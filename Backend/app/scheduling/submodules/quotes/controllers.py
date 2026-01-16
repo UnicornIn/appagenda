@@ -26,7 +26,7 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
 
 # URL del logo (logo principal con fondo oscuro)
-LOGO_URL = "https://rizosfelicesdata.s3.us-east-2.amazonaws.com/logo+principal+rosado+letra+blanco_Mesa+de+tra+(1).png"
+LOGO_URL = "https://s3.us-east-1.amazonaws.com/rf.images/companies/default/clients/RF+PNG.png"
 
 # URL alternativa del logo si el principal no funciona (logo rosado con letra blanca)
 LOGO_ALTERNATIVO = "https://rizosfelicesdata.s3.us-east-2.amazonaws.com/logo+rosado+letra+blanca.png"
@@ -378,151 +378,418 @@ async def crear_seccion_fotos(ficha_data, estilos):
     return secciones
 
 async def generar_pdf_ficha(ficha_data: dict, cita_data: dict) -> bytes:
-    """Genera un PDF profesional con todos los datos"""
+    """Genera un PDF profesional para RIZOS FELICES"""
     
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, 
-                          topMargin=2*cm, bottomMargin=2*cm,
+                          topMargin=1.5*cm, bottomMargin=1.5*cm,
                           leftMargin=2*cm, rightMargin=2*cm)
     story = []
     
-    # Crear estilos
-    estilos = crear_estilos()
+    # =============== ESTILOS CON NEGRO Y GRIS ===============
+    styles = getSampleStyleSheet()
     
-    # =============== CABECERA ===============
-    await crear_cabecera(story, estilos)
+    # Solo negro y gris
+    COLOR_NEGRO = '#000000'      # Negro puro
+    COLOR_GRIS_OSCURO = '#333333' # Gris oscuro
+    COLOR_GRIS_MEDIO = '#666666'  # Gris medio
+    COLOR_GRIS_CLARO = '#999999'  # Gris claro
     
-    # =============== 1. INFORMACIÓN DEL CLIENTE ===============
-    story.append(Paragraph("INFORMACIÓN DEL CLIENTE", estilos['section_style']))
+    # Estilo para título principal
+    title_style = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        alignment=TA_CENTER,
+        spaceAfter=5,
+        textColor=colors.black,
+        fontName='Helvetica-Bold'
+    )
     
-    cliente_info = [
-        ['Nombre:', f"{ficha_data.get('nombre', '')} {ficha_data.get('apellido', '')}".strip() or 'No especificado'],
-        ['Documento:', ficha_data.get('cedula', 'No especificado') or 'No especificado'],
-        ['Teléfono:', ficha_data.get('telefono', 'No especificado')],
-        ['Email:', ficha_data.get('email', 'No especificado') or 'No especificado'],
-    ]
+    # Estilo para subtítulo
+    subtitle_style = ParagraphStyle(
+        'SubtitleStyle',
+        parent=styles['Heading2'],
+        fontSize=13,
+        alignment=TA_CENTER,
+        spaceAfter=20,
+        textColor=colors.HexColor(COLOR_GRIS_OSCURO),
+        fontName='Helvetica'
+    )
     
-    story.append(crear_tabla_datos(cliente_info, 3.5*cm, '#F8F9F9'))
-    story.append(Spacer(1, 15))
+    # Estilo para secciones principales
+    section_style = ParagraphStyle(
+        'SectionStyle',
+        parent=styles['Heading2'],
+        fontSize=16,
+        alignment=TA_LEFT,
+        spaceAfter=10,
+        spaceBefore=20,
+        textColor=colors.black,
+        fontName='Helvetica-Bold',
+        leftIndent=0
+    )
     
-    # =============== 2. INFORMACIÓN DEL SERVICIO ===============
-    story.append(Paragraph("DETALLES DEL SERVICIO", estilos['section_style']))
+    # Estilo para subsecciones
+    subsection_style = ParagraphStyle(
+        'SubsectionStyle',
+        parent=styles['Heading3'],
+        fontSize=14,
+        alignment=TA_LEFT,
+        spaceAfter=6,
+        spaceBefore=12,
+        textColor=colors.HexColor(COLOR_GRIS_OSCURO),
+        fontName='Helvetica-Bold'
+    )
     
-    servicio_info = [
-        ['Servicio:', ficha_data.get('servicio_nombre', 'No especificado')],
-        ['Tipo de Consulta:', ficha_data.get('tipo_ficha', 'No especificado').replace('_', ' ').title()],
-        ['Profesional:', ficha_data.get('profesional_nombre', 'No especificado')],
-        ['Sede:', ficha_data.get('sede_nombre', 'No especificado')],
-        ['Fecha del Servicio:', ficha_data.get('fecha_reserva', 'No especificado')],
-    ]
+    # Estilo para etiquetas
+    label_style = ParagraphStyle(
+        'LabelStyle',
+        parent=styles['Normal'],
+        fontSize=12,
+        alignment=TA_LEFT,
+        textColor=colors.HexColor(COLOR_GRIS_OSCURO),
+        fontName='Helvetica-Bold',
+        leading=16
+    )
     
-    story.append(crear_tabla_datos(servicio_info, 4.5*cm, '#EBF5FB'))
-    story.append(Spacer(1, 15))
+    # Estilo para valores
+    value_style = ParagraphStyle(
+        'ValueStyle',
+        parent=styles['Normal'],
+        fontSize=12,
+        alignment=TA_LEFT,
+        textColor=colors.black,
+        leading=16,
+        wordWrap='LTR'
+    )
     
-    # =============== 3. INFORMACIÓN FINANCIERA ===============
-    story.append(Paragraph("INFORMACIÓN FINANCIERA", estilos['section_style']))
+    # Estilo para texto normal
+    normal_style = ParagraphStyle(
+        'NormalStyle',
+        parent=styles['Normal'],
+        fontSize=11,
+        alignment=TA_LEFT,
+        textColor=colors.HexColor(COLOR_GRIS_MEDIO),
+        leading=15,
+        wordWrap='LTR'
+    )
     
-    # Formatear valores monetarios
-    def format_currency(value):
-        if isinstance(value, (int, float)):
-            return f"${value:,.0f}".replace(",", ".")
-        return str(value)
+    # Estilo para footer
+    footer_style = ParagraphStyle(
+        'FooterStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor(COLOR_GRIS_MEDIO),
+        leading=14
+    )
     
-    # Obtener método de pago
-    metodo_pago_actual = cita_data.get('metodo_pago_actual')
-    metodo_pago_inicial = cita_data.get('metodo_pago_inicial')
-    
-    if metodo_pago_actual and str(metodo_pago_actual).strip().lower() != 'no especificado':
-        metodo_pago = str(metodo_pago_actual).title()
-    elif metodo_pago_inicial and str(metodo_pago_inicial).strip().lower() != 'no especificado':
-        metodo_pago = str(metodo_pago_inicial).title()
-    else:
-        metodo_pago = 'No especificado'
-    
-    financiero_info = [
-        ['Valor Total:', format_currency(cita_data.get('valor_total', 0))],
-        ['Abono Inicial:', format_currency(cita_data.get('abono', 0))],
-        ['Saldo Pendiente:', format_currency(cita_data.get('saldo_pendiente', 0))],
-        ['Estado de Pago:', cita_data.get('estado_pago', 'pendiente').upper()],
-        ['Método de Pago:', metodo_pago],
-        ['Moneda:', cita_data.get('moneda', 'COP')],
-    ]
-    
-    story.append(crear_tabla_datos(financiero_info, 4.5*cm, '#F5F5F5'))
-    story.append(Spacer(1, 15))
-    
-    # =============== 4. DIAGNÓSTICO TÉCNICO ===============
-    if ficha_data.get('datos_especificos'):
-        story.extend(crear_seccion_diagnostico(ficha_data['datos_especificos'], estilos))
-    
-    # =============== 5. OBSERVACIONES Y RECOMENDACIONES ===============
-    story.extend(crear_seccion_observaciones(ficha_data, estilos))
-    
-    # =============== 6. AUTORIZACIONES ===============
-    story.append(Paragraph("AUTORIZACIONES", estilos['section_style']))
-    
-    autorizacion_publicacion = "✅ AUTORIZADA" if ficha_data.get('autorizacion_publicacion') else "❌ NO AUTORIZADA"
-    autorizacion_info = [['Autorización para Publicación:', autorizacion_publicacion]]
-    
-    if ficha_data.get('comentario_interno'):
-        comentario = ficha_data.get('comentario_interno')
-        if len(comentario) > 100:
-            story.append(Paragraph("COMENTARIO INTERNO", estilos['subsection_style']))
-            story.append(Paragraph(comentario, estilos['value_style']))
-            story.append(Spacer(1, 8))
+    # =============== CABECERA CON LOGO ===============
+    try:
+        # Descargar el logo de Rizos Felices
+        logo_buffer = await descargar_imagen("https://s3.us-east-1.amazonaws.com/rf.images/companies/default/clients/RF+PNG.png")
+        if logo_buffer:
+            # Logo centrado
+            logo_img = Image(logo_buffer, width=10*cm, height=4*cm, kind='proportional')
+            logo_img.hAlign = 'CENTER'
+            story.append(logo_img)
+            story.append(Spacer(1, 10))
         else:
-            autorizacion_info.append(['Comentario Interno:', comentario])
+            # Fallback: texto
+            story.append(Paragraph("RIZOS FELICES", title_style))
+    except:
+        story.append(Paragraph("RIZOS FELICES", title_style))
     
-    story.append(crear_tabla_datos(autorizacion_info, 5.5*cm, '#FEF9E7'))
-    story.append(Spacer(1, 15))
-    
-    # =============== 7. FOTOGRAFÍAS ===============
-    fotos_secciones = await crear_seccion_fotos(ficha_data, estilos)
-    
-    # Verificar si necesitamos página nueva para fotos
-    if len(story) + len(fotos_secciones) > 40:  # Estimación de espacio
-        story.append(PageBreak())
-        # Reagregar cabecera en nueva página
-        await crear_cabecera(story, estilos)
-        story.append(Paragraph("FOTOGRAFÍAS DEL SERVICIO", estilos['section_style']))
-        story.append(Spacer(1, 10))
-    
-    # Agregar fotos (ya sea en página actual o nueva)
-    story.extend(fotos_secciones)
-    
-    # =============== 8. INFORMACIÓN DE FINALIZACIÓN ===============
-    story.append(Paragraph("INFORMACIÓN DE FINALIZACIÓN", estilos['section_style']))
-    
-    fecha_final = cita_data.get('fecha_finalizacion', datetime.utcnow())
-    if isinstance(fecha_final, datetime):
-        fecha_final_str = fecha_final.strftime("%d/%m/%Y %H:%M")
-    else:
-        fecha_final_str = str(fecha_final)
-    
-    finalizacion_info = [
-        ['Fecha de Finalización:', fecha_final_str],
-        ['Finalizado por:', cita_data.get('finalizado_por', 'Sistema')],
-        ['Hora de Finalización:', cita_data.get('hora_fin', 'No especificado')],
-    ]
-    
-    story.append(crear_tabla_datos(finalizacion_info, 5*cm, '#F8F9F9'))
+    story.append(Paragraph("Sistema de Gestión Profesional", subtitle_style))
     story.append(Spacer(1, 20))
     
-    # =============== 9. PIE DE PÁGINA ===============
-    current_year = datetime.now().year
-    footer_text = f"""
+    # =============== 1. INFORMACIÓN DEL CLIENTE ===============
+    story.append(Paragraph("INFORMACIÓN DEL CLIENTE", section_style))
+    
+    # Limpiar nombre del cliente
+    cliente_nombre = f"{ficha_data.get('nombre', '')} {ficha_data.get('apellido', '')}".strip()
+    if cliente_nombre.endswith(" None"):
+        cliente_nombre = cliente_nombre.replace(" None", "")
+    
+    cliente_email = ficha_data.get('email', 'No especificado') or 'No especificado'
+    cliente_telefono = ficha_data.get('telefono', 'No especificado') or 'No especificado'
+    
+    # Tabla simple
+    cliente_data = [
+        [Paragraph("<b>Nombre:</b>", label_style), Paragraph(cliente_nombre, value_style)],
+        [Paragraph("<b>Email:</b>", label_style), Paragraph(cliente_email, value_style)],
+        [Paragraph("<b>Teléfono:</b>", label_style), Paragraph(cliente_telefono, value_style)]
+    ]
+    
+    cliente_table = Table(cliente_data, colWidths=[4.5*cm, 10.5*cm])
+    cliente_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+        ('TOPPADDING', (0, 0), (-1, -1), 10),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+    
+    story.append(cliente_table)
+    story.append(Spacer(1, 20))
+    
+    # =============== 2. INFORMACIÓN DEL SERVICIO ===============
+    story.append(Paragraph("INFORMACIÓN DEL SERVICIO", section_style))
+    
+    # Formatear fecha (ej: "14 ene 2026")
+    fecha_servicio = ficha_data.get('fecha_reserva', 'No especificado')
+    if fecha_servicio != 'No especificado':
+        try:
+            if 'T' in fecha_servicio:
+                fecha_obj = datetime.fromisoformat(fecha_servicio.replace('Z', '+00:00'))
+                fecha_servicio = fecha_obj.strftime('%d %b %Y').lower()
+            else:
+                fecha_obj = datetime.strptime(fecha_servicio.split('T')[0], '%Y-%m-%d')
+                fecha_servicio = fecha_obj.strftime('%d %b %Y').lower()
+        except:
+            pass
+    
+    # Limpiar nombre del profesional
+    profesional_nombre = ficha_data.get('profesional_nombre', 'No especificado')
+    if profesional_nombre and profesional_nombre.lower() != 'no especificado':
+        if 'estilista' in profesional_nombre.lower():
+            partes = profesional_nombre.split()
+            nombres = [p for p in partes if len(p) > 2 and p[0].isupper() and p.isalpha()]
+            if nombres:
+                profesional_nombre = ' '.join(nombres)
+            else:
+                profesional_nombre = 'Profesional'
+    
+    servicio_data = [
+        [Paragraph("<b>Servicio:</b>", label_style), Paragraph(ficha_data.get('servicio_nombre', 'No especificado'), value_style)],
+        [Paragraph("<b>Fecha:</b>", label_style), Paragraph(fecha_servicio, value_style)],
+        [Paragraph("<b>Sede:</b>", label_style), Paragraph(ficha_data.get('sede_nombre', 'No especificado'), value_style)],
+        [Paragraph("<b>Profesional:</b>", label_style), Paragraph(profesional_nombre, value_style)]
+    ]
+    
+    servicio_table = Table(servicio_data, colWidths=[4.5*cm, 10.5*cm])
+    servicio_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+        ('TOPPADDING', (0, 0), (-1, -1), 10),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+    
+    story.append(servicio_table)
+    story.append(Spacer(1, 25))
+    
+    # =============== 3. NOTAS DEL CLIENTE ===============
+    story.append(Paragraph("NOTAS DEL CLIENTE", section_style))
+    story.append(Spacer(1, 10))
+    
+    # =============== 4. DIAGNÓSTICO RIZO TIPO ===============
+    # Verificar si hay suficiente espacio
+    story.append(Paragraph("DIAGNÓSTICO RIZO TIPO:", subsection_style))
+    
+    if ficha_data.get('datos_especificos'):
+        datos_especificos = ficha_data['datos_especificos']
+        
+        campos_rizo = [
+            ('plasticidad', 'Plasticidad'),
+            ('permeabilidad', 'Permeabilidad'),
+            ('porosidad', 'Porosidad'),
+            ('exterior_lipidico', 'Exterior Lipídico'),
+            ('densidad', 'Densidad'),
+            ('oleosidad', 'Oleosidad'),
+            ('grosor', 'Grosor'),
+            ('textura', 'Textura'),
+        ]
+        
+        # Preparar datos para diagnóstico
+        rizo_data = []
+        
+        for campo_key, campo_label in campos_rizo:
+            valor = datos_especificos.get(campo_key, '').strip()
+            if valor and valor.lower() != 'no especificado':
+                if isinstance(valor, str):
+                    if valor.upper() in ['ALTA', 'MEDIA', 'BAJA']:
+                        valor = valor.upper()
+                    else:
+                        valor = valor.title()
+                
+                rizo_data.append([
+                    Paragraph(f"<b>{campo_label}:</b>", label_style),
+                    Paragraph(valor, value_style)
+                ])
+        
+        if rizo_data:
+            rizo_table = Table(rizo_data, colWidths=[5*cm, 10*cm])
+            rizo_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            
+            story.append(rizo_table)
+            story.append(Spacer(1, 15))
+    
+    # =============== 5. SECCIONES INDIVIDUALES ===============
+    # Lista de secciones en orden
+    secciones = [
+        ("RECOMENDACIONES PERSONALIZADAS", 
+         ficha_data.get('datos_especificos', {}).get('recomendaciones_personalizadas')),
+        ("FRECUENCIA DE CORTE", 
+         ficha_data.get('datos_especificos', {}).get('frecuencia_corte')),
+        ("TÉCNICAS DE ESTILIZADO", 
+         ficha_data.get('datos_especificos', {}).get('tecnicas_estilizado')),
+        ("PRODUCTOS SUGERIDOS", 
+         ficha_data.get('datos_especificos', {}).get('productos_sugeridos')),
+        ("OBSERVACIONES GENERALES", 
+         ficha_data.get('datos_especificos', {}).get('observaciones_generales')),
+    ]
+    
+    # Agregar secciones
+    for titulo, contenido in secciones:
+        if contenido and str(contenido).strip() and str(contenido).lower() != 'no especificado':
+            story.append(Paragraph(titulo + ":", subsection_style))
+            story.append(Paragraph(contenido, normal_style))
+            story.append(Spacer(1, 12))
+    
+    # =============== 6. COMENTARIO INTERNO ===============
+    comentario_interno = ficha_data.get('comentario_interno')
+    if comentario_interno and str(comentario_interno).strip() and str(comentario_interno).lower() != 'no especificado':
+        story.append(Paragraph("COMENTARIO INTERNO", subsection_style))
+        story.append(Paragraph(comentario_interno, normal_style))
+        story.append(Spacer(1, 20))
+    
+    # =============== 7. IMÁGENES DEL SERVICIO ===============
+    tiene_imagenes = ficha_data.get('fotos', {}).get('antes') or ficha_data.get('fotos', {}).get('despues')
+    
+    if tiene_imagenes:
+        story.append(PageBreak())
+        
+        # Cabecera de página de imágenes
+        try:
+            logo_buffer = await descargar_imagen("https://s3.us-east-1.amazonaws.com/rf.images/companies/default/clients/RF+PNG.png")
+            if logo_buffer:
+                logo_img = Image(logo_buffer, width=8*cm, height=3.2*cm, kind='proportional')
+                logo_img.hAlign = 'CENTER'
+                story.append(logo_img)
+                story.append(Spacer(1, 10))
+        except:
+            pass
+        
+        story.append(Paragraph("IMÁGENES DEL SERVICIO", 
+                              ParagraphStyle('ImagesTitle',
+                                           fontName='Helvetica-Bold',
+                                           fontSize=16,
+                                           alignment=TA_LEFT,
+                                           textColor=colors.black,
+                                           spaceAfter=15,
+                                           spaceBefore=10)))
+        
+        # Función para mostrar imágenes
+        async def mostrar_imagenes(titulo, urls_imagenes):
+            if not urls_imagenes:
+                return []
+            
+            elementos = []
+            
+            # Título de sección
+            elementos.append(Paragraph(titulo, 
+                                     ParagraphStyle('ImageSection',
+                                                  fontName='Helvetica-Bold',
+                                                  fontSize=14,
+                                                  alignment=TA_LEFT,
+                                                  textColor=colors.HexColor(COLOR_GRIS_OSCURO),
+                                                  spaceAfter=10,
+                                                  spaceBefore=15)))
+            
+            # Procesar imágenes en grupos de 2
+            for i in range(0, min(len(urls_imagenes), 4), 2):
+                fila_urls = urls_imagenes[i:i + 2]
+                fila_imagenes = []
+                
+                for url in fila_urls:
+                    try:
+                        img_buffer = await descargar_imagen(url)
+                        if img_buffer:
+                            img = Image(img_buffer, width=8.5*cm, height=8.5*cm, kind='proportional')
+                            img.hAlign = 'CENTER'
+                            fila_imagenes.append([img])
+                        else:
+                            fila_imagenes.append([Paragraph("", normal_style)])
+                    except:
+                        fila_imagenes.append([Paragraph("", normal_style)])
+                
+                # Asegurar 2 columnas
+                while len(fila_imagenes) < 2:
+                    fila_imagenes.append([Paragraph("", normal_style)])
+                
+                # Crear fila de imágenes
+                fila_table = Table([fila_imagenes], colWidths=[8.5*cm, 8.5*cm])
+                fila_table.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, 0), 'TOP'),
+                    ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 15),
+                ]))
+                
+                elementos.append(fila_table)
+            
+            return elementos
+        
+        # Mostrar imágenes ANTES
+        if ficha_data.get('fotos', {}).get('antes'):
+            elementos_antes = await mostrar_imagenes("ANTES:", ficha_data['fotos']['antes'])
+            story.extend(elementos_antes)
+        
+        # Espacio entre secciones de imágenes
+        if ficha_data.get('fotos', {}).get('antes') and ficha_data.get('fotos', {}).get('despues'):
+            story.append(Spacer(1, 20))
+        
+        # Mostrar imágenes DESPUÉS
+        if ficha_data.get('fotos', {}).get('despues'):
+            elementos_despues = await mostrar_imagenes("DESPUÉS:", ficha_data['fotos']['despues'])
+            story.extend(elementos_despues)
+    
+    # =============== 8. FOOTER ===============
+    story.append(Spacer(1, 30))
+    
+    # Formatear fecha en español
+    now = datetime.now()
+    
+    meses_es = {
+        'January': 'enero', 'February': 'febrero', 'March': 'marzo',
+        'April': 'abril', 'May': 'mayo', 'June': 'junio',
+        'July': 'julio', 'August': 'agosto', 'September': 'septiembre',
+        'October': 'octubre', 'November': 'noviembre', 'December': 'diciembre'
+    }
+    
+    dias_es = {
+        'Monday': 'lunes', 'Tuesday': 'martes', 'Wednesday': 'miércoles',
+        'Thursday': 'jueves', 'Friday': 'viernes', 'Saturday': 'sábado',
+        'Sunday': 'domingo'
+    }
+    
+    dia_ingles = now.strftime("%A")
+    mes_ingles = now.strftime("%B")
+    
+    dia_espanol = dias_es.get(dia_ingles, dia_ingles.lower())
+    mes_espanol = meses_es.get(mes_ingles, mes_ingles.lower())
+    
+    fecha_formateada = f"{dia_espanol}, {now.day} de {mes_espanol} de {now.year}, {now.strftime('%H:%M')}"
+    
+    # Footer en negro y gris
+    footer_content = f"""
     <para alignment="center">
-    <font color="#7F8C8D" size="8">
-    <b>Documento generado automáticamente por Rizos Felices</b><br/>
-    Fecha de generación: {datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC<br/>
-    Este documento es un comprobante oficial del servicio realizado.<br/>
-    Consérvelo para cualquier consulta futura.<br/>
-    © {current_year} Rizos Felices - Todos los derechos reservados
+    <font color="{COLOR_GRIS_MEDIO}" size="10">
+    Documento generado el {fecha_formateada}<br/>
+    <font color="black"><b>Rizos Felices</b></font> - Sistema de Gestión Profesional<br/>
+    <i>Este documento es confidencial y para uso exclusivo del cliente</i>
     </font>
     </para>
     """
     
-    story.append(Paragraph(footer_text, estilos['footer_style']))
+    story.append(Paragraph(footer_content, footer_style))
     
     # =============== CONSTRUIR PDF ===============
     try:
@@ -533,7 +800,173 @@ async def generar_pdf_ficha(ficha_data: dict, cita_data: dict) -> bytes:
         print(f"❌ Error generando PDF: {e}")
         import traceback
         traceback.print_exc()
-        return await generar_pdf_simple(ficha_data, cita_data)
+        return await generar_pdf_simple_fallback(ficha_data, cita_data)
+
+
+async def generar_pdf_simple_fallback(ficha_data: dict, cita_data: dict) -> bytes:
+    """Versión simple como fallback"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    story = []
+    styles = getSampleStyleSheet()
+    
+    story.append(Paragraph("RIZOS FELICES", 
+                          ParagraphStyle('Title',
+                                       parent=styles['Heading1'],
+                                       fontSize=20,
+                                       alignment=TA_CENTER,
+                                       textColor=colors.black)))
+    
+    story.append(Paragraph("Sistema de Gestión Profesional", 
+                          ParagraphStyle('Subtitle',
+                                       parent=styles['Normal'],
+                                       fontSize=12,
+                                       alignment=TA_CENTER,
+                                       textColor=colors.gray)))
+    
+    story.append(Spacer(1, 25))
+    
+    # Información básica
+    info = [
+        ["Cliente:", f"{ficha_data.get('nombre', '')}"],
+        ["Servicio:", ficha_data.get('servicio_nombre', '')],
+        ["Fecha:", datetime.now().strftime('%d/%m/%Y %H:%M')],
+        ["Sede:", ficha_data.get('sede_nombre', '')]
+    ]
+    
+    info_table = Table(info, colWidths=[4*cm, 10*cm])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    
+    story.append(info_table)
+    story.append(Spacer(1, 30))
+    
+    # Footer simple
+    footer_text = f"Documento generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    story.append(Paragraph(footer_text, 
+                          ParagraphStyle('Footer',
+                                       parent=styles['Normal'],
+                                       fontSize=9,
+                                       alignment=TA_CENTER,
+                                       textColor=colors.gray)))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+async def generar_pdf_simple_fallback(ficha_data: dict, cita_data: dict) -> bytes:
+    """Versión simple como fallback"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    story = []
+    styles = getSampleStyleSheet()
+    
+    story.append(Paragraph("RIZOS FELICES", 
+                          ParagraphStyle('Title',
+                                       parent=styles['Heading1'],
+                                       fontSize=20,
+                                       alignment=TA_CENTER,
+                                       textColor=colors.HexColor('#D81B60'))))
+    
+    story.append(Paragraph("Sistema de Gestión Profesional", 
+                          ParagraphStyle('Subtitle',
+                                       parent=styles['Normal'],
+                                       fontSize=12,
+                                       alignment=TA_CENTER,
+                                       textColor=colors.HexColor('#8E24AA'))))
+    
+    story.append(Spacer(1, 25))
+    
+    # Información básica
+    info = [
+        ["Cliente:", f"{ficha_data.get('nombre', '')}"],
+        ["Servicio:", ficha_data.get('servicio_nombre', '')],
+        ["Fecha:", datetime.now().strftime('%d/%m/%Y %H:%M')],
+        ["Sede:", ficha_data.get('sede_nombre', '')]
+    ]
+    
+    info_table = Table(info, colWidths=[4*cm, 10*cm])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    
+    story.append(info_table)
+    story.append(Spacer(1, 30))
+    
+    # Footer simple
+    footer_text = f"Documento generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    story.append(Paragraph(footer_text, 
+                          ParagraphStyle('Footer',
+                                       parent=styles['Normal'],
+                                       fontSize=9,
+                                       alignment=TA_CENTER,
+                                       textColor=colors.gray)))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+async def generar_pdf_simple_fallback(ficha_data: dict, cita_data: dict) -> bytes:
+    """Versión simple como fallback"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    story = []
+    styles = getSampleStyleSheet()
+    
+    story.append(Paragraph("RIZOS FELICES", 
+                          ParagraphStyle('Title',
+                                       parent=styles['Heading1'],
+                                       fontSize=20,
+                                       alignment=TA_CENTER,
+                                       textColor=colors.HexColor('#D81B60'))))
+    
+    story.append(Paragraph("Sistema de Gestión Profesional", 
+                          ParagraphStyle('Subtitle',
+                                       parent=styles['Normal'],
+                                       fontSize=12,
+                                       alignment=TA_CENTER,
+                                       textColor=colors.HexColor('#8E24AA'))))
+    
+    story.append(Spacer(1, 25))
+    
+    # Información básica
+    info = [
+        ["Cliente:", f"{ficha_data.get('nombre', '')}"],
+        ["Servicio:", ficha_data.get('servicio_nombre', '')],
+        ["Fecha:", datetime.now().strftime('%d/%m/%Y %H:%M')],
+        ["Sede:", ficha_data.get('sede_nombre', '')]
+    ]
+    
+    info_table = Table(info, colWidths=[4*cm, 10*cm])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    
+    story.append(info_table)
+    story.append(Spacer(1, 30))
+    
+    # Footer simple
+    footer_text = f"Documento generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    story.append(Paragraph(footer_text, 
+                          ParagraphStyle('Footer',
+                                       parent=styles['Normal'],
+                                       fontSize=9,
+                                       alignment=TA_CENTER,
+                                       textColor=colors.gray)))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 async def generar_pdf_simple(ficha_data: dict, cita_data: dict) -> bytes:
     """Genera un PDF simple como fallback"""
