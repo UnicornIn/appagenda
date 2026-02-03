@@ -47,7 +47,6 @@ export function FacturaDetailModal({ factura, open, onOpenChange }: FacturaDetai
               <DetailRow label="Identificador" value={factura.identificador} />
               <DetailRow label="Fecha de pago" value={formatDate(factura.fecha_pago)} />
               <DetailRow label="Local" value={factura.local} />
-              <DetailRow label="Sede ID" value={factura.sede_id} />
               <DetailRow label="Moneda" value={factura.moneda} />
               <DetailRow label="Tipo de comisión" value={factura.tipo_comision} />
             </div>

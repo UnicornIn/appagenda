@@ -6,6 +6,7 @@ import type { Estilista } from "../../../types/estilista"
 import { sedeService, type Sede } from "../../PageSuperAdmin/Sedes/sedeService"
 import { serviciosService } from "../Services/serviciosService"
 import { useAuth } from "../../../components/Auth/AuthContext"
+import { formatSedeNombre } from "../../../lib/sede"
 
 // Definir el tipo Servicio que coincide con la respuesta del servicio
 interface Servicio {
@@ -275,7 +276,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
 
   const getSedeNombre = () => {
     const sedeSeleccionada = sedes.find(s => s.sede_id === formData.sede_id)
-    return sedeSeleccionada ? `${sedeSeleccionada.nombre} (${sedeSeleccionada.sede_id})` : "Seleccionar sede"
+    return sedeSeleccionada ? formatSedeNombre(sedeSeleccionada.nombre, "Seleccionar sede") : "Seleccionar sede"
   }
 
   const stopPropagation = (e: React.MouseEvent) => {
@@ -356,12 +357,11 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                     className={`w-full text-left px-3 py-2 hover:bg-gray-100 ${
                       formData.sede_id === sede.sede_id ? 'bg-blue-50 text-blue-600' : ''
                     }`}
-                  >
-                    <div className="font-medium">{sede.nombre}</div>
-                    <div className="text-sm text-gray-500">ID: {sede.sede_id}</div>
-                    <div className="text-sm text-gray-500 truncate">{sede.direccion}</div>
-                  </button>
-                ))}
+                    >
+                      <div className="font-medium">{formatSedeNombre(sede.nombre)}</div>
+                      <div className="text-sm text-gray-500 truncate">{sede.direccion}</div>
+                    </button>
+                  ))}
                 {sedes.length === 0 && (
                   <div className="px-3 py-2 text-sm text-gray-500 text-center">
                     No hay sedes disponibles

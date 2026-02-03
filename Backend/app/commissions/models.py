@@ -51,9 +51,12 @@ class ComisionResponse(BaseModel):
     id: str
     profesional_id: str
     profesional_nombre: str
+
     sede_id: str
-    moneda: Optional[str] = None  # ⭐ Opcional para comisiones viejas
-    tipo_comision: Optional[str] = "servicios"  # ⭐ NUEVO
+    sede_nombre: str  # ⭐ NUEVO
+
+    moneda: Optional[str] = None
+    tipo_comision: Optional[str] = "servicios"
     total_servicios: int
     total_comisiones: float
     periodo_inicio: str

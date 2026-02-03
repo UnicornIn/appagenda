@@ -10,6 +10,7 @@ import { getEstilistas, type Estilista } from '../../../components/Professionale
 import AppointmentDetailsModal from './AppointmentDetailsModal';
 import { useAuth } from '../../../components/Auth/AuthContext';
 import { getBloqueosEstilista, type Bloqueo } from '../../../components/Quotes/bloqueosApi';
+import { formatSedeNombre } from '../../../lib/sede';
 
 interface Appointment {
   id: string;
@@ -1233,7 +1234,7 @@ const CalendarScheduler: React.FC = () => {
                 </p>
                 {user?.sede_id && (
                   <div className="text-[10px] text-gray-500 mt-0.5">
-                    📍 Sede: {sedes.find(s => s.sede_id === user.sede_id)?.nombre || 'Tu sede'}
+                    📍 Sede: {formatSedeNombre(sedes.find(s => s.sede_id === user.sede_id)?.nombre, 'Tu sede')}
                   </div>
                 )}
               </div>
@@ -1258,7 +1259,7 @@ const CalendarScheduler: React.FC = () => {
                 <div className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-gray-50">
                   <div className="flex items-center justify-between">
                     <span className="text-gray-900 font-medium">
-                      {sedes.find(s => s.sede_id === user.sede_id)?.nombre || 'Tu sede'}
+                      {formatSedeNombre(sedes.find(s => s.sede_id === user.sede_id)?.nombre, 'Tu sede')}
                     </span>
                     <span className="text-[10px] text-gray-500">(Tu sede)</span>
                   </div>
@@ -1274,7 +1275,7 @@ const CalendarScheduler: React.FC = () => {
                 >
                   <option value="">Todas las sedes</option>
                   {sedesDisponibles.map(sede => (
-                    <option key={sede._id} value={sede._id}>{sede.nombre}</option>
+                    <option key={sede._id} value={sede._id}>{formatSedeNombre(sede.nombre)}</option>
                   ))}
                 </select>
               )}

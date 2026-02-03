@@ -11,6 +11,7 @@ import { useState, useEffect } from "react"
 import { API_BASE_URL } from "../../../types/config"
 import { ProductCatalogModal } from "./ProductCatalogModal"
 import { Badge } from "../../../components/ui/badge"
+import { formatSedeNombre } from "../../../lib/sede"
 
 // En service-protocol.tsx - REEMPLAZA toda tu interfaz Producto con esto:
 interface Producto {
@@ -907,7 +908,7 @@ export function ServiceProtocol({
                             </div>
                             <div>
                               <span className="text-gray-700">Sede:</span>
-                              <p className="font-medium truncate">{ficha.sede_nombre}</p>
+                              <p className="font-medium truncate">{formatSedeNombre(ficha.sede_nombre, 'Sede no especificada')}</p>
                             </div>
                             <div>
                             </div>
@@ -1113,7 +1114,7 @@ export function ServiceProtocol({
                             <div className="grid grid-cols-2 gap-3">
                               <div>
                                 <p className="text-sm text-gray-600">Sede</p>
-                                <p className="font-medium">{selectedFicha.sede_nombre}</p>
+                                <p className="font-medium">{formatSedeNombre(selectedFicha.sede_nombre, 'Sede no especificada')}</p>
                               </div>
                               <div>
                                 <p className="text-sm text-gray-600">Tipo de ficha</p>

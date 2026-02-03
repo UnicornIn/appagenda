@@ -8,6 +8,7 @@ import { SalesDonutChart } from "./sales-donut-chart";
 import { ClientIndicators } from "./client-indicators";
 import { Button } from "../../../components/ui/button";
 import { useAuth } from "../../../components/Auth/AuthContext";
+import { formatSedeNombre } from "../../../lib/sede";
 import {
   getDashboard,
   getVentasDashboard,
@@ -79,6 +80,15 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [monedaUsuario, setMonedaUsuario] = useState<string>("COP");
   const [debugInfo, setDebugInfo] = useState<string>("");
+
+  const getSedeNombre = useCallback(
+    (sedeId: string, fallback: string = "Sede seleccionada") => {
+      if (sedeId === "global") return "Vista Global";
+      const nombre = sedes.find(sede => sede.sede_id === sedeId)?.nombre;
+      return formatSedeNombre(nombre, fallback);
+    },
+    [sedes]
+  );
   
   // Estados para el rango de fechas personalizado
   const [showDateModal, setShowDateModal] = useState(false);
@@ -216,7 +226,7 @@ export default function DashboardPage() {
       }, 5000);
 
       setError(null);
-      setDebugInfo(`Cargando datos para sede: ${selectedSede}, período: ${selectedPeriod}`);
+      setDebugInfo(`Cargando datos para sede: ${getSedeNombre(selectedSede)}, período: ${selectedPeriod}`);
 
       // Configurar parámetros para la API
       const params: any = {
@@ -670,7 +680,7 @@ export default function DashboardPage() {
         <div className="text-xs text-gray-600 space-y-1">
           <p>Estado: {debugInfo}</p>
           <p>Moneda usuario: {monedaUsuario}</p>
-          <p>Sede seleccionada: {selectedSede}</p>
+          <p>Sede seleccionada: {getSedeNombre(selectedSede)}</p>
           {ventasData?.metricas_por_moneda && (
             <p>Monedas disponibles: {Object.keys(ventasData.metricas_por_moneda).join(', ')}</p>
           )}
@@ -839,9 +849,9 @@ export default function DashboardPage() {
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-gray-200 border-t-gray-900 rounded-full animate-spin mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Cargando datos...</h3>
-          <p className="text-gray-600 mb-4">
-            Estamos obteniendo la información más reciente para {selectedSede !== "global" ? getSedeInfo(selectedSede)?.nombre : "Vista Global"}
-          </p>
+            <p className="text-gray-600 mb-4">
+              Estamos obteniendo la información más reciente para {getSedeNombre(selectedSede)}
+            </p>
           <div className="flex flex-col items-center">
             <div className="w-64 h-2 bg-gray-200 rounded-full overflow-hidden mb-2">
               <div className="h-full bg-gray-900 animate-pulse" style={{ width: "70%" }} />
@@ -882,12 +892,12 @@ export default function DashboardPage() {
                 <BarChart3 className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">Dashboard Analytics</h1>
-                <p className="text-sm text-gray-600">
-                  {selectedSede === "global"
-                    ? 'Vista Global'
-                    : `Sede: ${getSedeInfo(selectedSede)?.nombre || 'Seleccionada'}`}
-                </p>
+                  <h1 className="text-xl font-bold text-gray-900">Dashboard Analytics</h1>
+                  <p className="text-sm text-gray-600">
+                    {selectedSede === "global"
+                      ? 'Vista Global'
+                      : `Sede: ${getSedeNombre(selectedSede)}`}
+                  </p>
                 <p className="text-xs text-gray-500 mt-1">
                   Período: {getPeriodDisplay()}
                 </p>
@@ -913,11 +923,11 @@ export default function DashboardPage() {
               <Select value={selectedSede} onValueChange={handleSedeChange}>
                 <SelectTrigger className="w-[180px] bg-white border border-gray-300">
                   <Building2 className="w-4 h-4 mr-2" />
-                  <SelectValue>
-                    {selectedSede === "global"
-                      ? "Vista Global"
-                      : getSedeInfo(selectedSede)?.nombre || "Sede"}
-                  </SelectValue>
+                    <SelectValue>
+                      {selectedSede === "global"
+                        ? "Vista Global"
+                        : getSedeNombre(selectedSede, "Sede")}
+                    </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="bg-white">
                   <SelectItem value="global">
@@ -933,14 +943,14 @@ export default function DashboardPage() {
                         <span className="text-sm">Cargando...</span>
                       </div>
                     </SelectItem>
-                  ) : sedes.map((sede) => (
-                    <SelectItem key={sede._id} value={sede.sede_id}>
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${sede.activa ? 'bg-green-500' : 'bg-gray-300'}`} />
-                        {sede.nombre}
-                      </div>
-                    </SelectItem>
-                  ))}
+                    ) : sedes.map((sede) => (
+                      <SelectItem key={sede._id} value={sede.sede_id}>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${sede.activa ? 'bg-green-500' : 'bg-gray-300'}`} />
+                          {formatSedeNombre(sede.nombre)}
+                        </div>
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
 
@@ -984,9 +994,9 @@ export default function DashboardPage() {
                     <div className="text-center">
                       <div className="w-10 h-10 border-3 border-gray-200 border-t-gray-900 rounded-full animate-spin mx-auto mb-4" />
                       <p className="text-gray-600">Cargando datos de la sede...</p>
-                      <p className="text-sm text-gray-500 mt-2">
-                        Sede: {getSedeInfo(selectedSede)?.nombre} • ID: {selectedSede}
-                      </p>
+                        <p className="text-sm text-gray-500 mt-2">
+                          Sede: {getSedeNombre(selectedSede)}
+                        </p>
                     </div>
                   </div>
                 ) : error ? (
@@ -1111,7 +1121,7 @@ export default function DashboardPage() {
                             </div>
                             <div>
                               <h3 className="text-xl font-bold">
-                                {getSedeInfo(selectedSede)?.nombre || 'Sede Desconocida'}
+                                {getSedeNombre(selectedSede, "Sede Desconocida")}
                               </h3>
                               <div className="flex flex-wrap gap-4 mt-2 text-sm text-gray-600">
                                 <div className="flex items-center gap-1">
@@ -1122,9 +1132,9 @@ export default function DashboardPage() {
                                   <span className="font-medium">Tel:</span> {getSedeInfo(selectedSede)?.telefono || 'Sin teléfono'}
                                 </div>
                               </div>
-                              <p className="text-sm text-gray-500 mt-2">
-                                Período: {getPeriodDisplay()} • Sede ID: {selectedSede}
-                              </p>
+                                <p className="text-sm text-gray-500 mt-2">
+                                  Período: {getPeriodDisplay()} • Sede: {getSedeNombre(selectedSede)}
+                                </p>
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -1467,7 +1477,7 @@ export default function DashboardPage() {
                                 <div className="flex items-start justify-between mb-2">
                                   <div className="flex items-center gap-2">
                                     <Building2 className="w-4 h-4 text-gray-600" />
-                                    <h4 className="font-medium text-gray-900">{sede.nombre}</h4>
+                                    <h4 className="font-medium text-gray-900">{formatSedeNombre(sede.nombre)}</h4>
                                   </div>
                                   {sede.activa ? (
                                     <div className="w-2 h-2 rounded-full bg-green-500" />
@@ -1475,17 +1485,14 @@ export default function DashboardPage() {
                                     <div className="w-2 h-2 rounded-full bg-gray-300" />
                                   )}
                                 </div>
-                                <p className="text-xs text-gray-600 truncate">{sede.direccion}</p>
-                                <p className="text-xs text-gray-600 mt-1">{sede.telefono}</p>
-                                <div className="flex items-center justify-between mt-2">
-                                  <span className="text-xs text-gray-500">
-                                    ID: {sede.sede_id}
-                                  </span>
-                                  {selectedSede === sede.sede_id && (
-                                    <Badge className="bg-gray-900 text-white text-xs">
-                                      Seleccionada
-                                    </Badge>
-                                  )}
+                                  <p className="text-xs text-gray-600 truncate">{sede.direccion}</p>
+                                  <p className="text-xs text-gray-600 mt-1">{sede.telefono}</p>
+                                  <div className="flex items-center justify-between mt-2">
+                                    {selectedSede === sede.sede_id && (
+                                      <Badge className="bg-gray-900 text-white text-xs">
+                                        Seleccionada
+                                      </Badge>
+                                    )}
                                 </div>
                               </CardContent>
                             </Card>
@@ -1506,7 +1513,7 @@ export default function DashboardPage() {
             <div className="bg-white rounded-lg w-full max-w-2xl max-h-[80vh] overflow-hidden border border-gray-200">
               <div className="p-4 border-b border-gray-200 flex items-center justify-between">
                 <div>
-                  <h3 className="font-bold text-lg">Clientes en Riesgo - {getSedeInfo(selectedSede)?.nombre}</h3>
+                  <h3 className="font-bold text-lg">Clientes en Riesgo - {getSedeNombre(selectedSede)}</h3>
                   <p className="text-sm text-gray-600">
                     {churnData.length} clientes detectados con inactividad
                   </p>

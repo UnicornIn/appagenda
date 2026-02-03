@@ -10,6 +10,7 @@ import { getEstilistas, type Estilista } from '../../../components/Professionale
 import AppointmentDetailsModal from './AppointmentDetailsModal';
 import { useAuth } from '../../../components/Auth/AuthContext';
 import { getBloqueosMultiplesProfesionales, type Bloqueo } from '../../../components/Quotes/bloqueosApi';
+import { formatSedeNombre } from "../../../lib/sede";
 
 interface Appointment {
   id: string;
@@ -1150,13 +1151,13 @@ const CalendarScheduler: React.FC = () => {
                   setSelectedSede(sede || null);
                 }}
               >
-                <option value="">Selecciona una sede</option>
-                {sedes.map(sede => (
-                  <option key={sede._id} value={sede._id}>
-                    {sede.nombre}
-                  </option>
-                ))}
-              </select>
+                  <option value="">Selecciona una sede</option>
+                  {sedes.map(sede => (
+                    <option key={sede._id} value={sede._id}>
+                      {formatSedeNombre(sede.nombre)}
+                    </option>
+                  ))}
+                </select>
             </div>
 
             <div className="mb-4">

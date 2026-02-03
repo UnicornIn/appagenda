@@ -7,6 +7,7 @@ import type { Factura } from "../../../types/factura"
 import { facturaService } from "./facturas"
 import { sedeService } from "../Sedes/sedeService"
 import type { Sede } from "../../../types/sede"
+import { formatSedeNombre } from "../../../lib/sede"
 
 export function VentasFacturadasList() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -139,6 +140,11 @@ export function VentasFacturadasList() {
     return `${currency} ${amount?.toFixed(2) || '0.00'}`
   }
 
+  const selectedSedeNombre = formatSedeNombre(
+    sedes.find(s => s._id === selectedSede)?.nombre,
+    "Sede seleccionada"
+  )
+
   const handleExportCSV = () => {
     try {
       // Crear encabezados CSV
@@ -172,7 +178,10 @@ export function VentasFacturadasList() {
       ].join("\n")
       
       // Obtener nombre de la sede seleccionada
-      const sedeNombre = sedes.find(s => s._id === selectedSede)?.nombre || selectedSede
+      const sedeNombre = formatSedeNombre(
+        sedes.find(s => s._id === selectedSede)?.nombre,
+        "sede"
+      )
       
       // Crear y descargar archivo
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
@@ -200,7 +209,7 @@ export function VentasFacturadasList() {
             <h1 className="text-xl font-medium">Ventas facturadas</h1>
             <p className="text-sm text-gray-600 mt-1">
               {selectedSede 
-                ? `Sede: ${sedes.find(s => s._id === selectedSede)?.nombre || selectedSede}`
+                ? `Sede: ${selectedSedeNombre}`
                 : "Selecciona una sede para ver las facturas"}
             </p>
           </div>
@@ -241,7 +250,7 @@ export function VentasFacturadasList() {
               <option value="">-- Seleccionar sede --</option>
               {sedes.map((sede) => (
                 <option key={sede._id} value={sede._id}>
-                  {sede.nombre} {sede.sede_id ? `(${sede.sede_id})` : ''}
+                  {formatSedeNombre(sede.nombre)}
                 </option>
               ))}
             </select>

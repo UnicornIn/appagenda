@@ -25,7 +25,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { title: 'Dashboard', href: '/superadmin/dashboard', icon: LayoutDashboard, roles: ['super_admin'] },
   { title: 'Agenda', href: '/superadmin/appointments', icon: Users, roles: ['super_admin'] },
-  { title: 'Products', href: '/superadmin/products', icon: Package, roles: ['super_admin'] },
+  { title: 'Productos', href: '/superadmin/products', icon: Package, roles: ['super_admin'] },
   { title: 'Clientes', href: '/superadmin/clients', icon: Users, roles: ['super_admin'] },
   { title: 'Comisiones', href: '/superadmin/commissions', icon: CreditCard, roles: ['super_admin'] },
   { title: 'Sedes', href: '/superadmin/sedes', icon: Home, roles: ['super_admin'] },

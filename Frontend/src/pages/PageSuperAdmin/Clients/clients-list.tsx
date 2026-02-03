@@ -13,6 +13,7 @@ import {
 } from "../../../components/ui/select"
 import type { Cliente } from "../../../types/cliente"
 import type { Sede } from "../Sedes/sedeService"
+import { formatSedeNombre } from "../../../lib/sede"
 
 interface ClientsListProps {
   onSelectClient: (client: Cliente) => void
@@ -176,16 +177,16 @@ export function ClientsList({
                 <SelectItem value="all" className="text-gray-900 hover:bg-gray-100">
                   Todas las sedes
                 </SelectItem>
-                {sedes.map((sede) => (
-                  <SelectItem 
-                    key={sede.sede_id} 
-                    value={sede.sede_id}
-                    className="text-gray-900 hover:bg-gray-100"
-                  >
-                    {sede.nombre}
-                  </SelectItem>
-                ))}
-              </SelectContent>
+                  {sedes.map((sede) => (
+                    <SelectItem 
+                      key={sede.sede_id} 
+                      value={sede.sede_id}
+                      className="text-gray-900 hover:bg-gray-100"
+                    >
+                    {formatSedeNombre(sede.nombre)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
             </Select>
           </div>
         </div>
@@ -275,7 +276,7 @@ export function ClientsList({
                         <td className="px-6 py-4">
                           <div className="text-gray-900">
                             {cliente.sede_id 
-                              ? sedes.find(s => s.sede_id === cliente.sede_id)?.nombre || 'Sede asignada'
+                              ? formatSedeNombre(sedes.find(s => s.sede_id === cliente.sede_id)?.nombre, 'Sede asignada')
                               : 'Sin sede asignada'}
                           </div>
                         </td>

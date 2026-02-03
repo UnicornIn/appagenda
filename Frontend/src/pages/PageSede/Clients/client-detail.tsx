@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button"
 import type { Cliente } from "../../../types/cliente"
 import { EditClientModal } from "./EditClientModal"
 import { API_BASE_URL } from "../../../types/config"
+import { formatSedeNombre } from "../../../lib/sede"
 
 interface ClientDetailProps {
   client: Cliente
@@ -580,7 +581,7 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
                 {(client.fichas as FichaExtendida[]).map((ficha) => {
                   const servicioNombre = ficha.servicio_nombre || ficha.servicio || 'Servicio'
                   const profesionalNombre = ficha.profesional_nombre || 'Sin profesional'
-                  const sedeNombre = ficha.sede_nombre || ficha.sede || ficha.local || 'Sin sede'
+                  const sedeNombre = formatSedeNombre(ficha.sede_nombre || ficha.sede || ficha.local, 'Sin sede')
                   const tieneDiagnostico = ficha.datos_especificos || (ficha.respuestas && ficha.respuestas.length > 0)
                   const isExpanded = expandedFichas.has(ficha._id)
 

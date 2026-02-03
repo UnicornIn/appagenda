@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button"
 import type { Cliente } from "../../../types/cliente"
 import { EditClientModal } from "./EditClientModal"
 import { generarPDFFicha, type FichaPDFData } from "../../../lib/pdfGenerator"
+import { formatSedeNombre } from "../../../lib/sede"
 
 interface ClientDetailProps {
   client: Cliente
@@ -243,7 +244,7 @@ ${datos.productos_sugeridos || 'No especificados'}
         ficha: {
           servicio: ficha.servicio_nombre || ficha.servicio || 'Servicio',
           fecha: formatFechaCorregida(ficha.fecha_ficha),
-          sede: ficha.sede_nombre || ficha.sede || ficha.local || 'Sin sede',
+          sede: formatSedeNombre(ficha.sede_nombre || ficha.sede || ficha.local, 'Sin sede'),
           estilista: ficha.profesional_nombre || ficha.estilista || 'Sin estilista',
           notas_cliente: ficha.notas_cliente || diagnosticoInfo || '',
           comentario_interno: ficha.comentario_interno || ficha.datos_especificos?.recomendaciones_personalizadas || '',
@@ -482,7 +483,7 @@ ${datos.productos_sugeridos || 'No especificados'}
                 {(client.fichas as FichaExtendida[]).map((ficha) => {
                   const servicioNombre = ficha.servicio_nombre || ficha.servicio || 'Servicio'
                   const estilistaNombre = ficha.profesional_nombre || ficha.estilista || 'Sin estilista'
-                  const sedeNombre = ficha.sede_nombre || ficha.sede || ficha.local || 'Sin sede'
+                  const sedeNombre = formatSedeNombre(ficha.sede_nombre || ficha.sede || ficha.local, 'Sin sede')
                   const tieneDiagnostico = ficha.datos_especificos || (ficha.respuestas && ficha.respuestas.length > 0)
                   const isExpanded = expandedFichas.has(ficha._id)
 

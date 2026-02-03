@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Select, SelectContent, SelectItem } from "../../../components/ui/select"
 import { Calendar } from "lucide-react";
+import { formatSedeNombre } from "../../../lib/sede";
 
 // Interfaces para los datos
 interface Estilista {
@@ -87,13 +88,13 @@ export function ComisionesFilters() {
         >
           <SelectContent>
             <SelectItem value="todas">Todas las sedes</SelectItem>
-            {sedes.length > 0 ? (
-              sedes.map((sede) => (
-                <SelectItem key={sede.id} value={sede.id}>
-                  {sede.nombre}
-                </SelectItem>
-              ))
-            ) : (
+              {sedes.length > 0 ? (
+                sedes.map((sede) => (
+                  <SelectItem key={sede.id} value={sede.id}>
+                    {formatSedeNombre(sede.nombre)}
+                  </SelectItem>
+                ))
+              ) : (
               <SelectItem value="sin-datos" disabled>
                 No hay sedes disponibles
               </SelectItem>

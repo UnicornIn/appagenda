@@ -130,14 +130,16 @@ def construir_query_filtros(user: dict, filtros: Optional[dict] = None):
     return query
 
 def formatear_comision_response(comision: dict) -> ComisionResponse:
-    """Formatea un documento de comisión a ComisionResponse"""
     return ComisionResponse(
         id=str(comision["_id"]),
         profesional_id=comision["profesional_id"],
         profesional_nombre=comision["profesional_nombre"],
+
         sede_id=comision["sede_id"],
+        sede_nombre=comision.get("sede_nombre", ""),  # ⭐ AQUÍ
+
         moneda=comision.get("moneda"),
-        tipo_comision=comision.get("tipo_comision", "servicios"),  # ⭐ NUEVO
+        tipo_comision=comision.get("tipo_comision", "servicios"),
         total_servicios=comision["total_servicios"],
         total_comisiones=comision["total_comisiones"],
         periodo_inicio=comision.get("periodo_inicio", ""),
@@ -147,6 +149,7 @@ def formatear_comision_response(comision: dict) -> ComisionResponse:
         liquidada_por=comision.get("liquidada_por"),
         liquidada_en=comision.get("liquidada_en")
     )
+
 
 # ⭐ NUEVA FUNCIÓN: Calcular totales desglosados por tipo
 def calcular_totales_por_tipo(servicios_detalle: list) -> dict:

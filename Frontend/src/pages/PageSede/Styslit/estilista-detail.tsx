@@ -2,6 +2,7 @@
 
 import { Edit, Trash2, Mail, Calendar, Building, Percent, Star, Clock } from 'lucide-react'
 import type { Estilista } from "../../../types/estilista"
+import { formatSedeNombre } from "../../../lib/sede"
 
 interface EstilistaDetailProps {
   estilista: Estilista
@@ -133,7 +134,7 @@ export function EstilistaDetail({ estilista, onEdit, onDelete }: EstilistaDetail
                 <span className="font-medium text-gray-600">Sede:</span>
                 {/* 🔥 CORREGIDO: Mostrar nombre de la sede en lugar del ID */}
                 <p className="text-gray-900">
-                  {(estilista as any).sede_nombre || 'Sede no asignada'}
+                  {formatSedeNombre((estilista as any).sede_nombre, 'Sede no asignada')}
                 </p>
               </div>
               {estilista.comision && (

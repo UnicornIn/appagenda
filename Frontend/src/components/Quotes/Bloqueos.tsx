@@ -3,6 +3,7 @@ import { createBloqueo } from "./bloqueosApi";
 import { useAuth } from "../../components/Auth/AuthContext";
 import { getSedes, type Sede } from "../Branch/sedesApi";
 import { getEstilistas, type Estilista } from "../Professionales/estilistasApi";
+import { formatSedeNombre } from "../../lib/sede";
 
 interface BloqueosProps {
   onClose: () => void;
@@ -276,7 +277,10 @@ const Bloqueos: React.FC<BloqueosProps> = ({ onClose, estilistaId, fecha, horaIn
   const minHoraFin = formData.hora_inicio;
 
   // Obtener el nombre de la sede actual para mostrar
-  const nombreSedeActual = sedes.find(s => s.sede_id === formData.sede_id)?.nombre || "";
+  const nombreSedeActual = formatSedeNombre(
+    sedes.find(s => s.sede_id === formData.sede_id)?.nombre,
+    ""
+  );
 
   // Obtener el nombre del estilista actual para mostrar
   const nombreEstilistaActual = estilistas.find(e => e.profesional_id === formData.profesional_id)?.nombre || "";
@@ -362,14 +366,14 @@ const Bloqueos: React.FC<BloqueosProps> = ({ onClose, estilistaId, fecha, horaIn
               required
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 transition-colors"
               disabled={loadingSedes || !!estilistaId || esEstilista}
-            >
-              <option value="">{loadingSedes ? "Cargando sedes..." : "Seleccionar sede"}</option>
-              {sedes.map(sede => (
-                <option key={sede._id || sede.sede_id} value={sede.sede_id}>
-                  {sede.nombre}
-                </option>
-              ))}
-            </select>
+              >
+                <option value="">{loadingSedes ? "Cargando sedes..." : "Seleccionar sede"}</option>
+                {sedes.map(sede => (
+                  <option key={sede._id || sede.sede_id} value={sede.sede_id}>
+                    {formatSedeNombre(sede.nombre)}
+                  </option>
+                ))}
+              </select>
           )}
         </div>
 

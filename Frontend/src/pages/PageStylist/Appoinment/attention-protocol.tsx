@@ -16,6 +16,7 @@ import BloqueosModal from "../../../components/Quotes/Bloqueos";  // <-- AÑADIR
 import { ProductManagementPanel } from "./ProductManagementPanel"
 import { ZoomIn, X, ExternalLink } from "lucide-react";
 import { ShoppingCart } from "lucide-react";
+import { formatSedeNombre } from "../../../lib/sede";
 
 interface AttentionProtocolProps {
   citaSeleccionada?: any;
@@ -227,7 +228,7 @@ export function AttentionProtocol({
           },
           servicio_nombre: ficha.servicio_nombre || ficha.servicio || 'Servicio sin nombre',
           profesional_nombre: ficha.profesional_nombre || ficha.estilista || 'Estilista no asignado',
-          sede_nombre: ficha.sede_nombre || ficha.sede || 'Sede no especificada'
+          sede_nombre: formatSedeNombre(ficha.sede_nombre || ficha.sede || ficha.local, 'Sede no especificada')
         };
       });
 
@@ -813,7 +814,7 @@ export function AttentionProtocol({
               <p className="text-xs"><strong>Nombre:</strong> {detalleFicha.nombre} {detalleFicha.apellido || ''}</p> {/* REDUCIDO texto */}
               <p className="text-xs"><strong>Cédula:</strong> {detalleFicha.cedula}</p>
               <p className="text-xs"><strong>Teléfono:</strong> {detalleFicha.telefono}</p>
-              <p className="text-xs"><strong>Sede:</strong> {detalleFicha.sede_nombre}</p>
+              <p className="text-xs"><strong>Sede:</strong> {formatSedeNombre(detalleFicha.sede_nombre, 'Sede no especificada')}</p>
             </div>
           </div>
 
@@ -1272,7 +1273,7 @@ export function AttentionProtocol({
                     </div>
                     <div>
                       <span className="text-gray-600">Sede:</span>
-                      <span className="ml-1">{ficha.sede_nombre}</span> {/* REDUCIDO de ml-2 */}
+                      <span className="ml-1">{formatSedeNombre(ficha.sede_nombre, 'Sede no especificada')}</span> {/* REDUCIDO de ml-2 */}
                     </div>
                     <div>
                       <span className="text-gray-600">Precio:</span>

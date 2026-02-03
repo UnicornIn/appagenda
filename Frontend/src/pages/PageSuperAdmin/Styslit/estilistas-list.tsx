@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Search, MoreVertical, Edit, Trash2, User, Filter } from 'lucide-react'
 import type { Estilista } from "../../../types/estilista"
+import { formatSedeNombre } from "../../../lib/sede"
 
 interface EstilistasListProps {
   estilistas: Estilista[]
@@ -192,7 +193,7 @@ export function EstilistasList({
                       }`}>
                         <span className="flex items-center gap-1">
                           <Building className="h-3 w-3" />
-                          {(estilista as any).sede_nombre || 'Sede no asignada'}
+                          {formatSedeNombre((estilista as any).sede_nombre, 'Sede no asignada')}
                         </span>
                         {estilista.comision && (
                           <span className="flex items-center gap-1">

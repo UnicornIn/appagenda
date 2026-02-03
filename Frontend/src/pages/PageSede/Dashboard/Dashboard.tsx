@@ -8,6 +8,7 @@ import { SalesDonutChart } from "./sales-donut-chart";
 import { ClientIndicators } from "./client-indicators";
 import { Button } from "../../../components/ui/button";
 import { useAuth } from "../../../components/Auth/AuthContext";
+import { formatSedeNombre } from "../../../lib/sede";
 import {
   getVentasDashboard,
   getVentasAvailablePeriods,
@@ -690,6 +691,7 @@ export default function DashboardPage() {
   };
 
   const currentSede = getSedeInfo(selectedSede);
+  const sedeNombreDisplay = formatSedeNombre(currentSede?.nombre, "Sede seleccionada");
   const metricas = getMetricas();
 
   if (!isAuthenticated) {
@@ -740,10 +742,10 @@ export default function DashboardPage() {
   if (!currentSede) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold">Sede no encontrada</h2>
-          <p className="mt-2 text-gray-600">No se encontró información para la sede ID: {selectedSede}</p>
-        </div>
+          <div className="text-center">
+            <h2 className="text-2xl font-bold">Sede no encontrada</h2>
+            <p className="mt-2 text-gray-600">No se encontró información para la sede {sedeNombreDisplay}</p>
+          </div>
       </div>
     );
   }
@@ -805,9 +807,9 @@ export default function DashboardPage() {
               <div className="text-center">
                 <div className="w-12 h-12 border-4 border-gray-200 border-t-gray-800 rounded-full animate-spin mx-auto mb-4"></div>
                 <p className="text-gray-600">Cargando datos financieros...</p>
-                <p className="text-sm text-gray-500 mt-2">
-                  Sede: {selectedSede} • Período: {getPeriodDisplay()} • Moneda: {metricas.moneda}
-                </p>
+                  <p className="text-sm text-gray-500 mt-2">
+                    Sede: {sedeNombreDisplay} • Período: {getPeriodDisplay()} • Moneda: {metricas.moneda}
+                  </p>
               </div>
             </div>
           ) : error ? (
@@ -815,11 +817,11 @@ export default function DashboardPage() {
               <AlertCircle className="w-16 h-16 mx-auto mb-4 text-gray-400" />
               <h3 className="text-lg font-semibold text-gray-700 mb-2">Error al cargar datos</h3>
               <p className="text-gray-500 mb-4">{error}</p>
-              <div className="space-y-2 mb-6 text-sm text-gray-600">
-                <p>Sede ID: {selectedSede}</p>
-                <p>Período: {getPeriodDisplay()}</p>
-                <p>Moneda: {metricas.moneda} • País: {user?.pais || 'No especificado'}</p>
-              </div>
+                <div className="space-y-2 mb-6 text-sm text-gray-600">
+                  <p>Sede: {sedeNombreDisplay}</p>
+                  <p>Período: {getPeriodDisplay()}</p>
+                  <p>Moneda: {metricas.moneda} • País: {user?.pais || 'No especificado'}</p>
+                </div>
               <Button
                 onClick={handleRefresh}
                 variant="outline"
@@ -1160,12 +1162,12 @@ export default function DashboardPage() {
               <BarChart3 className="w-16 h-16 mx-auto mb-4 text-gray-400" />
               <h3 className="text-lg font-semibold text-gray-700 mb-2">No hay datos financieros disponibles</h3>
               <p className="text-gray-500 mb-4">No se pudieron cargar los datos del dashboard de ventas.</p>
-              <div className="space-y-2 mb-6 text-sm text-gray-600">
-                <p>Sede ID: {selectedSede}</p>
-                <p>Período: {getPeriodDisplay()}</p>
-                <p>Moneda: {metricas.moneda} • País: {user?.pais || 'No especificado'}</p>
-                <p className="text-xs text-gray-500">Verifica que la API de ventas esté funcionando correctamente</p>
-              </div>
+                <div className="space-y-2 mb-6 text-sm text-gray-600">
+                  <p>Sede: {sedeNombreDisplay}</p>
+                  <p>Período: {getPeriodDisplay()}</p>
+                  <p>Moneda: {metricas.moneda} • País: {user?.pais || 'No especificado'}</p>
+                  <p className="text-xs text-gray-500">Verifica que la API de ventas esté funcionando correctamente</p>
+                </div>
               <Button
                 onClick={handleRefresh}
                 variant="outline"
