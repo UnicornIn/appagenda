@@ -1673,7 +1673,7 @@ async def crear_ficha(
         "fecha_ficha": data.fecha_ficha or datetime.utcnow().isoformat(),
         "fecha_reserva": data.fecha_reserva,
 
-        "email": data.email or cliente.get("email"),
+        "correo": data.email or cliente.get("correo"),
         "nombre": data.nombre or cliente.get("nombre"),
         "apellido": data.apellido or cliente.get("apellido"),
         "cedula": data.cedula or cliente.get("cedula"),
@@ -2185,10 +2185,10 @@ async def finalizar_servicio_con_pdf(
         cliente_email = ficha.get("email")
         if not cliente_email:
             # Si no hay email en la ficha, buscar en el cliente
-            print(f"🔍 Buscando email del cliente con ID: {ficha.get('cliente_id')}")
-            cliente = await collection_clients.find_one({"_id": ficha.get("cliente_id")})
-            if cliente and cliente.get("email"):
-                cliente_email = cliente.get("email")
+            print(f"🔍 Buscando correo del cliente con ID: {ficha.get('cliente_id')}")
+            cliente = await collection_clients.find_one({"cliente_id": ficha.get("cliente_id")})
+            if cliente and cliente.get("correo"):
+                cliente_email = cliente.get("correo")
                 print(f"📧 Email encontrado: {cliente_email}")
         
         if cliente_email:
