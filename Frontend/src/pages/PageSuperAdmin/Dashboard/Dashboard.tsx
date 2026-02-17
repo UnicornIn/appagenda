@@ -1048,7 +1048,7 @@ export default function DashboardPage() {
                 </SelectContent>
               </Select>
 
-              <Button
+              {/* <Button
                 onClick={handleRefresh}
                 disabled={loading || showLoadingDelay}
                 className="bg-gray-900 hover:bg-gray-800 text-white"
@@ -1056,7 +1056,7 @@ export default function DashboardPage() {
               >
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                 Actualizar
-              </Button>
+              </Button> */}
             </div>
           </div>
         </div>
@@ -1129,9 +1129,9 @@ export default function DashboardPage() {
                                 )}
                               </div>
                             </div>
-                            <Badge className="bg-gray-900 text-white">
+                            {/* <Badge className="bg-gray-900 text-white">
                               {globalData.calidad_datos || 'BUENA'}
-                            </Badge>
+                            </Badge> */}
                           </div>
                         </CardContent>
                       </Card>
@@ -1198,7 +1198,7 @@ export default function DashboardPage() {
                                 </p>
                               </div>
                             </div>
-                            <Badge className="bg-gray-900 text-white">Ventas</Badge>
+                            {/* <Badge className="bg-gray-900 text-white">Ventas</Badge> */}
                           </div>
                         </CardContent>
                       </Card>

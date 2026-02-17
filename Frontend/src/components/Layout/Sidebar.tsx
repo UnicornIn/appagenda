@@ -6,7 +6,7 @@ import {
   Users,
   Package,
   CreditCard,
-  Wallet,
+  // Wallet,
   Home,
   Menu,
   X,
@@ -42,7 +42,7 @@ const navItems: NavItem[] = [
   { title: 'Estilistas', href: '/sede/stylists', icon: Users, roles: ['admin_sede'] },
   { title: 'Comisiones', href: '/sede/commissions', icon: CreditCard, roles: ['admin_sede'] },
   { title: 'Ventas Facturadas', href: '/sede/sales-invoiced', icon: CreditCard, roles: ['admin_sede'] },
-  { title: 'Cierre de Caja', href: '/sede/cierre-caja', icon: Wallet, roles: ['admin_sede'] },
+  // { title: 'Cierre de Caja', href: '/sede/cierre-caja', icon: Wallet, roles: ['admin_sede'] },
 
   { title: 'Agenda', href: '/stylist/appointments', icon: Users, roles: ['estilista'] },
   { title: 'Comisiones', href: '/stylist/commissions', icon: CreditCard, roles: ['estilista'] },

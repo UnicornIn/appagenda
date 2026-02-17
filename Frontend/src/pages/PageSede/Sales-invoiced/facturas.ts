@@ -108,20 +108,22 @@ export interface FacturaConverted {
 }
 
 export class FacturaService {
-  private token: string | null = null;
-
-  constructor() {
-    this.token = sessionStorage.getItem("access_token");
+  private getAuthToken(): string | null {
+    return (
+      sessionStorage.getItem("access_token") ||
+      localStorage.getItem("access_token")
+    );
   }
 
   private getHeaders() {
+    const token = this.getAuthToken();
     const headers: HeadersInit = {
       "accept": "application/json",
       "Content-Type": "application/json",
     };
 
-    if (this.token) {
-      headers["Authorization"] = `Bearer ${this.token}`;
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
 
     return headers;

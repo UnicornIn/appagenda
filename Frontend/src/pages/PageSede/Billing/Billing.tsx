@@ -6,6 +6,9 @@ import { Sidebar } from "../../../components/Layout/Sidebar"
 import { SalesMetrics } from "./sales-metrics"
 import { TodayAppointments } from "./today-appointments"
 import { ServiceProtocol } from "./service-protocol"
+import { Button } from "../../../components/ui/button"
+import { ShoppingBag } from "lucide-react"
+import { DirectSaleModal } from "./DirectSaleModal"
 // Asegúrate de que esta interfaz coincida con la de TodayAppointments
 interface Appointment {
   _id: string
@@ -27,6 +30,8 @@ interface Appointment {
 export default function Billing() {
   // Estado para la cita seleccionada
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null)
+  const [showDirectSaleModal, setShowDirectSaleModal] = useState(false)
+  const [metricsRefreshKey, setMetricsRefreshKey] = useState(0)
 
   const handleSelectAppointment = (appointment: Appointment) => {
     setSelectedAppointment(appointment)
@@ -36,41 +41,60 @@ export default function Billing() {
     setSelectedAppointment(null)
   }
 
+  const handleDirectSaleCompleted = () => {
+    setMetricsRefreshKey((current) => current + 1)
+  }
+
   return (
-    <div className="flex h-screen bg-gray-50">
-      <Sidebar />
-      <main className="flex-1 overflow-auto">
-        <div className="p-8">
-          {/* Header */}
-          <div className="mb-8 flex items-center justify-between">
-            <h1 className="text-3xl font-bold">Ventas</h1>
-            <div className="flex items-center gap-2">
+    <>
+      <DirectSaleModal
+        isOpen={showDirectSaleModal}
+        onClose={() => setShowDirectSaleModal(false)}
+        onSaleCompleted={handleDirectSaleCompleted}
+      />
+
+      <div className="flex h-screen bg-gray-50">
+        <Sidebar />
+        <main className="flex-1 overflow-auto">
+          <div className="p-8">
+            {/* Header */}
+            <div className="mb-8 flex items-center justify-between">
+              <h1 className="text-3xl font-bold">Ventas</h1>
+              <div className="flex items-center gap-2">
+                <Button
+                  className="bg-black text-white hover:bg-gray-800"
+                  onClick={() => setShowDirectSaleModal(true)}
+                >
+                  <ShoppingBag className="mr-2 h-4 w-4" />
+                  Venta directa
+                </Button>
+              </div>
+            </div>
+
+            {/* Sales Metrics */}
+            <SalesMetrics key={metricsRefreshKey} />
+
+            {/* Main Content Grid */}
+            <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+              {/* Left Column */}
+              <div className="space-y-6">
+                <TodayAppointments
+                  onSelectAppointment={handleSelectAppointment}
+                  selectedAppointmentId={selectedAppointment?._id}
+                />
+              </div>
+
+              {/* Right Column - Muestra el protocolo de la cita seleccionada */}
+              <div>
+                <ServiceProtocol
+                  selectedAppointment={selectedAppointment}
+                  onClose={handleCloseProtocol}
+                />
+              </div>
             </div>
           </div>
-
-          {/* Sales Metrics */}
-          <SalesMetrics />
-
-          {/* Main Content Grid */}
-          <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {/* Left Column */}
-            <div className="space-y-6">
-              <TodayAppointments 
-                onSelectAppointment={handleSelectAppointment}
-                selectedAppointmentId={selectedAppointment?._id}
-              />
-            </div>
-
-            {/* Right Column - Muestra el protocolo de la cita seleccionada */}
-            <div>
-              <ServiceProtocol 
-                selectedAppointment={selectedAppointment}
-                onClose={handleCloseProtocol}
-              />
-            </div>
-          </div>
-        </div>
-      </main>
-    </div>
+        </main>
+      </div>
+    </>
   )
 }

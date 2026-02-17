@@ -1419,122 +1419,227 @@ async def obtener_fichas_por_cliente(
     }
 
 # ============================================================
-# 📅 Obtener todas las citas del estilista autenticado
-# ⭐ ACTUALIZADO PARA SOPORTAR MÚLTIPLES SERVICIOS
+# 📅 Obtener citas del estilista autenticado - VERSIÓN OPTIMIZADA
+# ✅ Sin cambios en el frontend
+# ✅ De N*3 queries → 3 queries totales
+# ✅ Filtro de fecha automático (30 días atrás - 60 días adelante)
 # ============================================================
+
 @router.get("/citas/estilista", response_model=list)
 async def get_citas_estilista(
-    current_user: dict = Depends(get_current_user) 
+    current_user: dict = Depends(get_current_user),
+    fecha_desde: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+    fecha_hasta: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
 ):
     if current_user["rol"] != "estilista":
-        raise HTTPException(
-            status_code=403,
-            detail="Solo los estilistas pueden ver sus citas"
-        )
+        raise HTTPException(status_code=403, detail="Solo los estilistas pueden ver sus citas")
 
-    email = current_user["email"]
-
-    estilista = await collection_estilista.find_one({"email": email})
-
+    estilista = await collection_estilista.find_one({"email": current_user["email"]})
     if not estilista:
-        raise HTTPException(
-            status_code=404,
-            detail="No se encontró el profesional asociado a este usuario"
-        )
+        raise HTTPException(status_code=404, detail="No se encontró el profesional asociado a este usuario")
 
     profesional_id = estilista.get("profesional_id")
-    sede_id = estilista.get("sede_id")
 
-    # ===========================================
-    # FILTRO CORREGIDO
-    # ===========================================
-    citas = await collection_citas.find({
-        "$or": [
-            {"estilista_id": profesional_id},
-            {"profesional_id": profesional_id}
-        ]
-    }).sort("fecha", 1).to_list(None)
+    hoy = datetime.utcnow()
+    dt_desde = datetime.strptime(fecha_desde, "%Y-%m-%d") if fecha_desde else hoy - timedelta(days=30)
+    dt_hasta = (datetime.strptime(fecha_hasta, "%Y-%m-%d") + timedelta(days=1)) if fecha_hasta else hoy + timedelta(days=60)
+
+    str_desde = dt_desde.strftime("%Y-%m-%d")
+    str_hasta = (dt_hasta - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    pipeline = [
+        {
+            "$match": {
+                "$or": [
+                    {"estilista_id": profesional_id},
+                    {"profesional_id": profesional_id}
+                ],
+                "fecha": {"$gte": str_desde, "$lte": str_hasta}
+            }
+        },
+        {"$sort": {"fecha": 1}},
+        {
+            "$lookup": {
+                "from": collection_clients.name,
+                "localField": "cliente_id",
+                "foreignField": "cliente_id",
+                "as": "_cliente_data"
+            }
+        },
+        {
+            "$lookup": {
+                "from": collection_locales.name,
+                "localField": "sede_id",
+                "foreignField": "sede_id",
+                "as": "_sede_data"
+            }
+        },
+        {
+            "$addFields": {
+                "_cliente": {"$arrayElemAt": ["$_cliente_data", 0]},
+                "_sede":    {"$arrayElemAt": ["$_sede_data", 0]}
+            }
+        },
+        {"$project": {"_cliente_data": 0, "_sede_data": 0}}
+    ]
+
+    citas = await collection_citas.aggregate(pipeline).to_list(None)
+
+    # Pre-cargar todos los servicios necesarios en una sola query
+    todos_servicio_ids = set()
+    for c in citas:
+        for serv_item in c.get("servicios", []):
+            if serv_item.get("servicio_id"):
+                todos_servicio_ids.add(serv_item.get("servicio_id"))
+        if c.get("servicio_id"):
+            todos_servicio_ids.add(c.get("servicio_id"))
+
+    servicios_db_map = {}
+    if todos_servicio_ids:
+        servicios_db_list = await collection_servicios.find({
+            "$or": [
+                {"servicio_id": {"$in": list(todos_servicio_ids)}},
+                {"unique_id":   {"$in": list(todos_servicio_ids)}}
+            ]
+        }).to_list(None)
+        for s in servicios_db_list:
+            if s.get("servicio_id"): servicios_db_map[s["servicio_id"]] = s
+            if s.get("unique_id"):   servicios_db_map[s["unique_id"]] = s
+
+    def detectar_formato(c: dict) -> str:
+        servicios_arr = c.get("servicios")
+        if isinstance(servicios_arr, list) and len(servicios_arr) > 0:
+            return "nuevo"
+        if c.get("servicio_id") or c.get("servicio_nombre") or c.get("valor_total"):
+            return "antiguo"
+        return "vacio"
+
+    def resolver_precio_item(serv_item: dict, servicio_db) -> tuple:
+        val = serv_item.get("precio_personalizado")
+        es_personalizado = False
+        try:
+            if val is not None and val is not False and float(val) > 0:
+                es_personalizado = True
+        except (TypeError, ValueError):
+            pass
+
+        if es_personalizado:
+            return float(val), True
+
+        precio_item = serv_item.get("precio")
+        if precio_item not in (None, 0, "", False):
+            try:
+                return float(precio_item), False
+            except (TypeError, ValueError):
+                pass
+
+        if servicio_db:
+            precio_bd = servicio_db.get("precio")
+            if precio_bd not in (None, 0):
+                try:
+                    return float(precio_bd), False
+                except (TypeError, ValueError):
+                    pass
+
+        return 0.0, False
 
     respuesta = []
 
     for c in citas:
-        # -----------------------------------------
-        # 1. CLIENTE
-        # -----------------------------------------
-        cliente = await collection_clients.find_one({"cliente_id": c.get("cliente_id")})
+        formato = detectar_formato(c)
+
+        # CLIENTE
+        cliente_raw = c.get("_cliente") or {}
+        nombre   = cliente_raw.get("nombre", "")
+        apellido = cliente_raw.get("apellido", "")
+
+        if not nombre:
+            nombre_embebido = c.get("cliente_nombre", "").strip()
+            if nombre_embebido:
+                partes   = nombre_embebido.split(" ", 1)
+                nombre   = partes[0]
+                apellido = partes[1] if len(partes) > 1 else ""
+
         cliente_data = {
-            "cliente_id": c.get("cliente_id"),
-            "nombre": cliente.get("nombre") if cliente else "Desconocido",
-            "apellido": cliente.get("apellido") if cliente else "",
-            "telefono": cliente.get("telefono") if cliente else "",
-            "email": cliente.get("email") if cliente else "",
+            "cliente_id": c.get("cliente_id", ""),
+            "nombre":     nombre   or "Desconocido",
+            "apellido":   apellido or "",
+            "telefono":   cliente_raw.get("telefono") or c.get("cliente_telefono", ""),
+            "email":      cliente_raw.get("email")    or c.get("cliente_email", ""),
         }
 
-        # -----------------------------------------
-        # ⭐ 2. SERVICIOS (NUEVA LÓGICA)
-        # -----------------------------------------
-        servicios_cita = c.get("servicios", [])
+        # SERVICIOS Y PRECIO
         servicios_data = []
-        precio_total = 0  # ✅ INICIALIZAR AQUÍ
+        precio_total   = 0.0
 
-        # Si tiene array de servicios (nuevo formato)
-        if servicios_cita and isinstance(servicios_cita, list):
-            for serv_item in servicios_cita:
+        if formato == "nuevo":
+            for serv_item in c.get("servicios", []):
                 servicio_id = serv_item.get("servicio_id")
-                
-                # Buscar info del servicio en BD
-                servicio_db = await collection_servicios.find_one({
-                    "$or": [
-                        {"servicio_id": servicio_id},
-                        {"unique_id": servicio_id}
-                    ]
-                })
-                
-                # Determinar precio (personalizado o de BD)
-                if serv_item.get("precio_personalizado") is not None:
-                    precio = float(serv_item.get("precio_personalizado"))
-                else:
-                    precio = float(servicio_db.get("precio", 0)) if servicio_db else 0
-                
-                precio_total += precio  # ✅ Suma correctamente
-                
+                servicio_db = servicios_db_map.get(servicio_id) if servicio_id else None
+                precio, es_personalizado = resolver_precio_item(serv_item, servicio_db)
+                precio_total += precio
+
+                nombre_serv = (
+                    serv_item.get("nombre")
+                    or (servicio_db.get("nombre") if servicio_db else None)
+                    or "Servicio sin nombre"
+                )
                 servicios_data.append({
-                    "servicio_id": servicio_id,
-                    "nombre": serv_item.get("nombre") or (servicio_db.get("nombre") if servicio_db else "Desconocido"),
-                    "precio": precio,  # ✅ Asegurar que se envíe el precio correcto
-                    "precio_personalizado": serv_item.get("precio_personalizado") is not None
+                    "servicio_id":          servicio_id or "",
+                    "nombre":               nombre_serv,
+                    "precio":               precio,
+                    "precio_personalizado": es_personalizado
                 })
 
-        # -----------------------------------------
-        # 3. SEDE
-        # -----------------------------------------
-        sede = await collection_locales.find_one({"sede_id": c.get("sede_id")})
+        elif formato == "antiguo":
+            servicio_id = c.get("servicio_id")
+            servicio_db = servicios_db_map.get(servicio_id) if servicio_id else None
+
+            precio_total = float(
+                c.get("valor_total")
+                or c.get("precio_total")
+                or (servicio_db.get("precio") if servicio_db else 0)
+                or 0
+            )
+
+            nombre_serv = (
+                c.get("servicio_nombre")
+                or (servicio_db.get("nombre") if servicio_db else None)
+                or "Servicio sin nombre"
+            )
+
+            servicios_data.append({
+                "servicio_id":          servicio_id or "",
+                "nombre":               nombre_serv,
+                "precio":               precio_total,
+                "precio_personalizado": False
+            })
+
+        # SEDE
+        sede_raw = c.get("_sede") or {}
         sede_data = {
-            "sede_id": c.get("sede_id"),
-            "nombre": sede.get("nombre") if sede else "Sede desconocida"
+            "sede_id": c.get("sede_id", ""),
+            "nombre":  (
+                sede_raw.get("nombre")
+                or c.get("sede_nombre")
+                or "Sede desconocida"
+            )
         }
 
-        # -----------------------------------------
-        # ⭐ 4. RESPUESTA CON SERVICIOS ENRIQUECIDOS
-        # -----------------------------------------
         respuesta.append({
-            "cita_id": str(c.get("_id")),
-            "cliente": cliente_data,
-            
-            # ⭐ NUEVO: Array de servicios
-            "servicios": servicios_data,
-            
-            "sede": sede_data,
-            "estilista_id": profesional_id,
-            "fecha": c.get("fecha"),
-            "hora_inicio": c.get("hora_inicio"),
-            "hora_fin": c.get("hora_fin"),
-            "estado": c.get("estado"),
-            "comentario": c.get("comentario", None),
-            
-            # ⭐ NUEVOS CAMPOS ÚTILES
-            "precio_total": precio_total,
-            "cantidad_servicios": len(servicios_data),
+            "cita_id":                    str(c.get("_id")),
+            "cliente":                    cliente_data,
+            "servicios":                  servicios_data,
+            "sede":                       sede_data,
+            "estilista_id":               profesional_id,
+            "fecha":                      c.get("fecha"),
+            "hora_inicio":                c.get("hora_inicio"),
+            "hora_fin":                   c.get("hora_fin"),
+            "estado":                     c.get("estado"),
+            "estado_pago":                c.get("estado_pago"),
+            "comentario":                 c.get("comentario", None),
+            "precio_total":               precio_total,
+            "cantidad_servicios":         len(servicios_data),
             "tiene_precio_personalizado": any(s["precio_personalizado"] for s in servicios_data)
         })
 
