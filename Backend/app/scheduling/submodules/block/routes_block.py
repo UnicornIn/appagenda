@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from app.scheduling.models import Bloqueo
 from app.database.mongo import collection_block
 from app.auth.routes import get_current_user
-from datetime import datetime, time
+from datetime import datetime, time, date
 from typing import List
 from bson import ObjectId
 
@@ -16,6 +16,9 @@ def bloqueo_to_dict(b):
     b["_id"] = str(b["_id"])
     return b
 
+def date_to_datetime(d: date) -> datetime:
+    return datetime.combine(d, time.min)
+
 
 # =========================================================
 # 🔹 Crear bloqueo (admin_sede, admin_franquicia, super_admin, estilista)
@@ -26,34 +29,56 @@ async def crear_bloqueo(
     current_user: dict = Depends(get_current_user)
 ):
     rol = current_user["rol"]
-
     if rol not in ["admin_sede", "admin_franquicia", "super_admin", "estilista"]:
-        raise HTTPException(status_code=403, detail="No autorizado para crear bloqueos")
+        raise HTTPException(status_code=403, detail="No autorizado")
 
-    # Convertir `fecha` de date → datetime (Mongo solo acepta datetime)
-    fecha_dt = datetime.combine(bloqueo.fecha, time.min)
+    # 🔎 Buscar bloqueos del mismo profesional
+    bloqueos = await collection_block.find({
+        "profesional_id": bloqueo.profesional_id
+    }).to_list(None)
 
-    # Validar solapamientos
-    existing = await collection_block.find_one({
-        "profesional_id": bloqueo.profesional_id,
-        "fecha": fecha_dt,
-        "hora_inicio": {"$lte": bloqueo.hora_fin},
-        "hora_fin": {"$gte": bloqueo.hora_inicio}
-    })
+    for b in bloqueos:
+        # 1️⃣ Coinciden días de la semana
+        dias_comunes = set(b["repeat"]["days_of_week"]) & set(bloqueo.repeat.days_of_week)
+        if not dias_comunes:
+            continue
 
-    if existing:
-        raise HTTPException(status_code=400, detail="El horario se cruza con otro bloqueo existente")
+        # 2️⃣ Coinciden horas
+        if not (
+            bloqueo.end_time <= b["start_time"] or
+            bloqueo.start_time >= b["end_time"]
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Solapamiento con otro bloqueo recurrente"
+            )
 
-    # Preparar data para guardar
     data = bloqueo.dict()
-    data["fecha"] = fecha_dt  # Guardar fecha como datetime correcto
+
+    # 🔁 fechas principales
+    data["start_date"] = date_to_datetime(bloqueo.start_date)
+
+    #    🔁 repeat.until
+    if bloqueo.repeat.until:
+        data["repeat"]["until"] = date_to_datetime(bloqueo.repeat.until)
+
+    # 🔁 listas de fechas
+    data["repeat"]["exclude_dates"] = [
+        date_to_datetime(d) for d in bloqueo.repeat.exclude_dates
+]
+
+    data["repeat"]["include_dates"] = [
+        date_to_datetime(d) for d in bloqueo.repeat.include_dates
+]
+
     data["creado_por"] = current_user["email"]
     data["fecha_creacion"] = datetime.now()
 
     result = await collection_block.insert_one(data)
     data["_id"] = str(result.inserted_id)
 
-    return {"msg": "Bloqueo creado exitosamente", "bloqueo": data}
+    return {"msg": "Bloqueo creado correctamente", "bloqueo": data}
+
 
 
 # =========================================================
@@ -66,17 +91,34 @@ async def listar_bloqueos_profesional(
 ):
     rol = current_user["rol"]
 
-    # 🔐 El estilista solo puede ver sus propios bloqueos
     if rol == "estilista" and current_user["profesional_id"] != profesional_id:
-        raise HTTPException(status_code=403, detail="No autorizado para ver otros bloqueos")
+        raise HTTPException(status_code=403, detail="No autorizado")
 
-    # 🔎 Obtener bloqueos por profesional_id
     bloqueos = await collection_block.find({
         "profesional_id": profesional_id
     }).to_list(None)
 
     return [bloqueo_to_dict(b) for b in bloqueos]
 
+# =========================================================
+# 🔹 Eliminar un día específico de un bloqueo recurrente
+# =========================================================
+
+@router.patch("/{bloqueo_id}/exclude-day", response_model=dict)
+async def excluir_dia_bloqueo(
+    bloqueo_id: str,
+    fecha: date,
+    current_user: dict = Depends(get_current_user)
+):
+    result = await collection_block.update_one(
+        {"_id": ObjectId(bloqueo_id)},
+        {"$addToSet": {"repeat.exclude_dates": date_to_datetime(fecha)}}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Bloqueo no encontrado")
+
+    return {"msg": "Día excluido del bloqueo"}
 
 # =========================================================
 # 🔹 Eliminar bloqueo
