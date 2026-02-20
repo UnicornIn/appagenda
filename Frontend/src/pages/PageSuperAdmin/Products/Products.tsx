@@ -1,13 +1,14 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Search, Package, AlertTriangle, BarChart3, Loader2, Filter, ChevronRight, TrendingUp, TrendingDown, Box, Edit2, Save, X } from "lucide-react"
+import { Search, Package, AlertTriangle, Loader2, Filter, ChevronRight, Box, Edit2, Save, X, Plus } from "lucide-react"
 import { Button } from "../../../components/ui/button"
 import { Input } from "../../../components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../../components/ui/card"
 import { Badge } from "../../../components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select"
 import { Separator } from "../../../components/ui/separator"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog"
 import { inventarioService } from "../../PageSede/Products/inventario"
 import type { InventarioProducto } from "../../PageSede/Products/inventario"
 import { Sidebar } from "../../../components/Layout/Sidebar"
@@ -28,6 +29,14 @@ export function ProductsList() {
   const [stockTemporal, setStockTemporal] = useState<number>(0)
   const [guardandoStock, setGuardandoStock] = useState<string | null>(null)
   const [mensajeExito, setMensajeExito] = useState<string | null>(null)
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [isCreatingInventario, setIsCreatingInventario] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [createSuccess, setCreateSuccess] = useState<string | null>(null)
+  const [nuevoProductoId, setNuevoProductoId] = useState("")
+  const [nuevoSedeId, setNuevoSedeId] = useState("")
+  const [nuevoStockInicial, setNuevoStockInicial] = useState("0")
+  const [nuevoStockMinimo, setNuevoStockMinimo] = useState("5")
 
   // Usar el AuthContext en lugar de sessionStorage
   const { user, isAuthenticated, isLoading: authLoading } = useAuth()
@@ -59,6 +68,12 @@ export function ProductsList() {
       setCategorias(categoriasUnicas)
     }
   }, [productos])
+
+  useEffect(() => {
+    if (sedeId && !nuevoSedeId) {
+      setNuevoSedeId(sedeId)
+    }
+  }, [sedeId, nuevoSedeId])
 
   const cargarInventario = async () => {
     try {
@@ -192,6 +207,77 @@ export function ProductsList() {
     }
   }
 
+  const abrirModalCreacion = () => {
+    setCreateError(null)
+    setNuevoProductoId("")
+    setNuevoSedeId(sedeId || "")
+    setNuevoStockInicial("0")
+    setNuevoStockMinimo("5")
+    setIsCreateModalOpen(true)
+  }
+
+  const cerrarModalCreacion = () => {
+    setIsCreateModalOpen(false)
+    setCreateError(null)
+  }
+
+  const crearInventario = async () => {
+    const productoId = nuevoProductoId.trim()
+    const sedeInventarioId = nuevoSedeId.trim()
+    const stockInicial = Number(nuevoStockInicial)
+    const stockMinimo = Number(nuevoStockMinimo)
+
+    if (!productoId) {
+      setCreateError("El campo producto_id es obligatorio")
+      return
+    }
+
+    if (!sedeInventarioId) {
+      setCreateError("El campo sede_id es obligatorio")
+      return
+    }
+
+    if (!Number.isFinite(stockInicial) || stockInicial < 0) {
+      setCreateError("El stock inicial debe ser un número mayor o igual a 0")
+      return
+    }
+
+    if (!Number.isFinite(stockMinimo) || stockMinimo < 0) {
+      setCreateError("El stock mínimo debe ser un número mayor o igual a 0")
+      return
+    }
+
+    setIsCreatingInventario(true)
+    setCreateError(null)
+
+    try {
+      const resultado = await inventarioService.crearInventario(
+        {
+          producto_id: productoId,
+          sede_id: sedeInventarioId,
+          stock_actual: stockInicial,
+          stock_minimo: stockMinimo
+        },
+        user?.token || sessionStorage.getItem("access_token")
+      )
+
+      if (!resultado.success) {
+        setCreateError(resultado.error || "No se pudo crear el inventario")
+        return
+      }
+
+      cerrarModalCreacion()
+      setCreateSuccess(resultado.message || "Producto registrado en inventario correctamente")
+      await cargarInventario()
+      setTimeout(() => setCreateSuccess(null), 3000)
+    } catch (err) {
+      console.error("Error creando inventario:", err)
+      setCreateError("Error inesperado al crear el inventario")
+    } finally {
+      setIsCreatingInventario(false)
+    }
+  }
+
   // Función para determinar el color del stock
   const getStockColor = (stockActual: number, stockMinimo: number) => {
     if (stockActual === 0) return "bg-red-50 text-red-700 border-red-100"
@@ -241,7 +327,7 @@ export function ProductsList() {
           {/* Header */}
 
           <div className="mb-8">
-            <div className="flex items-center justify-between">
+            <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
                   <span>Dashboard</span>
@@ -250,16 +336,15 @@ export function ProductsList() {
                   <ChevronRight className="h-3 w-3" />
                   <span className="text-gray-700 font-medium">Productos</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h1 className="text-3xl font-bold text-gray-900">Inventario</h1>
-                    <p className="text-gray-600 mt-2">
-                      Gestión de productos y control de stock
-                    </p>
-                  </div>
-
-                </div>
+                <h1 className="text-3xl font-bold text-gray-900">Inventario</h1>
+                <p className="text-gray-600 mt-2">
+                  Gestión de productos y control de stock
+                </p>
               </div>
+              <Button onClick={abrirModalCreacion} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Crear Producto
+              </Button>
             </div>
           </div>
 
@@ -290,6 +375,12 @@ export function ProductsList() {
                   </Badge>
                 </div>
               </div>
+            </div>
+          )}
+
+          {createSuccess && (
+            <div className="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+              {createSuccess}
             </div>
           )}
 
@@ -334,84 +425,6 @@ export function ProductsList() {
               </div>
             </CardContent>
           </Card>
-
-          {/* Estadísticas */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <Card className="border-gray-200 hover:border-gray-300 transition-colors">
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 mb-2">Total Productos</p>
-                    <p className="text-2xl font-bold text-gray-900">{stats.totalProductos}</p>
-                  </div>
-                  <div className="p-3 bg-blue-50 rounded-lg">
-                    <Package className="h-5 w-5 text-blue-600" />
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center text-xs text-gray-500">
-                  <TrendingUp className="h-3 w-3 text-green-500 mr-1" />
-                  <span>En inventario</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-gray-200 hover:border-gray-300 transition-colors">
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 mb-2">Stock Total</p>
-                    <p className="text-2xl font-bold text-gray-900">{stats.totalStock}</p>
-                  </div>
-                  <div className="p-3 bg-emerald-50 rounded-lg">
-                    <BarChart3 className="h-5 w-5 text-emerald-600" />
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center text-xs text-gray-500">
-                  <span>Promedio: {stats.stockPromedio} por producto</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-gray-200 hover:border-gray-300 transition-colors">
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 mb-2">Bajo Stock</p>
-                    <p className="text-2xl font-bold text-gray-900">{stats.productosBajoStock}</p>
-                  </div>
-                  <div className="p-3 bg-amber-50 rounded-lg">
-                    <AlertTriangle className="h-5 w-5 text-amber-600" />
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <div className="flex items-center text-xs text-gray-500">
-                    <TrendingDown className="h-3 w-3 text-amber-500 mr-1" />
-                    <span>{stats.totalProductos > 0 ? Math.round((stats.productosBajoStock / stats.totalProductos) * 100) : 0}% del inventario</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-gray-200 hover:border-gray-300 transition-colors">
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 mb-2">Sin Stock</p>
-                    <p className="text-2xl font-bold text-gray-900">{stats.productosSinStock}</p>
-                  </div>
-                  <div className="p-3 bg-red-50 rounded-lg">
-                    <AlertTriangle className="h-5 w-5 text-red-600" />
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <div className="flex items-center text-xs text-gray-500">
-                    <TrendingDown className="h-3 w-3 text-red-500 mr-1" />
-                    <span>Requieren atención inmediata</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
 
           {/* Estado de carga/error */}
           {isLoading && (
@@ -645,6 +658,110 @@ export function ProductsList() {
           )}
         </div>
       </div>
+
+      <Dialog
+        open={isCreateModalOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            cerrarModalCreacion()
+            return
+          }
+          setIsCreateModalOpen(true)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Crear producto en inventario</DialogTitle>
+            <DialogDescription>
+              Registra el inventario inicial de un producto en una sede.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700" htmlFor="producto-id">
+                Producto ID
+              </label>
+              <Input
+                id="producto-id"
+                placeholder="Ej: P001"
+                value={nuevoProductoId}
+                onChange={(e) => setNuevoProductoId(e.target.value)}
+                disabled={isCreatingInventario}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700" htmlFor="sede-id">
+                Sede ID
+              </label>
+              <Input
+                id="sede-id"
+                placeholder="Ej: SD-88809"
+                value={nuevoSedeId}
+                onChange={(e) => setNuevoSedeId(e.target.value)}
+                disabled={isCreatingInventario}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700" htmlFor="stock-inicial">
+                  Stock inicial
+                </label>
+                <Input
+                  id="stock-inicial"
+                  type="number"
+                  min="0"
+                  value={nuevoStockInicial}
+                  onChange={(e) => setNuevoStockInicial(e.target.value)}
+                  disabled={isCreatingInventario}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700" htmlFor="stock-minimo">
+                  Stock mínimo
+                </label>
+                <Input
+                  id="stock-minimo"
+                  type="number"
+                  min="0"
+                  value={nuevoStockMinimo}
+                  onChange={(e) => setNuevoStockMinimo(e.target.value)}
+                  disabled={isCreatingInventario}
+                />
+              </div>
+            </div>
+
+            {createError && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {createError}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={cerrarModalCreacion}
+              disabled={isCreatingInventario}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={crearInventario}
+              disabled={isCreatingInventario}
+              className="gap-2"
+            >
+              {isCreatingInventario && <Loader2 className="h-4 w-4 animate-spin" />}
+              Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

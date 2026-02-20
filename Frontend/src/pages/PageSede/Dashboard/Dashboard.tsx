@@ -346,9 +346,24 @@ export default function DashboardPage() {
           color: 'oklch(0.7 0 0)'
         },
         {
+          name: 'Tarjeta de Crédito',
+          value: metricas.metodos_pago?.tarjeta_credito || 0,
+          color: 'oklch(0.5 0 0)'
+        },
+        {
+          name: 'Tarjeta de Débito',
+          value: metricas.metodos_pago?.tarjeta_debito || 0,
+          color: 'oklch(0.45 0 0)'
+        },
+        {
+          name: 'Addi',
+          value: metricas.metodos_pago?.addi || 0,
+          color: 'oklch(0.4 0 0)'
+        },
+        {
           name: 'Tarjeta',
           value: metricas.metodos_pago?.tarjeta || 0,
-          color: 'oklch(0.5 0 0)'
+          color: 'oklch(0.35 0 0)'
         },
         {
           name: 'Sin Pago',
@@ -632,6 +647,9 @@ export default function DashboardPage() {
           efectivo: 0,
           transferencia: 0,
           tarjeta: 0,
+          tarjeta_credito: 0,
+          tarjeta_debito: 0,
+          addi: 0,
           sin_pago: 0
         },
         moneda: monedaUsuario
@@ -671,6 +689,9 @@ export default function DashboardPage() {
           efectivo: 0,
           transferencia: 0,
           tarjeta: 0,
+          tarjeta_credito: 0,
+          tarjeta_debito: 0,
+          addi: 0,
           sin_pago: 0
         },
         moneda: monedaUsuario

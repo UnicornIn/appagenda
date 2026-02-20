@@ -317,11 +317,23 @@ async def crear_cita(
 
     servicios_procesados = []
     servicios_info = []  # Para email
+    servicios_ids_vistos = set()
     valor_total = 0
     duracion_total = 0
     nombres_servicios = []  # Para denormalizar
 
     for servicio_item in cita.servicios:
+        if servicio_item.servicio_id in servicios_ids_vistos:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Servicio duplicado en la cita: {servicio_item.servicio_id}"
+            )
+        servicios_ids_vistos.add(servicio_item.servicio_id)
+
+        cantidad = int(servicio_item.cantidad or 1)
+        if cantidad < 1:
+            raise HTTPException(status_code=400, detail="La cantidad debe ser mayor o igual a 1")
+
         servicio_db = await collection_servicios.find_one({"servicio_id": servicio_item.servicio_id})
         if not servicio_db:
             raise HTTPException(status_code=404, detail=f"Servicio {servicio_item.servicio_id} no encontrado")
@@ -341,16 +353,27 @@ async def crear_cita(
             es_personalizado = False
 
         # Acumular totales
-        valor_total += precio
-        duracion_total += servicio_db.get("duracion_minutos", 0)
-        nombres_servicios.append(servicio_db.get("nombre"))
+        subtotal = round(precio * cantidad, 2)
+        valor_total += subtotal
+        duracion_total += int(servicio_db.get("duracion_minutos", 0) or 0) * cantidad
+        nombre_servicio = servicio_db.get("nombre", "Servicio")
+        nombres_servicios.append(f"{nombre_servicio} x{cantidad}" if cantidad > 1 else nombre_servicio)
+        servicios_info.append({
+            "servicio_id": servicio_item.servicio_id,
+            "nombre": nombre_servicio,
+            "precio_unitario": round(precio, 2),
+            "cantidad": cantidad,
+            "subtotal": subtotal
+        })
 
         # ⭐ GUARDAR SERVICIO (estructura mejorada)
         servicio_guardado = {
             "servicio_id": servicio_item.servicio_id,
-            "nombre": servicio_db.get("nombre"),  # ⭐ NUEVO
+            "nombre": nombre_servicio,  # ⭐ NUEVO
             "precio_personalizado": es_personalizado,  # ⭐ BOOLEANO
-            "precio": round(precio, 2)  # ⭐ SIEMPRE guardar el precio usado
+            "precio": round(precio, 2),  # ⭐ SIEMPRE guardar el precio unitario usado
+            "cantidad": cantidad,
+            "subtotal": subtotal
         }
         servicios_procesados.append(servicio_guardado)
 
@@ -973,8 +996,9 @@ async def editar_cita(
 ):
     """
     Edita una cita.
-    ✅ Soporta edición de servicios (nueva estructura)
+    ✅ Soporta edición de servicios, productos y horario
     ✅ Recalcula totales automáticamente
+    ✅ Valida disponibilidad y conflictos de agenda
     """
     if current_user.get("rol") not in ["admin_sede", "super_admin"]:
         raise HTTPException(status_code=403, detail="No autorizado")
@@ -983,61 +1007,358 @@ async def editar_cita(
     if not cita_actual:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
 
+    cita_object_id = cita_actual.get("_id")
+    if not cita_object_id:
+        raise HTTPException(status_code=500, detail="La cita no tiene _id válido")
+
+    def _hora_a_minutos(hora_str: str) -> int:
+        hora_obj = time.fromisoformat(hora_str)
+        return (hora_obj.hour * 60) + hora_obj.minute
+
+    def _minutos_a_hora(total_min: int) -> str:
+        horas = total_min // 60
+        minutos = total_min % 60
+        return f"{str(horas).zfill(2)}:{str(minutos).zfill(2)}"
+
+    def _sumar_minutos_hora(hora_str: str, minutos: int) -> str:
+        inicio = _hora_a_minutos(hora_str)
+        return _minutos_a_hora(inicio + max(0, minutos))
+
+    def _normalizar_fecha(fecha_valor) -> str:
+        if isinstance(fecha_valor, datetime):
+            return fecha_valor.strftime("%Y-%m-%d")
+        fecha_texto = str(fecha_valor)
+        try:
+            return datetime.strptime(fecha_texto[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Formato de fecha inválido. Use YYYY-MM-DD")
+
+    def _total_productos_desde_lista(productos_lista: list) -> float:
+        total = 0.0
+        for p in productos_lista or []:
+            cantidad = int(p.get("cantidad", 1) or 1)
+            precio_unitario = float(p.get("precio_unitario", p.get("precio", 0)) or 0)
+            subtotal = float(p.get("subtotal", precio_unitario * cantidad) or 0)
+            total += subtotal
+        return round(total, 2)
+
+    estado_actual = str(cita_actual.get("estado", "")).strip().lower()
+    estados_no_editables = {"cancelada", "completada", "finalizada", "no asistio", "no_asistio"}
+    campos_edicion_cita = {"servicios", "productos", "fecha", "hora_inicio", "hora_fin", "profesional_id"}
+    solicita_edicion = any(campo in cambios for campo in campos_edicion_cita)
+
+    if solicita_edicion and estado_actual in estados_no_editables:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede editar la cita cuando está en estado '{cita_actual.get('estado')}'"
+        )
+
+    sede = await collection_locales.find_one({"sede_id": cita_actual.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede de la cita no encontrada")
+
+    moneda_sede = sede.get("moneda", "COP")
+
     # ====================================
-    # ⭐ SI SE EDITAN SERVICIOS (nueva estructura)
+    # ⭐ SERVICIOS
     # ====================================
+    valor_servicios = round(
+        float(cita_actual.get("valor_total", 0) or 0) - _total_productos_desde_lista(cita_actual.get("productos", [])),
+        2
+    )
+    valor_servicios = max(0, valor_servicios)
+    duracion_total = int(cita_actual.get("servicio_duracion", 0) or 0)
+    if duracion_total <= 0:
+        try:
+            duracion_total = max(
+                0,
+                _hora_a_minutos(str(cita_actual.get("hora_fin", "00:00"))) -
+                _hora_a_minutos(str(cita_actual.get("hora_inicio", "00:00")))
+            )
+        except Exception:
+            duracion_total = 0
+
     if "servicios" in cambios:
-        sede = await collection_locales.find_one({"sede_id": cita_actual.get("sede_id")})
-        moneda_sede = sede.get("moneda", "COP")
-        
+        if not isinstance(cambios["servicios"], list) or len(cambios["servicios"]) == 0:
+            raise HTTPException(status_code=400, detail="Debe enviar al menos un servicio")
+
         servicios_procesados = []
-        valor_total = 0
-        
+        servicios_ids_vistos = set()
+        valor_servicios = 0.0
+        duracion_total = 0
+        nombres_servicios = []
+
         for servicio_item in cambios["servicios"]:
+            if not isinstance(servicio_item, dict):
+                raise HTTPException(status_code=400, detail="Formato inválido en servicios")
+
             servicio_id = servicio_item.get("servicio_id")
-            precio_personalizado = servicio_item.get("precio_personalizado")
-            
-            # Buscar servicio en BD
+            if not servicio_id:
+                raise HTTPException(status_code=400, detail="Cada servicio debe incluir servicio_id")
+
+            if servicio_id in servicios_ids_vistos:
+                raise HTTPException(status_code=400, detail=f"Servicio duplicado en la cita: {servicio_id}")
+            servicios_ids_vistos.add(servicio_id)
+
+            cantidad_raw = servicio_item.get("cantidad", 1)
+            try:
+                cantidad = int(cantidad_raw)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"Cantidad inválida para servicio {servicio_id}")
+
+            if cantidad < 1:
+                raise HTTPException(status_code=400, detail="La cantidad debe ser mayor o igual a 1")
+
             servicio_db = await collection_servicios.find_one({"servicio_id": servicio_id})
             if not servicio_db:
                 raise HTTPException(status_code=404, detail=f"Servicio {servicio_id} no encontrado")
-            
-            # Determinar precio
-            if precio_personalizado is not None and precio_personalizado > 0:
-                precio = float(precio_personalizado)
-                es_personalizado = True
-            else:
-                precios = servicio_db.get("precios", {})
-                if moneda_sede not in precios:
-                    raise HTTPException(status_code=400, detail=f"Servicio sin precio en {moneda_sede}")
-                precio = float(precios[moneda_sede])
-                es_personalizado = False
-            
-            valor_total += precio
-            
+
+            precios = servicio_db.get("precios", {})
+            if moneda_sede not in precios:
+                raise HTTPException(status_code=400, detail=f"Servicio sin precio en {moneda_sede}")
+            precio_base_sede = float(precios[moneda_sede])
+
+            precio_manual = servicio_item.get("precio")
+            precio_personalizado = servicio_item.get("precio_personalizado")
+            precio = None
+
+            if precio_manual is not None:
+                try:
+                    precio_manual_float = float(precio_manual)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail=f"Precio inválido para servicio {servicio_id}")
+                if precio_manual_float > 0:
+                    precio = precio_manual_float
+
+            if precio is None and precio_personalizado is not None:
+                try:
+                    precio_personalizado_float = float(precio_personalizado)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail=f"Precio personalizado inválido para servicio {servicio_id}")
+                if precio_personalizado_float > 0:
+                    precio = precio_personalizado_float
+
+            if precio is None:
+                precio = precio_base_sede
+
+            es_personalizado = round(precio, 2) != round(precio_base_sede, 2)
+
+            subtotal = round(precio * cantidad, 2)
+            duracion_servicio = int(servicio_db.get("duracion_minutos", 0) or 0)
+            nombre_servicio = servicio_db.get("nombre", "Servicio")
+
+            valor_servicios += subtotal
+            duracion_total += duracion_servicio * cantidad
+            nombres_servicios.append(f"{nombre_servicio} x{cantidad}" if cantidad > 1 else nombre_servicio)
+
             servicios_procesados.append({
                 "servicio_id": servicio_id,
-                "nombre": servicio_db.get("nombre"),
+                "nombre": nombre_servicio,
                 "precio_personalizado": es_personalizado,
-                "precio": round(precio, 2)
+                "precio": round(precio, 2),
+                "cantidad": cantidad,
+                "subtotal": subtotal
             })
-        
-        # Actualizar servicios y totales
+
         cambios["servicios"] = servicios_procesados
-        cambios["valor_total"] = round(valor_total, 2)
-        
-        # Recalcular saldo
-        abono_actual = cita_actual.get("abono", 0)
-        nuevo_saldo = round(valor_total - abono_actual, 2)
-        cambios["saldo_pendiente"] = nuevo_saldo
-        
-        # Recalcular estado de pago
-        if nuevo_saldo <= 0:
-            cambios["estado_pago"] = "pagado"
-        elif abono_actual > 0:
-            cambios["estado_pago"] = "abonado"
-        else:
-            cambios["estado_pago"] = "pendiente"
+        cambios["servicio_nombre"] = ", ".join(nombres_servicios) if nombres_servicios else "Sin servicio"
+        cambios["servicio_duracion"] = duracion_total
+        valor_servicios = round(valor_servicios, 2)
+
+    # ====================================
+    # ⭐ PRODUCTOS
+    # ====================================
+    productos_finales = cita_actual.get("productos", [])
+    total_productos = _total_productos_desde_lista(productos_finales)
+
+    if "productos" in cambios:
+        if not isinstance(cambios["productos"], list):
+            raise HTTPException(status_code=400, detail="Formato inválido en productos")
+
+        productos_procesados = []
+        productos_ids_vistos = set()
+        total_productos = 0.0
+        profesional_para_producto = cambios.get("profesional_id", cita_actual.get("profesional_id"))
+
+        for producto_item in cambios["productos"]:
+            if not isinstance(producto_item, dict):
+                raise HTTPException(status_code=400, detail="Formato inválido en productos")
+
+            producto_id = str(producto_item.get("producto_id", "")).strip()
+            if not producto_id:
+                raise HTTPException(status_code=400, detail="Cada producto debe incluir producto_id")
+
+            if producto_id in productos_ids_vistos:
+                raise HTTPException(status_code=400, detail=f"Producto duplicado en la cita: {producto_id}")
+            productos_ids_vistos.add(producto_id)
+
+            cantidad_raw = producto_item.get("cantidad", 1)
+            try:
+                cantidad = int(cantidad_raw)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"Cantidad inválida para producto {producto_id}")
+
+            if cantidad < 1:
+                raise HTTPException(status_code=400, detail="La cantidad de producto debe ser mayor o igual a 1")
+
+            producto_db = await collection_products.find_one({"id": producto_id})
+            if not producto_db:
+                try:
+                    producto_db = await collection_products.find_one({"_id": ObjectId(producto_id)})
+                except Exception:
+                    producto_db = None
+            if not producto_db:
+                raise HTTPException(status_code=404, detail=f"Producto {producto_id} no encontrado")
+
+            precio_manual = producto_item.get("precio", producto_item.get("precio_unitario"))
+            precio_unitario = None
+
+            if precio_manual is not None:
+                try:
+                    precio_manual_float = float(precio_manual)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail=f"Precio inválido para producto {producto_id}")
+                if precio_manual_float > 0:
+                    precio_unitario = precio_manual_float
+
+            if precio_unitario is None:
+                precios_producto = producto_db.get("precios", {})
+                if moneda_sede not in precios_producto:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"El producto '{producto_db.get('nombre', producto_id)}' no tiene precio en {moneda_sede}"
+                    )
+                precio_unitario = float(precios_producto[moneda_sede])
+
+            subtotal = round(precio_unitario * cantidad, 2)
+            comision_porcentaje = float(producto_db.get("comision", 0) or 0)
+            comision_valor = round((subtotal * comision_porcentaje) / 100, 2)
+
+            productos_procesados.append({
+                "producto_id": producto_id,
+                "nombre": producto_db.get("nombre", "Producto"),
+                "cantidad": cantidad,
+                "precio_unitario": round(precio_unitario, 2),
+                "subtotal": subtotal,
+                "moneda": moneda_sede,
+                "comision_porcentaje": comision_porcentaje,
+                "comision_valor": comision_valor,
+                "agregado_por_email": current_user.get("email"),
+                "agregado_por_rol": current_user.get("rol"),
+                "fecha_agregado": datetime.utcnow(),
+                "profesional_id": profesional_para_producto
+            })
+
+            total_productos += subtotal
+
+        total_productos = round(total_productos, 2)
+        productos_finales = productos_procesados
+        cambios["productos"] = productos_procesados
+
+    # ====================================
+    # ⭐ FECHA/HORA/PROFESIONAL
+    # ====================================
+    fecha_final = _normalizar_fecha(cambios.get("fecha", cita_actual.get("fecha")))
+    hora_inicio_final = str(cambios.get("hora_inicio", cita_actual.get("hora_inicio")))
+    profesional_id_final = str(cambios.get("profesional_id", cita_actual.get("profesional_id")))
+    hora_fin_final = str(cambios.get("hora_fin", cita_actual.get("hora_fin")))
+
+    if "servicios" in cambios or "hora_inicio" in cambios:
+        hora_fin_final = _sumar_minutos_hora(hora_inicio_final, duracion_total)
+        cambios["hora_fin"] = hora_fin_final
+
+    if "fecha" in cambios:
+        cambios["fecha"] = fecha_final
+    if "hora_inicio" in cambios:
+        cambios["hora_inicio"] = hora_inicio_final
+    if "profesional_id" in cambios:
+        cambios["profesional_id"] = profesional_id_final
+
+    if "profesional_id" in cambios:
+        profesional_db = await collection_estilista.find_one({"profesional_id": profesional_id_final})
+        if not profesional_db:
+            raise HTTPException(status_code=404, detail="Profesional no encontrado")
+        cambios["profesional_nombre"] = profesional_db.get("nombre")
+
+    # Validar disponibilidad y conflictos si cambia agenda
+    if any(campo in cambios for campo in {"fecha", "hora_inicio", "hora_fin", "profesional_id", "servicios"}):
+        try:
+            fecha_dt = datetime.strptime(fecha_final, "%Y-%m-%d")
+            hora_inicio_obj = time.fromisoformat(hora_inicio_final)
+            hora_fin_obj = time.fromisoformat(hora_fin_final)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Fecha u hora inválida")
+
+        if not hora_inicio_obj < hora_fin_obj:
+            raise HTTPException(status_code=400, detail="La hora de fin debe ser mayor a la hora de inicio")
+
+        dia_semana = fecha_dt.isoweekday()
+        horario = await collection_horarios.find_one({"profesional_id": profesional_id_final})
+        if not horario:
+            raise HTTPException(status_code=400, detail="El profesional no tiene horario configurado")
+
+        dia_info = next(
+            (
+                d for d in horario.get("disponibilidad", [])
+                if int(d.get("dia_semana", 0)) == dia_semana and d.get("activo", True) is True
+            ),
+            None
+        )
+        if not dia_info:
+            raise HTTPException(status_code=400, detail="El profesional no tiene disponibilidad para esa fecha")
+
+        hora_inicio_horario = time.fromisoformat(dia_info.get("hora_inicio"))
+        hora_fin_horario = time.fromisoformat(dia_info.get("hora_fin"))
+
+        if not (
+            hora_inicio_horario <= hora_inicio_obj < hora_fin_horario and
+            hora_inicio_horario < hora_fin_obj <= hora_fin_horario
+        ):
+            raise HTTPException(status_code=400, detail="La cita está fuera del horario laboral del profesional")
+
+        bloqueo = await collection_block.find_one({
+            "profesional_id": profesional_id_final,
+            "fecha": fecha_final,
+            "hora_inicio": {"$lt": hora_fin_final},
+            "hora_fin": {"$gt": hora_inicio_final}
+        })
+        if bloqueo:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El profesional tiene un bloqueo en ese horario (Motivo: {bloqueo.get('motivo', 'No especificado')})"
+            )
+
+        solape = await collection_citas.find_one({
+            "_id": {"$ne": cita_object_id},
+            "profesional_id": profesional_id_final,
+            "fecha": fecha_final,
+            "hora_inicio": {"$lt": hora_fin_final},
+            "hora_fin": {"$gt": hora_inicio_final},
+            "estado": {"$nin": ["cancelada", "no asistio", "no_asistio"]}
+        })
+        if solape:
+            cliente_solape = solape.get("cliente_nombre", "otro cliente")
+            raise HTTPException(
+                status_code=400,
+                detail=f"El profesional ya tiene una cita con {cliente_solape} en ese horario"
+            )
+
+    # ====================================
+    # ⭐ RECÁLCULO DE TOTALES
+    # ====================================
+    nuevo_valor_total = round(valor_servicios + total_productos, 2)
+    cambios["valor_total"] = nuevo_valor_total
+
+    abono_actual = float(cambios.get("abono", cita_actual.get("abono", 0)) or 0)
+    nuevo_saldo = round(nuevo_valor_total - abono_actual, 2)
+    cambios["saldo_pendiente"] = nuevo_saldo
+
+    if nuevo_saldo <= 0:
+        cambios["estado_pago"] = "pagado"
+    elif abono_actual > 0:
+        cambios["estado_pago"] = "abonado"
+    else:
+        cambios["estado_pago"] = "pendiente"
 
     # ====================================
     # ⭐ Actualizar timestamp
@@ -1048,7 +1369,7 @@ async def editar_cita(
     # Ejecutar actualización
     # ====================================
     result = await collection_citas.update_one(
-        {"_id": ObjectId(cita_id)},
+        {"_id": cita_object_id},
         {"$set": cambios}
     )
 
@@ -1056,7 +1377,7 @@ async def editar_cita(
         raise HTTPException(status_code=404, detail="Cita no encontrada")
 
     # Obtener cita actualizada
-    cita_actualizada = await collection_citas.find_one({"_id": ObjectId(cita_id)})
+    cita_actualizada = await collection_citas.find_one({"_id": cita_object_id})
     normalize_cita_doc(cita_actualizada)
     
     return {"success": True, "cita": cita_actualizada}

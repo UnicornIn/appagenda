@@ -9,8 +9,12 @@ export interface VentasMetricas {
   metodos_pago: {
     efectivo: number;
     transferencia: number;
-    tarjeta: number;
-    sin_pago: number;
+    tarjeta?: number;
+    tarjeta_credito?: number;
+    tarjeta_debito?: number;
+    addi?: number;
+    sin_pago?: number;
+    otros?: number;
   };
   ticket_promedio: number;
   crecimiento_ventas: string;

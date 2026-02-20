@@ -217,6 +217,17 @@ export function ClientsList({
                           </div>
                           <div>
                             <div className="font-medium text-gray-900">{cliente.nombre}</div>
+                            {/* {cliente.diasSinVenir !== undefined && (
+                              <div className={`text-xs ${
+                                cliente.diasSinVenir > 60 
+                                  ? 'text-red-600' 
+                                  : cliente.diasSinVenir > 30 
+                                  ? 'text-yellow-600'
+                                  : 'text-green-600'
+                              }`}>
+                                {cliente.diasSinVenir} días sin venir
+                              </div>
+                            )} */}
                           </div>
                         </div>
                       </td>

@@ -5,8 +5,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from typing import Optional, List
-from datetime import datetime
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta
 
 # Importar lógica contable separada
 from .accounting_logic import (
@@ -514,10 +514,193 @@ async def reporte_periodo(
 # 10. DESCARGAR REPORTE EXCEL (NUEVO ⭐)
 # ============================================================
 
+def _parse_date_yyyy_mm_dd(value: str, field_name: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"'{field_name}' debe tener formato YYYY-MM-DD"
+        ) from exc
+
+
+def _build_date_list(fecha_inicio: str, fecha_fin: str) -> List[str]:
+    inicio_dt = _parse_date_yyyy_mm_dd(fecha_inicio, "fecha_inicio")
+    fin_dt = _parse_date_yyyy_mm_dd(fecha_fin, "fecha_fin")
+
+    if inicio_dt > fin_dt:
+        inicio_dt, fin_dt = fin_dt, inicio_dt
+
+    dias = (fin_dt - inicio_dt).days + 1
+    return [
+        (inicio_dt + timedelta(days=offset)).strftime("%Y-%m-%d")
+        for offset in range(dias)
+    ]
+
+
+def _sort_items_by_fecha(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def parse_item_date(item: Dict[str, Any]) -> datetime:
+        fecha_value = item.get("fecha")
+        if isinstance(fecha_value, datetime):
+            return fecha_value
+        if isinstance(fecha_value, str):
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    return datetime.strptime(fecha_value, fmt)
+                except ValueError:
+                    continue
+        return datetime.min
+
+    return sorted(items, key=parse_item_date)
+
+
+async def _build_period_report_data(
+    sede_id: str,
+    fecha_inicio: str,
+    fecha_fin: str
+) -> Dict[str, Any]:
+    fechas = _build_date_list(fecha_inicio, fecha_fin)
+    if not fechas:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Rango de fechas inválido"
+        )
+
+    resumenes: List[Dict[str, Any]] = []
+    ventas: List[Dict[str, Any]] = []
+    egresos: List[Dict[str, Any]] = []
+    movimientos: List[Dict[str, Any]] = []
+
+    saldo_inicial = 0.0
+
+    for index, fecha_actual in enumerate(fechas):
+        resumen_dia = await calcular_resumen_dia(sede_id, fecha_actual)
+        resumenes.append(resumen_dia)
+
+        ventas.extend(await obtener_ventas_dia(sede_id, fecha_actual))
+        egresos.extend(await obtener_egresos_dia(sede_id, fecha_actual))
+
+        movimientos_dia = await obtener_movimientos_efectivo_dia(sede_id, fecha_actual)
+        if index == 0:
+            saldo_inicial = float(
+                movimientos_dia.get("saldo_inicial", resumen_dia.get("efectivo_inicial", 0)) or 0
+            )
+        movimientos.extend(movimientos_dia.get("movimientos", []))
+
+    resumen_ref = resumenes[0]
+
+    ingresos_otros_keys = [
+        "tarjeta_credito",
+        "tarjeta_debito",
+        "abonos",
+        "link_de_pago",
+        "giftcard",
+        "addi",
+        "pos",
+        "transferencia",
+        "otros",
+    ]
+
+    resumen_total: Dict[str, Any] = {
+        "sede_id": sede_id,
+        "sede_nombre": resumen_ref.get("sede_nombre", "Sede desconocida"),
+        "fecha": fechas[-1],
+        "fecha_inicio": fechas[0],
+        "fecha_fin": fechas[-1],
+        "moneda": resumen_ref.get("moneda", "COP"),
+        "efectivo_inicial": float(resumen_ref.get("efectivo_inicial", 0) or 0),
+        "ingresos_efectivo": {
+            "appointments_no_facturadas": 0.0,
+            "sales_facturadas": 0.0,
+            "total": 0.0,
+            "fuente": "periodo",
+        },
+        "ingresos_otros_metodos": {key: 0.0 for key in ingresos_otros_keys},
+        "egresos": {
+            "compras_internas": {"total": 0.0, "cantidad": 0},
+            "gastos_operativos": {"total": 0.0, "cantidad": 0},
+            "retiros_caja": {"total": 0.0, "cantidad": 0},
+            "otros": {"total": 0.0, "cantidad": 0},
+            "total": 0.0,
+        },
+        "efectivo_esperado": 0.0,
+        "total_vendido": 0.0,
+        "efectivo_contado": None,
+        "diferencia": None,
+        "estado": "abierto",
+    }
+
+    for resumen_dia in resumenes:
+        ingresos_efectivo = resumen_dia.get("ingresos_efectivo", {})
+        resumen_total["ingresos_efectivo"]["appointments_no_facturadas"] += float(
+            ingresos_efectivo.get("appointments_no_facturadas", 0) or 0
+        )
+        resumen_total["ingresos_efectivo"]["sales_facturadas"] += float(
+            ingresos_efectivo.get("sales_facturadas", 0) or 0
+        )
+        resumen_total["ingresos_efectivo"]["total"] += float(
+            ingresos_efectivo.get("total", 0) or 0
+        )
+
+        ingresos_otros = resumen_dia.get("ingresos_otros_metodos", {})
+        for key in ingresos_otros_keys:
+            resumen_total["ingresos_otros_metodos"][key] += float(
+                ingresos_otros.get(key, 0) or 0
+            )
+
+        egresos_dia = resumen_dia.get("egresos", {})
+        for categoria in ["compras_internas", "gastos_operativos", "retiros_caja", "otros"]:
+            info_cat = egresos_dia.get(categoria, {})
+            resumen_total["egresos"][categoria]["total"] += float(info_cat.get("total", 0) or 0)
+            resumen_total["egresos"][categoria]["cantidad"] += int(info_cat.get("cantidad", 0) or 0)
+
+        resumen_total["total_vendido"] += float(resumen_dia.get("total_vendido", 0) or 0)
+
+    resumen_total["ingresos_otros_metodos"]["total"] = sum(
+        resumen_total["ingresos_otros_metodos"][key] for key in ingresos_otros_keys
+    )
+    resumen_total["egresos"]["total"] = sum(
+        resumen_total["egresos"][categoria]["total"]
+        for categoria in ["compras_internas", "gastos_operativos", "retiros_caja", "otros"]
+    )
+
+    movimientos = _sort_items_by_fecha(movimientos)
+    saldo_corrido = float(saldo_inicial)
+    for movimiento in movimientos:
+        ingreso = float(movimiento.get("ingreso", 0) or 0)
+        egreso = float(movimiento.get("egreso", 0) or 0)
+        saldo_corrido += ingreso - egreso
+        movimiento["saldo"] = saldo_corrido
+
+    if movimientos:
+        resumen_total["efectivo_esperado"] = saldo_corrido
+    else:
+        resumen_total["efectivo_esperado"] = (
+            resumen_total["efectivo_inicial"]
+            + resumen_total["ingresos_efectivo"]["total"]
+            - resumen_total["egresos"]["total"]
+        )
+
+    return {
+        "resumen": resumen_total,
+        "ventas": _sort_items_by_fecha(ventas),
+        "egresos": _sort_items_by_fecha(egresos),
+        "movimientos_efectivo": {
+            "saldo_inicial": saldo_inicial,
+            "movimientos": movimientos,
+            "saldo_final": resumen_total["efectivo_esperado"],
+        },
+        "fecha_inicio": fechas[0],
+        "fecha_fin": fechas[-1],
+    }
+
+
 @router.get("/reporte-excel")
 async def descargar_reporte_excel(
     sede_id: str = Query(..., description="ID de la sede"),
-    fecha: str = Query(..., description="Fecha del cierre (YYYY-MM-DD)"),
+    fecha: Optional[str] = Query(None, description="Fecha del cierre (YYYY-MM-DD)"),
+    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
+    fecha_fin: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -533,8 +716,50 @@ async def descargar_reporte_excel(
     ✅ Archivo descargable
     """
     
-    # 1. Obtener resumen del día
-    resumen = await calcular_resumen_dia(sede_id, fecha)
+    usar_rango = bool(fecha_inicio or fecha_fin)
+
+    if usar_rango and (not fecha_inicio or not fecha_fin):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Debes enviar 'fecha_inicio' y 'fecha_fin' para descargar por período"
+        )
+
+    if not usar_rango and not fecha:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Debes enviar 'fecha' o 'fecha_inicio' y 'fecha_fin'"
+        )
+
+    if usar_rango:
+        reporte_periodo = await _build_period_report_data(sede_id, fecha_inicio, fecha_fin)
+        resumen = reporte_periodo["resumen"]
+        ventas = reporte_periodo["ventas"]
+        egresos = reporte_periodo["egresos"]
+        movimientos_efectivo = reporte_periodo["movimientos_efectivo"]
+        periodo_inicio = reporte_periodo["fecha_inicio"]
+        periodo_fin = reporte_periodo["fecha_fin"]
+        fecha_para_nombre = f"{periodo_inicio}_a_{periodo_fin}"
+    else:
+        _parse_date_yyyy_mm_dd(fecha, "fecha")
+
+        # 1. Obtener resumen del día
+        resumen = await calcular_resumen_dia(sede_id, fecha)
+        
+        # 3. Obtener todas las ventas del día (todos los métodos) desde SALES
+        ventas = await obtener_ventas_dia(sede_id, fecha)
+        
+        # 4. Obtener todos los egresos del día
+        egresos = await obtener_egresos_dia(sede_id, fecha)
+        
+        # 5. Obtener movimientos en efectivo con saldo corrido
+        movimientos_efectivo = await obtener_movimientos_efectivo_dia(sede_id, fecha)
+        fecha_para_nombre = fecha
+        periodo_inicio = fecha
+        periodo_fin = fecha
+
+    # Asegurar metadata de período para el generador (útil en rango y compatible en día)
+    resumen["fecha_inicio"] = periodo_inicio
+    resumen["fecha_fin"] = periodo_fin
     
     # 2. Obtener información completa de la sede
     sede = await locales.find_one({"sede_id": sede_id})
@@ -551,15 +776,6 @@ async def descargar_reporte_excel(
         "pais": sede.get("pais", "")
     }
     
-    # 3. Obtener todas las ventas del día (todos los métodos) desde SALES
-    ventas = await obtener_ventas_dia(sede_id, fecha)  # ← CAMBIO AQUÍ
-    
-    # 4. Obtener todos los egresos del día
-    egresos = await obtener_egresos_dia(sede_id, fecha)
-    
-    # 5. Obtener movimientos en efectivo con saldo corrido
-    movimientos_efectivo = await obtener_movimientos_efectivo_dia(sede_id, fecha)
-    
     # 6. Agregar quien genera el reporte
     resumen["generado_por"] = current_user.get("email")
     
@@ -574,7 +790,7 @@ async def descargar_reporte_excel(
     
     # 8. Nombre del archivo
     nombre_sede = sede.get("nombre", sede_id).replace(" ", "_")
-    filename = generar_nombre_archivo_excel(nombre_sede, fecha)
+    filename = generar_nombre_archivo_excel(nombre_sede, fecha_para_nombre)
     
     # 9. Retornar como descarga
     return StreamingResponse(

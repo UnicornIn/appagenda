@@ -79,7 +79,13 @@ export default function PagosPage() {
     // 🔥 NUEVO ESTADO PARA TIPO DE PROCESO
     const [selectedProcessType, setSelectedProcessType] = useState<"reserva" | "pago">("pago")
     const [selectedPaymentType, setSelectedPaymentType] = useState<"deposit" | "full">("full")
-    const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("link")
+    const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("link_pago")
+    const userCurrency = String(user?.moneda || sessionStorage.getItem("beaux-moneda") || "USD").toUpperCase()
+    const isCopCurrency = userCurrency === "COP"
+    const sanitizePaymentMethod = (method: string): string => {
+        if (!isCopCurrency && method === "addi") return "efectivo"
+        return method
+    }
     
     // 🔥 ABONO FIJO DE $50,000 COP
     const FIXED_DEPOSIT = 50000;
@@ -122,6 +128,12 @@ export default function PagosPage() {
             }
         }
     }, [location.state]);
+
+    useEffect(() => {
+        if (!isCopCurrency && selectedPaymentMethod === "addi") {
+            setSelectedPaymentMethod("efectivo")
+        }
+    }, [isCopCurrency, selectedPaymentMethod]);
 
     // 🔥 FUNCIÓN PARA CREAR CITA DIRECTA (SIN PAGO)
     const handleCreateAppointment = async () => {
@@ -219,7 +231,7 @@ export default function PagosPage() {
                 tipo_pago: tipoPago,
                 monto_abonado: montoPagado,
                 monto_total: citaData.monto_total,
-                metodo_pago: selectedPaymentMethod // 🔥 GUARDAR MÉTODO DE PAGO
+                metodo_pago: sanitizePaymentMethod(selectedPaymentMethod) // 🔥 GUARDAR MÉTODO DE PAGO
             };
 
             console.log('📤 Creando cita con pago:', citaParaCrear);
@@ -393,6 +405,7 @@ export default function PagosPage() {
                                     onMethodChange={setSelectedPaymentMethod}
                                     amount={getDisplayAmount().toString()}
                                     paymentType={getPaymentTypeText()}
+                                    currency={userCurrency}
                                 />
                             </div>
                         )}

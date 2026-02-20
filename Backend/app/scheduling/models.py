@@ -55,12 +55,21 @@ class Bloqueo(BaseModel):
 class ServicioEnCita(BaseModel):
     servicio_id: str
     precio_personalizado: Optional[float] = None  # Puede ser None, 0, o un número positivo
+    cantidad: Optional[int] = 1
     
     @validator('precio_personalizado')
     def validar_precio(cls, v):
         # Si es 0, convertir a None (significa "usar precio de BD")
         if v is not None and v == 0:
             return None
+        return v
+
+    @validator('cantidad')
+    def validar_cantidad(cls, v):
+        if v is None:
+            return 1
+        if v < 1:
+            raise ValueError("La cantidad debe ser mayor o igual a 1")
         return v
 
 # === CITA ===

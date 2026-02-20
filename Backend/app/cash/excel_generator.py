@@ -13,6 +13,12 @@ from typing import Dict, List
 # FUNCIÓN PRINCIPAL ACTUALIZADA
 # ============================================================
 
+def _obtener_periodo(resumen: Dict) -> tuple[str, str]:
+    """Resuelve el período del reporte soportando día único o rango."""
+    fecha_inicio = str(resumen.get("fecha_inicio") or resumen.get("fecha") or "")
+    fecha_fin = str(resumen.get("fecha_fin") or resumen.get("fecha") or fecha_inicio)
+    return fecha_inicio, fecha_fin
+
 def generar_reporte_excel_caja_completo(
     resumen: Dict,
     sede_info: Dict,
@@ -29,6 +35,7 @@ def generar_reporte_excel_caja_completo(
     """
     
     wb = Workbook()
+    fecha_inicio, fecha_fin = _obtener_periodo(resumen)
     
     # Hoja 1: Resumen de Caja (la que ya teníamos)
     ws_resumen = wb.active
@@ -37,15 +44,15 @@ def generar_reporte_excel_caja_completo(
     
     # Hoja 2: Flujo de Ingresos
     ws_ingresos = wb.create_sheet("Flujo de Ingresos")
-    _crear_hoja_flujo_ingresos(ws_ingresos, sede_info, resumen["fecha"], facturas)
+    _crear_hoja_flujo_ingresos(ws_ingresos, sede_info, fecha_inicio, fecha_fin, facturas)
     
     # Hoja 3: Flujo de Egresos
     ws_egresos = wb.create_sheet("Flujo de Egresos")
-    _crear_hoja_flujo_egresos(ws_egresos, sede_info, resumen["fecha"], egresos)
+    _crear_hoja_flujo_egresos(ws_egresos, sede_info, fecha_inicio, fecha_fin, egresos)
     
     # Hoja 4: Movimientos Efectivo
     ws_movimientos = wb.create_sheet("Movimientos Efectivo")
-    _crear_hoja_movimientos_efectivo(ws_movimientos, sede_info, resumen["fecha"], movimientos_efectivo)
+    _crear_hoja_movimientos_efectivo(ws_movimientos, sede_info, fecha_inicio, fecha_fin, movimientos_efectivo)
     
     # Guardar en memoria
     excel_file = BytesIO()
@@ -102,14 +109,14 @@ def _crear_hoja_resumen_caja(ws, resumen: Dict, sede_info: Dict):
     fila += 2
     
     # Periodo
-    fecha = resumen["fecha"]
+    fecha_inicio, fecha_fin = _obtener_periodo(resumen)
     ws[f'A{fila}'] = "Inicio:"
-    ws[f'B{fila}'] = f"{fecha} 00:00"
+    ws[f'B{fila}'] = f"{fecha_inicio} 00:00"
     ws[f'A{fila}'].font = header_font
     fila += 1
     
     ws[f'A{fila}'] = "Fin:"
-    ws[f'B{fila}'] = f"{fecha} 23:59"
+    ws[f'B{fila}'] = f"{fecha_fin} 23:59"
     ws[f'A{fila}'].font = header_font
     fila += 2
     
@@ -274,7 +281,13 @@ def _crear_hoja_resumen_caja(ws, resumen: Dict, sede_info: Dict):
 # HOJA 2: FLUJO DE INGRESOS
 # ============================================================
 
-def _crear_hoja_flujo_ingresos(ws, sede_info: Dict, fecha: str, facturas: List[Dict]):
+def _crear_hoja_flujo_ingresos(
+    ws,
+    sede_info: Dict,
+    fecha_inicio: str,
+    fecha_fin: str,
+    facturas: List[Dict]
+):
     """Crea la hoja de flujo de ingresos"""
     
     # Estilos
@@ -308,10 +321,10 @@ def _crear_hoja_flujo_ingresos(ws, sede_info: Dict, fecha: str, facturas: List[D
     
     # Periodo
     ws[f'A{fila}'] = "Inicio"
-    ws[f'B{fila}'] = f"{fecha} 00:00"
+    ws[f'B{fila}'] = f"{fecha_inicio} 00:00"
     fila += 1
     ws[f'A{fila}'] = "Fin"
-    ws[f'B{fila}'] = f"{fecha} 23:59"
+    ws[f'B{fila}'] = f"{fecha_fin} 23:59"
     fila += 2
     
     # Headers
@@ -358,7 +371,13 @@ def _crear_hoja_flujo_ingresos(ws, sede_info: Dict, fecha: str, facturas: List[D
 # HOJA 3: FLUJO DE EGRESOS
 # ============================================================
 
-def _crear_hoja_flujo_egresos(ws, sede_info: Dict, fecha: str, egresos: List[Dict]):
+def _crear_hoja_flujo_egresos(
+    ws,
+    sede_info: Dict,
+    fecha_inicio: str,
+    fecha_fin: str,
+    egresos: List[Dict]
+):
     """Crea la hoja de flujo de egresos"""
     
     titulo_font = Font(name='Arial', size=14, bold=True)
@@ -390,10 +409,10 @@ def _crear_hoja_flujo_egresos(ws, sede_info: Dict, fecha: str, egresos: List[Dic
     
     # Periodo
     ws[f'A{fila}'] = "Inicio"
-    ws[f'B{fila}'] = f"{fecha} 00:00"
+    ws[f'B{fila}'] = f"{fecha_inicio} 00:00"
     fila += 1
     ws[f'A{fila}'] = "Fin"
-    ws[f'B{fila}'] = f"{fecha} 23:59"
+    ws[f'B{fila}'] = f"{fecha_fin} 23:59"
     fila += 2
     
     # Headers
@@ -435,7 +454,13 @@ def _crear_hoja_flujo_egresos(ws, sede_info: Dict, fecha: str, egresos: List[Dic
 # HOJA 4: MOVIMIENTOS EFECTIVO
 # ============================================================
 
-def _crear_hoja_movimientos_efectivo(ws, sede_info: Dict, fecha: str, movimientos: Dict):
+def _crear_hoja_movimientos_efectivo(
+    ws,
+    sede_info: Dict,
+    fecha_inicio: str,
+    fecha_fin: str,
+    movimientos: Dict
+):
     """Crea la hoja de movimientos en efectivo con saldo corrido"""
     
     titulo_font = Font(name='Arial', size=14, bold=True)
@@ -471,10 +496,10 @@ def _crear_hoja_movimientos_efectivo(ws, sede_info: Dict, fecha: str, movimiento
     
     # Periodo
     ws[f'A{fila}'] = "Inicio"
-    ws[f'B{fila}'] = f"{fecha} 00:00"
+    ws[f'B{fila}'] = f"{fecha_inicio} 00:00"
     fila += 1
     ws[f'A{fila}'] = "Fin"
-    ws[f'B{fila}'] = f"{fecha} 23:59"
+    ws[f'B{fila}'] = f"{fecha_fin} 23:59"
     fila += 2
     
     # Saldo inicial

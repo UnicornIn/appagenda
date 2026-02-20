@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Sidebar } from "../../../components/Layout/Sidebar";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
-import { Textarea } from "../../../components/ui/textarea";
+// import { Textarea } from "../../../components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import {
   Dialog,
@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../../components/ui/dialog";
-import { Calendar, Plus, Trash2, Wallet } from "lucide-react";
+import { Calendar, Download, Loader2, Plus, Trash2 } from "lucide-react"; //Wallet +
 import { cashService } from "./api/cashService";
 import type { CashCierre, CashEgreso, CashResumen, CashReporteRaw } from "./types";
 import { formatDateDMY } from "../../../lib/dateFormat";
@@ -40,6 +40,11 @@ const normalizeDateRange = (start?: string, end?: string) => {
     return { start: end, end: start };
   }
   return { start, end };
+};
+
+const isISODate = (value?: string) => {
+  if (!value) return false;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 };
 
 const toNumber = (value: any): number => {
@@ -70,6 +75,7 @@ export default function CierreCajaPage() {
   const [moneda, setMoneda] = useState("COP");
   const [sedeId, setSedeId] = useState<string | null>(null);
   const [sedeNombre, setSedeNombre] = useState<string | null>(null);
+  const monedaSede = String(moneda || "COP").toUpperCase();
 
   const [fechaDesde, setFechaDesde] = useState(getDateNDaysAgo(7));
   const [fechaHasta, setFechaHasta] = useState(getToday());
@@ -86,6 +92,7 @@ export default function CierreCajaPage() {
   const [loadingResumen, setLoadingResumen] = useState(false);
   const [loadingEgresos, setLoadingEgresos] = useState(false);
   const [loadingCierres, setLoadingCierres] = useState(false);
+  const [loadingReporte, setLoadingReporte] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
@@ -98,23 +105,26 @@ export default function CierreCajaPage() {
   const [egresoTipo, setEgresoTipo] = useState("gasto_operativo");
   const [egresoModalOpen, setEgresoModalOpen] = useState(false);
 
-  const [aperturaMonto, setAperturaMonto] = useState("");
-  const [aperturaNota, setAperturaNota] = useState("");
-  const [aperturaFecha, setAperturaFecha] = useState(getToday());
+  // const [aperturaMonto, setAperturaMonto] = useState("");
+  // const [aperturaNota, setAperturaNota] = useState("");
+  // // const [aperturaFecha, setAperturaFecha] = useState(getToday());
 
-  const [cierreNota, setCierreNota] = useState("");
-  const [cierreFecha, setCierreFecha] = useState(getToday());
-  const [cierreEfectivoContado, setCierreEfectivoContado] = useState("0");
+  // const [cierreNota, setCierreNota] = useState("");
+  // const [cierreFecha, setCierreFecha] = useState(getToday());
+  // const [cierreEfectivoContado, setCierreEfectivoContado] = useState("0");
 
   useEffect(() => {
-    const sedeStorage = sessionStorage.getItem("beaux-sede_id");
-    const sedeNombreStorage = sessionStorage.getItem("beaux-nombre_local");
-    const monedaStorage = sessionStorage.getItem("beaux-moneda");
+    const sedeStorage =
+      sessionStorage.getItem("beaux-sede_id") || localStorage.getItem("beaux-sede_id");
+    const sedeNombreStorage =
+      sessionStorage.getItem("beaux-nombre_local") || localStorage.getItem("beaux-nombre_local");
+    const monedaStorage =
+      sessionStorage.getItem("beaux-moneda") || localStorage.getItem("beaux-moneda");
 
     setSedeId(sedeStorage);
     setSedeNombre(sedeNombreStorage);
     if (monedaStorage) {
-      setMoneda(monedaStorage);
+      setMoneda(monedaStorage.toUpperCase());
     }
   }, []);
 
@@ -131,19 +141,22 @@ export default function CierreCajaPage() {
     try {
       return new Intl.NumberFormat("es-CO", {
         style: "currency",
-        currency: moneda,
+        currency: monedaSede,
         minimumFractionDigits: 0,
       }).format(value);
     } catch (error) {
-      return `${moneda} ${value.toFixed(0)}`;
+      return `${monedaSede} ${value.toFixed(0)}`;
     }
   };
 
   const normalizeResumen = (data: CashReporteRaw): CashResumen => {
-    const root = unwrapData(data);
+    const root = unwrapData(data) || {};
     const summary = root?.resumen ?? root?.summary ?? root;
+    const periodTotals = root?.totales;
 
     const ingresos =
+      pickNumber(periodTotals, ["ingresos", "total_ingresos", "ventas", "total_ventas"]) ??
+      pickNumber(root?.ingresos_efectivo, ["total"]) ??
       pickNumber(summary, [
         "ingresos_total",
         "total_ingresos",
@@ -156,6 +169,8 @@ export default function CierreCajaPage() {
       ]) ?? 0;
 
     const egresos =
+      pickNumber(periodTotals, ["egresos", "total_egresos"]) ??
+      pickNumber(root?.egresos, ["total"]) ??
       pickNumber(summary, [
         "egresos_total",
         "total_egresos",
@@ -164,6 +179,8 @@ export default function CierreCajaPage() {
       ]) ?? 0;
 
     const balance =
+      pickNumber(periodTotals, ["neto", "balance", "saldo"]) ??
+      pickNumber(root, ["efectivo_esperado"]) ??
       pickNumber(summary, ["balance", "saldo", "neto", "total_balance"]) ??
       ingresos - egresos;
 
@@ -171,7 +188,7 @@ export default function CierreCajaPage() {
       ingresos,
       egresos,
       balance,
-      moneda: summary?.moneda ?? root?.moneda ?? moneda,
+      moneda: summary?.moneda ?? root?.moneda ?? monedaSede,
     };
   };
 
@@ -246,11 +263,11 @@ export default function CierreCajaPage() {
           });
           setResumen(normalizeResumen(efectivo));
         } catch (innerErr) {
-          setResumen({ ingresos: 0, egresos: 0, balance: 0, moneda });
+          setResumen({ ingresos: 0, egresos: 0, balance: 0, moneda: monedaSede });
           setError("No se pudieron cargar los ingresos del período");
         }
       } else {
-        setResumen({ ingresos: 0, egresos: 0, balance: 0, moneda });
+        setResumen({ ingresos: 0, egresos: 0, balance: 0, moneda: monedaSede });
         setError("No se pudieron cargar los ingresos del período");
       }
     } finally {
@@ -301,10 +318,10 @@ export default function CierreCajaPage() {
   };
 
   useEffect(() => {
-    if (sedeId) {
+    if (sedeId && monedaSede === "COP") {
       loadAll();
     }
-  }, [sedeId, fechaDesde, fechaHasta]);
+  }, [sedeId, fechaDesde, fechaHasta, monedaSede]);
 
   const handleCreateEgreso = async () => {
     if (!sedeId) return;
@@ -336,6 +353,7 @@ export default function CierreCajaPage() {
         tipo: egresoTipo,
         concepto: egresoMotivo.trim(),
         fecha: egresoFecha,
+        moneda: monedaSede,
       });
 
       setEgresoMonto("");
@@ -368,86 +386,152 @@ export default function CierreCajaPage() {
     }
   };
 
-  const handleApertura = async () => {
-    if (!sedeId) return;
+  // const handleApertura = async () => {
+  //   if (!sedeId) return;
 
-    const montoValue = toNumber(aperturaMonto);
-    if (!montoValue || montoValue <= 0) {
-      setError("El monto inicial debe ser mayor a 0");
-      return;
-    }
+  //   const montoValue = toNumber(aperturaMonto);
+  //   if (!montoValue || montoValue <= 0) {
+  //     setError("El monto inicial debe ser mayor a 0");
+  //     return;
+  //   }
 
-    setLoadingAction(true);
-    setError(null);
-    setSuccess(null);
+  //   setLoadingAction(true);
+  //   setError(null);
+  //   setSuccess(null);
 
-    try {
-      await cashService.aperturaCaja({
-        sede_id: sedeId,
-        fecha: aperturaFecha,
-        monto_inicial: montoValue,
-        efectivo_inicial: montoValue,
-        efectivo: montoValue,
-        notas: aperturaNota.trim() || undefined,
-        observaciones: aperturaNota.trim() || undefined,
-      });
+  //   try {
+  //     await cashService.aperturaCaja({
+  //       sede_id: sedeId,
+  //       // fecha: aperturaFecha,
+  //       monto_inicial: montoValue,
+  //       efectivo_inicial: montoValue,
+  //       efectivo: montoValue,
+  //       notas: aperturaNota.trim() || undefined,
+  //       observaciones: aperturaNota.trim() || undefined,
+  //       moneda: monedaSede,
+  //     });
 
-      setAperturaMonto("");
-      setAperturaNota("");
-      setSuccess("Caja abierta correctamente");
-      await loadCierres();
-    } catch (err: any) {
-      setError(err?.message || "No se pudo abrir la caja");
-    } finally {
-      setLoadingAction(false);
-    }
-  };
+  //     setAperturaMonto("");
+  //     setAperturaNota("");
+  //     setSuccess("Caja abierta correctamente");
+  //     await loadCierres();
+  //   } catch (err: any) {
+  //     setError(err?.message || "No se pudo abrir la caja");
+  //   } finally {
+  //     setLoadingAction(false);
+  //   }
+  // };
 
-  const handleCierre = async () => {
-    if (!sedeId) return;
+  // const handleCierre = async () => {
+  //   if (!sedeId) return;
 
-    const efectivoContadoValue = toNumber(cierreEfectivoContado);
-    if (Number.isNaN(efectivoContadoValue) || efectivoContadoValue < 0) {
-      setError("El efectivo contado debe ser mayor o igual a 0");
-      return;
-    }
+  //   const efectivoContadoValue = toNumber(cierreEfectivoContado);
+  //   if (Number.isNaN(efectivoContadoValue) || efectivoContadoValue < 0) {
+  //     setError("El efectivo contado debe ser mayor o igual a 0");
+  //     return;
+  //   }
 
-    setLoadingAction(true);
-    setError(null);
-    setSuccess(null);
+  //   setLoadingAction(true);
+  //   setError(null);
+  //   setSuccess(null);
 
-    try {
-      await cashService.cierreCaja({
-        sede_id: sedeId,
-        fecha: cierreFecha,
-        notas: cierreNota.trim() || undefined,
-        observaciones: cierreNota.trim() || undefined,
-        ingresos_total: resumen.ingresos,
-        total_ingresos: resumen.ingresos,
-        efectivo_total: resumen.ingresos,
-        egresos_total: resumen.egresos || egresosTotal,
-        total_egresos: resumen.egresos || egresosTotal,
-        balance: balanceCalculado,
-        saldo: balanceCalculado,
-        efectivo_cierre: balanceCalculado,
-        efectivo_final: balanceCalculado,
-        efectivo_contado: efectivoContadoValue,
-      });
+  //   try {
+  //     const totalIngresos = resumen.ingresos || 0;
+  //     const totalEgresos = resumen.egresos || egresosTotal;
+  //     const efectivoEsperado = resumen.balance || balanceCalculado;
 
-      setCierreNota("");
-      setSuccess("Caja cerrada correctamente");
-      await loadAll();
-    } catch (err: any) {
-      setError(err?.message || "No se pudo cerrar la caja");
-    } finally {
-      setLoadingAction(false);
-    }
-  };
+  //     await cashService.cierreCaja({
+  //       sede_id: sedeId,
+  //       fecha: cierreFecha,
+  //       notas: cierreNota.trim() || undefined,
+  //       observaciones: cierreNota.trim() || undefined,
+  //       moneda: monedaSede,
+  //       ingresos_total: totalIngresos,
+  //       total_ingresos: totalIngresos,
+  //       total_ventas: totalIngresos,
+  //       efectivo_total: totalIngresos,
+  //       efectivo_recibido: totalIngresos,
+  //       egresos_total: totalEgresos,
+  //       total_egresos: totalEgresos,
+  //       balance: efectivoEsperado,
+  //       saldo: efectivoEsperado,
+  //       efectivo_esperado: efectivoEsperado,
+  //       efectivo_cierre: efectivoEsperado,
+  //       efectivo_final: efectivoEsperado,
+  //       efectivo_contado: efectivoContadoValue,
+  //     });
+
+  //     setCierreNota("");
+  //     setSuccess("Caja cerrada correctamente");
+  //     await loadAll();
+  //   } catch (err: any) {
+  //     setError(err?.message || "No se pudo cerrar la caja");
+  //   } finally {
+  //     setLoadingAction(false);
+  //   }
+  // };
 
   const applyQuickRange = (days: number) => {
     setFechaDesde(getDateNDaysAgo(days));
     setFechaHasta(getToday());
   };
+
+  const handleDownloadReporte = async () => {
+    if (!sedeId) {
+      setError("No se encontró la sede actual para descargar el reporte");
+      return;
+    }
+
+    if (!fechaDesde || !fechaHasta) {
+      setError("Selecciona fecha desde y fecha hasta para descargar el reporte");
+      return;
+    }
+
+    const { start, end } = normalizeDateRange(fechaDesde, fechaHasta);
+    if (!isISODate(start) || !isISODate(end)) {
+      setError("Formato de fecha inválido. Usa YYYY-MM-DD");
+      return;
+    }
+
+    setLoadingReporte(true);
+    setError(null);
+    setSuccess(null);
+
+    let objectUrl: string | null = null;
+    try {
+      const { blob, filename } = await cashService.getReporteExcel({
+        sede_id: sedeId,
+        // Compatibilidad con backend actual (requiere 'fecha')
+        fecha: end,
+        fecha_inicio: start,
+        fecha_fin: end,
+      });
+
+      if (!blob || blob.size === 0) {
+        throw new Error("El reporte no contiene datos para el período seleccionado");
+      }
+
+      objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename?.trim() || `reporte_cierre_${start}_${end}.xlsx`;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      setSuccess("Reporte descargado correctamente");
+    } catch (err: any) {
+      setError(err?.message || "No se pudo descargar el reporte");
+    } finally {
+      if (objectUrl) {
+        window.URL.revokeObjectURL(objectUrl);
+      }
+      setLoadingReporte(false);
+    }
+  };
+
+  if (monedaSede !== "COP") return null;
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -502,13 +586,36 @@ export default function CierreCajaPage() {
                   </Button>
                 </div>
               </div>
-              <Button
-                onClick={loadAll}
-                disabled={loadingResumen || loadingEgresos || loadingCierres}
-                className="bg-gray-900 hover:bg-gray-800 text-white"
-              >
-                Actualizar
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={loadAll}
+                  disabled={loadingResumen || loadingEgresos || loadingCierres || loadingReporte}
+                  className="bg-gray-900 hover:bg-gray-800 text-white"
+                >
+                  Actualizar
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleDownloadReporte}
+                  disabled={
+                    !sedeId ||
+                    !fechaDesde ||
+                    !fechaHasta ||
+                    loadingReporte ||
+                    loadingResumen ||
+                    loadingEgresos ||
+                    loadingCierres
+                  }
+                  className="border-gray-300 text-gray-900 hover:bg-gray-100"
+                >
+                  {loadingReporte ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  {loadingReporte ? "Descargando..." : "Descargar reporte"}
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
@@ -549,7 +656,7 @@ export default function CierreCajaPage() {
             </Card>
           </div>
 
-          {/* Apertura y Cierre */}
+          {/* Apertura y Cierre
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Card className="border-gray-200">
               <CardHeader className="pb-2">
@@ -636,7 +743,7 @@ export default function CierreCajaPage() {
                 </Button>
               </CardContent>
             </Card>
-          </div>
+          </div> */}
 
           {/* Egresos y cierres */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

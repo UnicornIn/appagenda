@@ -43,6 +43,33 @@ interface CartItem {
 }
 
 const DEFAULT_PAYMENT_METHOD: PaymentMethod = "efectivo";
+const ALL_PAYMENT_BREAKDOWN_METHODS = [
+  "efectivo",
+  "transferencia",
+  "tarjeta_credito",
+  "tarjeta_debito",
+  "addi",
+] as const;
+type PaymentBreakdownMethod = (typeof ALL_PAYMENT_BREAKDOWN_METHODS)[number];
+
+const ALL_PAYMENT_METHOD_OPTIONS: Array<{ value: PaymentMethod; label: string }> = [
+  { value: "efectivo", label: "Efectivo" },
+  { value: "transferencia", label: "Transferencia" },
+  { value: "tarjeta_credito", label: "Tarjeta de Crédito" },
+  { value: "tarjeta_debito", label: "Tarjeta de Débito" },
+  { value: "addi", label: "Addi" },
+  { value: "tarjeta", label: "Tarjeta (legacy)" },
+];
+
+const buildEmptyPaymentBreakdown = (): Record<PaymentBreakdownMethod, number> => ({
+  efectivo: 0,
+  transferencia: 0,
+  tarjeta_credito: 0,
+  tarjeta_debito: 0,
+  addi: 0,
+});
+
+const roundMoney = (value: number): number => Math.round(value * 100) / 100;
 
 export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSaleModalProps) {
   const { user } = useAuth();
@@ -53,6 +80,9 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   const [searchTerm, setSearchTerm] = useState("");
   const [clienteId, setClienteId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(DEFAULT_PAYMENT_METHOD);
+  const [paymentBreakdown, setPaymentBreakdown] = useState<Record<PaymentBreakdownMethod, number>>(
+    buildEmptyPaymentBreakdown()
+  );
   const [saleId, setSaleId] = useState<string | null>(null);
 
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
@@ -75,12 +105,35 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
 
   const sedeId = user?.sede_id || sessionStorage.getItem("beaux-sede_id") || "";
   const currency = String(user?.moneda || sessionStorage.getItem("beaux-moneda") || "USD").toUpperCase();
+  const isCopCurrency = currency === "COP";
 
   const cartItems = useMemo(() => Object.values(cartByProductId), [cartByProductId]);
   const cartTotal = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [cartItems]
   );
+  const availablePaymentMethodOptions = useMemo(
+    () => ALL_PAYMENT_METHOD_OPTIONS.filter((option) => isCopCurrency || option.value !== "addi"),
+    [isCopCurrency]
+  );
+  const availablePaymentBreakdownMethods = useMemo(
+    () => ALL_PAYMENT_BREAKDOWN_METHODS.filter((method) => isCopCurrency || method !== "addi"),
+    [isCopCurrency]
+  );
+  const paymentBreakdownTotal = useMemo(
+    () =>
+      roundMoney(
+        availablePaymentBreakdownMethods.reduce(
+          (sum, method) => sum + (Number.isFinite(paymentBreakdown[method]) ? paymentBreakdown[method] : 0),
+          0
+        )
+      ),
+    [availablePaymentBreakdownMethods, paymentBreakdown]
+  );
+  const hasCustomPaymentBreakdown = paymentBreakdownTotal > 0;
+  const paymentBreakdownDelta = roundMoney(cartTotal - paymentBreakdownTotal);
+  const paymentBreakdownOverpaid = hasCustomPaymentBreakdown && paymentBreakdownDelta < -0.009;
+  const paymentBreakdownIncomplete = hasCustomPaymentBreakdown && paymentBreakdownDelta > 0.009;
 
   const filteredProducts = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -103,6 +156,13 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     isClearingSale ||
     isVerifyingReport;
 
+  const sanitizePaymentMethodForCurrency = (method: PaymentMethod): PaymentMethod => {
+    if (!isCopCurrency && method === "addi") {
+      return DEFAULT_PAYMENT_METHOD;
+    }
+    return method;
+  };
+
   const resetModalState = () => {
     setProducts([]);
     setCartByProductId({});
@@ -110,6 +170,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     setSearchTerm("");
     setClienteId("");
     setPaymentMethod(DEFAULT_PAYMENT_METHOD);
+    setPaymentBreakdown(buildEmptyPaymentBreakdown());
     setSaleId(null);
     setProductsError(null);
     setActionError(null);
@@ -154,6 +215,21 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     void loadProducts();
   }, [isOpen, currency]);
 
+  useEffect(() => {
+    if (!isCopCurrency && paymentMethod === "addi") {
+      setPaymentMethod(DEFAULT_PAYMENT_METHOD);
+    }
+  }, [isCopCurrency, paymentMethod]);
+
+  useEffect(() => {
+    if (!isCopCurrency && paymentBreakdown.addi > 0) {
+      setPaymentBreakdown((prev) => ({
+        ...prev,
+        addi: 0,
+      }));
+    }
+  }, [isCopCurrency, paymentBreakdown.addi]);
+
   const formatCurrency = (value: number): string => {
     try {
       return new Intl.NumberFormat("es-CO", {
@@ -190,6 +266,19 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   const setSuccess = (message: string) => {
     setSuccessMessage(message);
     setActionError(null);
+  };
+
+  const updatePaymentBreakdown = (method: PaymentBreakdownMethod, rawValue: string) => {
+    const parsed = Number.parseFloat(rawValue);
+    const nextValue = Number.isFinite(parsed) ? Math.max(0, roundMoney(parsed)) : 0;
+    setPaymentBreakdown((prev) => ({
+      ...prev,
+      [method]: nextValue,
+    }));
+  };
+
+  const clearPaymentBreakdown = () => {
+    setPaymentBreakdown(buildEmptyPaymentBreakdown());
   };
 
   const toSaleLineItems = (): DirectSaleLineItem[] =>
@@ -344,7 +433,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     }
   };
 
-  const createSale = async (): Promise<string> => {
+  const createSale = async (initialPaymentMethod: PaymentMethod = paymentMethod): Promise<string> => {
     if (saleId) {
       return saleId;
     }
@@ -360,12 +449,13 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     }
 
     setIsCreatingSale(true);
+    const safeInitialPaymentMethod = sanitizePaymentMethodForCurrency(initialPaymentMethod);
     const created = await createDirectSale({
       token,
       sedeId,
       clienteId: clienteId.trim() || undefined,
       total: cartTotal,
-      paymentMethod,
+      paymentMethod: safeInitialPaymentMethod,
       items: toSaleLineItems(),
     });
     setSaleId(created.saleId);
@@ -398,18 +488,45 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     }
 
     try {
+      const safeMainMethod = sanitizePaymentMethodForCurrency(paymentMethod);
+      const plannedPayments = hasCustomPaymentBreakdown
+        ? availablePaymentBreakdownMethods
+            .map((method) => ({
+              method: method as PaymentMethod,
+              amount: roundMoney(paymentBreakdown[method] || 0),
+            }))
+            .filter((payment) => payment.amount > 0)
+        : [{ method: safeMainMethod, amount: roundMoney(cartTotal) }];
+
+      if (plannedPayments.length === 0) {
+        setError("Define al menos un pago para continuar.");
+        return;
+      }
+
+      const plannedTotal = roundMoney(plannedPayments.reduce((sum, payment) => sum + payment.amount, 0));
+      if (plannedTotal > roundMoney(cartTotal) + 0.009) {
+        setError(`El total de pagos (${formatCurrency(plannedTotal)}) no puede superar la venta (${formatCurrency(cartTotal)}).`);
+        return;
+      }
+      if (plannedTotal < roundMoney(cartTotal) - 0.009) {
+        setError(`Falta asignar ${formatCurrency(roundMoney(cartTotal - plannedTotal))} para completar la venta.`);
+        return;
+      }
+
       setIsProcessingPayment(true);
       setActionError(null);
       setSuccessMessage(null);
 
-      const targetSaleId = await createSale();
+      const targetSaleId = await createSale(plannedPayments[0].method);
 
-      await registerDirectSalePayment({
-        token,
-        saleId: targetSaleId,
-        amount: cartTotal,
-        paymentMethod,
-      });
+      for (const payment of plannedPayments) {
+        await registerDirectSalePayment({
+          token,
+          saleId: targetSaleId,
+          amount: payment.amount,
+          paymentMethod: payment.method,
+        });
+      }
 
       if (sedeId) {
         setIsVerifyingReport(true);
@@ -475,7 +592,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
 
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600">
-              Método de pago
+              Método principal
             </label>
             <select
               className="h-9 w-full rounded-md border border-gray-300 px-3 text-sm"
@@ -483,9 +600,11 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
               onChange={(event) => setPaymentMethod(event.target.value)}
               disabled={isBusy}
             >
-              <option value="efectivo">Efectivo</option>
-              <option value="tarjeta">Tarjeta</option>
-              <option value="transferencia">Transferencia</option>
+              {availablePaymentMethodOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -695,6 +814,72 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                 <p className="text-2xl font-bold text-gray-900">{formatCurrency(cartTotal)}</p>
               </div>
 
+              <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-700">Desglose de pagos</p>
+                  <Button
+                    variant="ghost"
+                    className="h-7 px-2 text-xs text-gray-600 hover:bg-gray-100"
+                    onClick={clearPaymentBreakdown}
+                    disabled={isBusy}
+                  >
+                    Limpiar
+                  </Button>
+                </div>
+                <p className="mb-3 text-xs text-gray-600">
+                  Opcional. Si no defines montos, se cobra todo por el método principal.
+                </p>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                  {availablePaymentBreakdownMethods.map((method) => (
+                    <div key={method} className="rounded-md border border-gray-200 bg-white p-2">
+                      <label className="mb-1 block text-[11px] font-medium text-gray-700">
+                        {
+                          method === "tarjeta_credito"
+                            ? "Tarjeta de Crédito"
+                            : method === "tarjeta_debito"
+                            ? "Tarjeta de Débito"
+                            : method === "transferencia"
+                            ? "Transferencia"
+                            : method === "addi"
+                            ? "Addi"
+                            : "Efectivo"
+                        }
+                      </label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={paymentBreakdown[method] || ""}
+                        onChange={(event) => updatePaymentBreakdown(method, event.target.value)}
+                        disabled={isBusy}
+                        placeholder="0"
+                        className="h-8"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 rounded-md border border-gray-200 bg-white p-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Total asignado:</span>
+                    <span className="font-semibold text-gray-900">{formatCurrency(paymentBreakdownTotal)}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <span className="text-gray-600">Diferencia:</span>
+                    <span
+                      className={`font-semibold ${
+                        paymentBreakdownOverpaid
+                          ? "text-red-700"
+                          : paymentBreakdownIncomplete
+                          ? "text-amber-700"
+                          : "text-emerald-700"
+                      }`}
+                    >
+                      {paymentBreakdownDelta >= 0 ? formatCurrency(paymentBreakdownDelta) : `-${formatCurrency(Math.abs(paymentBreakdownDelta))}`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 {!saleId ? (
                   <>
@@ -703,7 +888,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                       onClick={() => {
                         void handlePaySale();
                       }}
-                      disabled={isBusy || cartItems.length === 0}
+                      disabled={isBusy || cartItems.length === 0 || paymentBreakdownOverpaid || paymentBreakdownIncomplete}
                     >
                       {isProcessingPayment ? (
                         <>
@@ -740,7 +925,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                       onClick={() => {
                         void handlePaySale();
                       }}
-                      disabled={isBusy || cartItems.length === 0}
+                      disabled={isBusy || cartItems.length === 0 || paymentBreakdownOverpaid || paymentBreakdownIncomplete}
                     >
                       {isProcessingPayment ? (
                         <>

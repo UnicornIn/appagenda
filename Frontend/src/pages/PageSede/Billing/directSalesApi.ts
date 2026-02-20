@@ -1,6 +1,13 @@
 import { API_BASE_URL } from "../../../types/config";
 
-export type PaymentMethod = "efectivo" | "tarjeta" | "transferencia" | string;
+export type PaymentMethod =
+  | "efectivo"
+  | "transferencia"
+  | "tarjeta"
+  | "tarjeta_credito"
+  | "tarjeta_debito"
+  | "addi"
+  | string;
 
 interface ApiErrorBody {
   detail?: string | Array<{ msg?: string }>;

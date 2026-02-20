@@ -476,6 +476,9 @@ export default function DashboardPage() {
           efectivo: 0,
           transferencia: 0,
           tarjeta: 0,
+          tarjeta_credito: 0,
+          tarjeta_debito: 0,
+          addi: 0,
           sin_pago: 0
         },
         moneda: monedaUsuario,
@@ -522,6 +525,9 @@ export default function DashboardPage() {
           efectivo: 0,
           transferencia: 0,
           tarjeta: 0,
+          tarjeta_credito: 0,
+          tarjeta_debito: 0,
+          addi: 0,
           sin_pago: 0
         },
         moneda: monedaUsuario,
@@ -601,15 +607,28 @@ export default function DashboardPage() {
     const metricas = getMetricasVentas();
 
     // Si no hay datos reales, usar datos de ejemplo
+    const metodosPago = metricas.metodos_pago || {};
+    const totalTarjetas =
+      (metodosPago.tarjeta || 0) +
+      (metodosPago.tarjeta_credito || 0) +
+      (metodosPago.tarjeta_debito || 0);
+    const totalAddi = metodosPago.addi || 0;
+    const totalSinPago = metodosPago.sin_pago || 0;
+    const totalEfectivo = metodosPago.efectivo || 0;
+    const totalTransferencia = metodosPago.transferencia || 0;
+
     if (!metricas.tieneDatos || (
-      metricas.metodos_pago.efectivo === 0 &&
-      metricas.metodos_pago.transferencia === 0 &&
-      metricas.metodos_pago.tarjeta === 0 &&
-      metricas.metodos_pago.sin_pago === 0
+      totalEfectivo === 0 &&
+      totalTransferencia === 0 &&
+      totalTarjetas === 0 &&
+      totalAddi === 0 &&
+      totalSinPago === 0
     )) {
       return [
         { name: 'Efectivo', value: 500000, color: '#888' },
-        { name: 'Tarjeta', value: 300000, color: '#666' },
+        { name: 'Tarjeta de Crédito', value: 200000, color: '#666' },
+        { name: 'Tarjeta de Débito', value: 100000, color: '#555' },
+        { name: 'Addi', value: 100000, color: '#4d4d4d' },
         { name: 'Transferencia', value: 200000, color: '#444' },
       ];
     }
@@ -617,22 +636,37 @@ export default function DashboardPage() {
     const paymentMethods = [
       {
         name: 'Efectivo',
-        value: metricas.metodos_pago?.efectivo || 0,
+        value: totalEfectivo,
         color: '#888'
       },
       {
         name: 'Transferencia',
-        value: metricas.metodos_pago?.transferencia || 0,
+        value: totalTransferencia,
         color: '#666'
       },
       {
-        name: 'Tarjeta',
-        value: metricas.metodos_pago?.tarjeta || 0,
+        name: 'Tarjeta de Crédito',
+        value: metodosPago.tarjeta_credito || 0,
         color: '#444'
       },
       {
+        name: 'Tarjeta de Débito',
+        value: metodosPago.tarjeta_debito || 0,
+        color: '#555'
+      },
+      {
+        name: 'Addi',
+        value: totalAddi,
+        color: '#4d4d4d'
+      },
+      {
+        name: 'Tarjeta',
+        value: metodosPago.tarjeta || 0,
+        color: '#3d3d3d'
+      },
+      {
         name: 'Sin Pago',
-        value: metricas.metodos_pago?.sin_pago || 0,
+        value: totalSinPago,
         color: '#222'
       }
     ].filter(item => item.value > 0);

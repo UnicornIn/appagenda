@@ -1,6 +1,39 @@
 // components/Quotes/citasApi.ts - Agrega esta función
 import { API_BASE_URL } from '../../../types/config'; // Ajusta la ruta según tu estructura
 
+const parseApiDetail = (detail: unknown, fallback: string): string => {
+  if (!detail) return fallback;
+  if (typeof detail === 'string') return detail;
+
+  if (Array.isArray(detail)) {
+    const parsed = detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && 'msg' in item) {
+          return String((item as { msg?: string }).msg || JSON.stringify(item));
+        }
+        return JSON.stringify(item);
+      })
+      .join(' | ');
+    return parsed || fallback;
+  }
+
+  if (typeof detail === 'object') {
+    const detailObj = detail as Record<string, unknown>;
+
+    if (typeof detailObj.message === 'string') return detailObj.message;
+    if (typeof detailObj.mensaje === 'string') return detailObj.mensaje;
+    if (typeof detailObj.error === 'string') return detailObj.error;
+
+    const parsed = Object.entries(detailObj)
+      .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+      .join(' | ');
+    return parsed || fallback;
+  }
+
+  return fallback;
+};
+
 export const updateCita = async (citaId: string, cambios: any, token: string) => {
   try {
     const response = await fetch(`${API_BASE_URL}scheduling/quotes/${citaId}`, {
@@ -13,8 +46,9 @@ export const updateCita = async (citaId: string, cambios: any, token: string) =>
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || `Error ${response.status}: ${response.statusText}`);
+      const errorData = await response.json().catch(() => null);
+      const fallback = `Error ${response.status}: ${response.statusText}`;
+      throw new Error(parseApiDetail(errorData?.detail ?? errorData, fallback));
     }
 
     return await response.json();
@@ -46,8 +80,8 @@ export const registrarPagoCita = async (
   );
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.detail || 'Error al registrar pago');
+    const errorData = await response.json().catch(() => null);
+    throw new Error(parseApiDetail(errorData?.detail ?? errorData, 'Error al registrar pago'));
   }
 
   return await response.json();
