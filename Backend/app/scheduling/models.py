@@ -85,6 +85,7 @@ class Cita(BaseModel):
     metodo_pago_inicial: Optional[str] = "sin_pago"
     abono: Optional[float] = 0
     notas: Optional[str] = None
+    codigo_giftcard: Optional[str] = None   # ⭐ NUEVO: código si paga con giftcard
 
 class ServicioEnFicha(BaseModel):
     """Servicio dentro de una ficha técnica"""
@@ -142,3 +143,5 @@ class ProductoItem(BaseModel):
 class PagoRequest(BaseModel):
     monto: float
     metodo_pago: Optional[str] = "efectivo"
+    notas: Optional[str] = None
+    codigo_giftcard: Optional[str] = None  # ⭐ requerido si metodo_pago == "giftcard"

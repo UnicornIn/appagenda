@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException, Form, Depends, status
 from datetime import datetime, timedelta
+from typing import List, Optional
+from bson import ObjectId
 from fastapi import Cookie, Response
 from jose import jwt, JWTError
 from fastapi.security import OAuth2PasswordBearer
@@ -13,7 +15,7 @@ from app.auth.controllers import (
     REFRESH_TOKEN_EXPIRE_DAYS,
     create_refresh_token
 )
-from app.auth.models import TokenResponse
+from app.auth.models import TokenResponse, UserResponse
 from app.database.mongo import (
     collection_auth,
     collection_estilista,
@@ -129,6 +131,41 @@ async def create_user(
         "creado_por": current_user["email"],
     }
 
+# =========================================================
+# 📋 LIST USERS (only super_admin)
+# =========================================================
+@router.get("/users", response_model=List[UserResponse])
+async def list_users(
+    rol: Optional[str] = None,          # Filtro opcional por rol
+    activo: Optional[bool] = None,      # Filtro opcional por estado
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["rol"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Solo el super_admin puede listar usuarios")
+
+    # Construir filtro dinámico
+    filtro = {}
+    if rol:
+        filtro["rol"] = rol
+    if activo is not None:
+        filtro["activo"] = activo
+
+    usuarios = await collection_auth.find(filtro).to_list(length=None)
+
+    return [
+        UserResponse(
+            id=str(u["_id"]),
+            nombre=u.get("nombre", ""),
+            correo_electronico=u.get("correo_electronico", ""),
+            rol=u.get("rol", ""),
+            sede_id=u.get("sede_id"),
+            franquicia_id=u.get("franquicia_id"),
+            activo=u.get("activo", True),
+            fecha_creacion=u.get("fecha_creacion"),
+            creado_por=u.get("creado_por"),
+        )
+        for u in usuarios
+    ]
 
 # =========================================================
 # 🔓 LOGIN AND TOKEN (LOGIN) - CORREGIDO PARA collection_auth
@@ -203,6 +240,7 @@ async def login(
         rol=rol_real,  # ⭐ ROL REAL del usuario
         nombre=user.get("nombre"),
         email=user.get("correo_electronico"),
+        sede_id=user.get("sede_id"),
     )
 
 
@@ -358,7 +396,8 @@ async def refresh_token_endpoint(response: Response, refresh_token: str = Cookie
             token_type="bearer",
             rol=rol,
             email=email,
-            nombre=user.get("nombre")
+            nombre=user.get("nombre"),
+            sede_id=user.get("sede_id"),
         )
 
     except JWTError as e:
