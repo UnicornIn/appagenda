@@ -130,7 +130,7 @@ async def generar_pdf_especifico(
         cita_data_for_pdf = {
             "cita_id": cita_id,
             "estado": cita.get("estado", "finalizado"),
-            "fecha_finalizacion": cita.get("fecha_finalizacion", datetime.utcnow()),
+            "fecha_finalizacion": cita.get("fecha_finalizacion", datetime.now()),
             "finalizado_por": cita.get("finalizado_por", "Sistema"),
             # Datos financieros
             "valor_total": cita.get("valor_total", 0),
@@ -228,7 +228,7 @@ async def generar_pdf_info(
             "estado_pago": cita.get("estado_pago", "pendiente"),
             "metodo_pago_actual": cita.get("metodo_pago_actual"),
             "metodo_pago_inicial": cita.get("metodo_pago_inicial"),
-            "fecha_finalizacion": cita.get("fecha_finalizacion", datetime.utcnow()),
+            "fecha_finalizacion": cita.get("fecha_finalizacion", datetime.now()),
             "finalizado_por": cita.get("finalizado_por", "Sistema"),
         }
         
@@ -258,7 +258,7 @@ async def generar_pdf_info(
             "pdf": {
                 "tamano_bytes": len(pdf_bytes),
                 "tamano_kb": round(pdf_size_kb, 2),
-                "fecha_generacion": datetime.utcnow().isoformat(),
+                "fecha_generacion": datetime.now().isoformat(),
                 "disponible_descarga": True
             },
             "download_url": f"/api/pdf/generar-pdf/{cliente_id}/{cita_id}"
@@ -326,7 +326,7 @@ async def reenviar_pdf_correo(
             "abono": cita.get("abono", 0),
             "saldo_pendiente": cita.get("saldo_pendiente", 0),
             "estado_pago": cita.get("estado_pago", "pendiente"),
-            "fecha_finalizacion": cita.get("fecha_finalizacion", datetime.utcnow()),
+            "fecha_finalizacion": cita.get("fecha_finalizacion", datetime.now()),
             "finalizado_por": cita.get("finalizado_por", "Sistema"),
         }
         
@@ -337,7 +337,7 @@ async def reenviar_pdf_correo(
         html_correo = crear_html_correo_ficha(
             cliente_nombre=f"{cliente.get('nombre', '')} {cliente.get('apellido', '')}",
             servicio_nombre=ficha.get('servicio_nombre', 'Servicio'),
-            fecha=datetime.utcnow().strftime("%d/%m/%Y %H:%M")
+            fecha=datetime.now().strftime("%d/%m/%Y %H:%M")
         )
         
         # Crear nombre del archivo
@@ -357,7 +357,7 @@ async def reenviar_pdf_correo(
             await collection_citas.update_one(
                 {"_id": ObjectId(cita_id)},
                 {"$set": {
-                    "ultimo_envio_pdf": datetime.utcnow(),
+                    "ultimo_envio_pdf": datetime.now(),
                     "pdf_enviado_a": email_a_usar,
                     "reenviado_por": current_user.get("email")
                 }}
@@ -367,7 +367,7 @@ async def reenviar_pdf_correo(
                 "success": True,
                 "message": f"PDF enviado exitosamente a {email_a_usar}",
                 "email_destino": email_a_usar,
-                "fecha_envio": datetime.utcnow().isoformat(),
+                "fecha_envio": datetime.now().isoformat(),
                 "tamano_pdf_kb": round(len(pdf_bytes) / 1024, 2)
             }
         else:

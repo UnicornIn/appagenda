@@ -248,8 +248,20 @@ async def _obtener_siguiente_numero_disperso(
         
         # 🔑 PASO 2: Convertir a número disperso
         numero_disperso = _dispersar_numero(secuencia, longitud, prefijo, sede_id)
+        numero_str = str(numero_disperso).zfill(longitud)
+        id_completo = f"{prefijo}-{numero_str}"
         
-        # 🔑 PASO 3: Verificar que no esté usado (colisión)
+        # 🔑 PASO 3: Verificar que NO exista en generated_ids (verificación primaria)
+        existe_en_generated = await collection_ids.find_one({"_id": id_completo})
+        if existe_en_generated:
+            # Colisión detectada: el ID ya fue generado antes
+            logger.warning(
+                f"⚠️ Colisión detectada en generated_ids para {id_completo} "
+                f"(intento {intento + 1}/{MAX_RETRIES}). Reintentando..."
+            )
+            continue
+        
+        # 🔑 PASO 4: Marcar en used_id_numbers (verificación secundaria)
         used_key = f"{sequence_key}:{numero_disperso}"
         
         try:
@@ -267,10 +279,9 @@ async def _obtener_siguiente_numero_disperso(
             
         except Exception as e:
             if "duplicate key" in str(e).lower():
-                # 🔄 Colisión detectada (extremadamente raro)
-                # Incrementar contador y reintentar con nueva secuencia
+                # 🔄 Colisión detectada en used_numbers (respaldo)
                 logger.warning(
-                    f"⚠️ Colisión detectada para {prefijo}-{numero_disperso} "
+                    f"⚠️ Colisión detectada en used_numbers para {id_completo} "
                     f"(intento {intento + 1}/{MAX_RETRIES}). Reintentando..."
                 )
                 continue
@@ -321,13 +332,14 @@ async def generar_id(
     entidad: TipoEntidad,
     sede_id: Optional[str] = None,
     metadata: Optional[dict] = None,
-    franquicia_id: Optional[str] = None
+    franquicia_id: Optional[str] = None,
+    max_intentos: int = 10
 ) -> str:
     """
     Genera un ID único NO SECUENCIAL con contador atómico.
     
     🏆 GARANTÍAS:
-    - ✅ Sin colisiones JAMÁS
+    - ✅ Sin colisiones JAMÁS (con reintentos automáticos)
     - ✅ Thread-safe (N servidores)
     - ✅ IDs NO PREDECIBLES (seguridad)
     - ✅ Sobrevive a reinicios
@@ -343,6 +355,7 @@ async def generar_id(
         sede_id: ID de sede (multi-tenant)
         metadata: Datos adicionales
         franquicia_id: DEPRECADO
+        max_intentos: Reintentos en caso de colisión
     
     Returns:
         str: ID único formato "PREFIJO-NUMERO" (número NO secuencial)
@@ -354,28 +367,29 @@ async def generar_id(
         >>> await generar_id("cliente")
         "CL-19453"  # NO es secuencial!
     """
-    try:
-        # Compatibilidad
-        if franquicia_id and not sede_id:
-            sede_id = franquicia_id
-        
-        # Validar entidad
-        entidad_lower = entidad.lower()
-        if entidad_lower not in PREFIJOS_VALIDOS:
-            entidades_validas = ", ".join(sorted(PREFIJOS_VALIDOS.keys()))
-            raise ValueError(
-                f"Entidad '{entidad}' no válida. "
-                f"Entidades disponibles: {entidades_validas}"
-            )
-        
-        prefijo = PREFIJOS_VALIDOS[entidad_lower]
-        
-        # Generar número disperso atómicamente
-        numero = await _generar_con_expansion_automatica(prefijo, sede_id)
-        id_completo = f"{prefijo}-{numero}"
-        
-        # Guardar en colección de IDs
+    # Compatibilidad
+    if franquicia_id and not sede_id:
+        sede_id = franquicia_id
+    
+    # Validar entidad
+    entidad_lower = entidad.lower()
+    if entidad_lower not in PREFIJOS_VALIDOS:
+        entidades_validas = ", ".join(sorted(PREFIJOS_VALIDOS.keys()))
+        raise ValueError(
+            f"Entidad '{entidad}' no válida. "
+            f"Entidades disponibles: {entidades_validas}"
+        )
+    
+    prefijo = PREFIJOS_VALIDOS[entidad_lower]
+    
+    # 🔄 REINTENTOS AUTOMÁTICOS en caso de colisión
+    for intento in range(max_intentos):
         try:
+            # Generar número disperso atómicamente
+            numero = await _generar_con_expansion_automatica(prefijo, sede_id)
+            id_completo = f"{prefijo}-{numero}"
+            
+            # Guardar en colección de IDs
             documento = {
                 "_id": id_completo,
                 "entidad": entidad_lower,
@@ -394,18 +408,29 @@ async def generar_id(
             return id_completo
             
         except Exception as e:
-            # Solo debería fallar si hay error de BD
             if "duplicate key" in str(e).lower():
-                logger.error(
-                    f"🚨 ALERTA CRÍTICA: Duplicado en collection_ids: {id_completo}"
+                # Colisión detectada: el ID ya existe en generated_ids
+                logger.warning(
+                    f"⚠️ Colisión en generated_ids: {id_completo} "
+                    f"(intento {intento + 1}/{max_intentos}). Reintentando..."
                 )
-            raise
+                
+                # Si es el último intento, lanzar error
+                if intento == max_intentos - 1:
+                    logger.error(
+                        f"🚨 CRÍTICO: No se pudo generar ID único después de {max_intentos} intentos"
+                    )
+                    raise
+                
+                # Continuar al siguiente intento
+                continue
+            else:
+                # Otro tipo de error, propagarlo inmediatamente
+                logger.error(f"❌ Error al generar ID para {entidad}: {e}")
+                raise
     
-    except ValueError:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error al generar ID para {entidad}: {e}")
-        raise
+    # No debería llegar aquí nunca
+    raise RuntimeError(f"Error inesperado al generar ID para {entidad}")
 
 
 # ====================================================================

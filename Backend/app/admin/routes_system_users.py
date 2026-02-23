@@ -11,7 +11,7 @@ from app.database.mongo import collection_auth, collection_locales
 
 router = APIRouter(prefix="/superadmin/system-users", tags=["SuperAdmin - System Users"])
 
-ALLOWED_INPUT_ROLES = {"superadmin", "admin_sede"}
+ALLOWED_INPUT_ROLES = {"superadmin", "admin", "admin_sede", "call_center"}
 SUPERADMIN_ROLES = {"super_admin", "superadmin"}
 
 
@@ -23,6 +23,8 @@ def _normalize_input_role(role: str) -> str:
     normalized = role.strip().lower().replace(" ", "_")
     if normalized in {"recepcionista", "adminsede"}:
         normalized = "admin_sede"
+    if normalized == "soporte":
+        normalized = "call_center"
     if normalized not in ALLOWED_INPUT_ROLES:
         raise HTTPException(status_code=400, detail="Rol inválido")
     return normalized
@@ -32,6 +34,8 @@ def _to_storage_role(input_role: str) -> str:
     # Mantiene compatibilidad con el resto del sistema.
     if input_role == "superadmin":
         return "super_admin"
+    if input_role == "call_center":
+        return "soporte"
     return input_role
 
 
@@ -40,6 +44,8 @@ def _to_public_role(storage_role: str) -> str:
         return "superadmin"
     if storage_role in {"recepcionista", "adminsede", "admin_sede"}:
         return "admin_sede"
+    if storage_role in {"soporte", "callcenter", "call_center", "call center"}:
+        return "call_center"
     return storage_role
 
 
@@ -60,8 +66,10 @@ class SystemUserCreate(BaseModel):
     email: EmailStr
     role: str
     sede_id: Optional[str] = None
+    comision: Optional[float] = None
     especialidades: list[str] = Field(default_factory=list)
     password: Optional[str] = Field(default=None, min_length=6, max_length=128)
+    horario: Optional[dict] = None
     activo: Optional[bool] = True
 
     @field_validator("nombre", mode="before")
@@ -89,6 +97,15 @@ class SystemUserCreate(BaseModel):
             value = value.strip()
             return value or None
         return value
+
+    @field_validator("comision")
+    @classmethod
+    def validate_comision(cls, value):
+        if value is None:
+            return None
+        if value < 0 or value > 100:
+            raise ValueError("La comisión debe estar entre 0 y 100")
+        return round(float(value), 2)
 
     @field_validator("especialidades", mode="before")
     @classmethod
@@ -132,8 +149,12 @@ async def list_system_users(current_user: dict = Depends(get_current_user)):
             "$in": [
                 "super_admin",
                 "superadmin",
+                "admin",
                 "admin_sede",
                 "recepcionista",
+                "soporte",
+                "call_center",
+                "callcenter",
                 "adminsede",
             ]
         },
@@ -146,6 +167,7 @@ async def list_system_users(current_user: dict = Depends(get_current_user)):
         "correo_electronico": 1,
         "rol": 1,
         "sede_id": 1,
+        "comision": 1,
         "especialidades": 1,
         "activo": 1,
         "fecha_creacion": 1,
@@ -163,6 +185,7 @@ async def list_system_users(current_user: dict = Depends(get_current_user)):
                 "email": user.get("correo_electronico", ""),
                 "role": _to_public_role(user.get("rol", "")),
                 "sede_id": user.get("sede_id"),
+                "comision": user.get("comision"),
                 "especialidades": user.get("especialidades", []),
                 "activo": bool(user.get("activo", True)),
                 "user_type": user.get("user_type", "system"),
@@ -203,7 +226,9 @@ async def create_system_user(payload: SystemUserCreate, current_user: dict = Dep
         "hashed_password": hashed_password,
         "rol": storage_role,
         "sede_id": payload.sede_id,
+        "comision": payload.comision,
         "especialidades": payload.especialidades,
+        "horario": payload.horario,
         "franquicia_id": None,
         "activo": bool(payload.activo if payload.activo is not None else True),
         "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -221,6 +246,7 @@ async def create_system_user(payload: SystemUserCreate, current_user: dict = Dep
             "email": data["correo_electronico"],
             "role": role_input,
             "sede_id": data["sede_id"],
+            "comision": data["comision"],
             "especialidades": data["especialidades"],
             "activo": data["activo"],
             "user_type": data["user_type"],
