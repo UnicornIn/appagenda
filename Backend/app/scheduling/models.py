@@ -36,13 +36,20 @@ class Horario(BaseModel):
     sede_id: str = Field(..., description="ID de sede ej: 001") 
     disponibilidad: List[DiaDisponible]
 
-# === BLOQUEO ===
+class RepeatRule(BaseModel):
+    type: str  # "weekly"
+    days_of_week: List[int]  # 0=lunes ... 6=domingo
+    until: Optional[date] = None
+    exclude_dates: List[date] = []
+    include_dates: List[date] = []
+
 class Bloqueo(BaseModel):
     profesional_id: str
     sede_id: str
-    fecha: date
-    hora_inicio: str
-    hora_fin: str
+    start_date: date
+    start_time: str  # "HH:MM"
+    end_time: str
+    repeat: RepeatRule
     motivo: Optional[str] = None
 
 class ServicioEnCita(BaseModel):
@@ -78,6 +85,7 @@ class Cita(BaseModel):
     metodo_pago_inicial: Optional[str] = "sin_pago"
     abono: Optional[float] = 0
     notas: Optional[str] = None
+    codigo_giftcard: Optional[str] = None   # ⭐ NUEVO: código si paga con giftcard
 
 class ServicioEnFicha(BaseModel):
     """Servicio dentro de una ficha técnica"""
@@ -135,3 +143,5 @@ class ProductoItem(BaseModel):
 class PagoRequest(BaseModel):
     monto: float
     metodo_pago: Optional[str] = "efectivo"
+    notas: Optional[str] = None
+    codigo_giftcard: Optional[str] = None  # ⭐ requerido si metodo_pago == "giftcard"
