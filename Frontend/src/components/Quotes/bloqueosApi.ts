@@ -9,8 +9,32 @@ export interface Bloqueo {
   hora_inicio: string;
   hora_fin: string;
   motivo: string;
+  recurrente?: boolean;
+  serie_id?: string | null;
+  dias_semana?: number[];
+  fecha_inicio_regla?: string | null;
+  fecha_fin_regla?: string | null;
   creado_por?: string;
   fecha_creacion?: string;
+}
+
+export interface BloqueoCreatePayload {
+  profesional_id: string;
+  sede_id: string;
+  hora_inicio: string;
+  hora_fin: string;
+  motivo: string;
+  fecha?: string;
+  recurrente?: boolean;
+  dias_semana?: number[];
+  fecha_inicio?: string;
+  fecha_fin?: string;
+}
+
+export interface BloqueoUpdatePayload {
+  hora_inicio: string;
+  hora_fin: string;
+  motivo: string;
 }
 
 // Obtener bloqueos de un profesional específico - CAMBIÉ EL NOMBRE DEL PARÁMETRO
@@ -84,7 +108,7 @@ export async function getBloqueos(filtros: {
   }
 }
 
-export async function createBloqueo(data: Bloqueo, token: string) {
+export async function createBloqueo(data: BloqueoCreatePayload, token: string) {
   const res = await fetch(`${API_BASE_URL}scheduling/block/`, {
     method: "POST",
     headers: {
@@ -97,6 +121,25 @@ export async function createBloqueo(data: Bloqueo, token: string) {
     const error = await res.json();
     throw new Error(error.detail || "Error al crear bloqueo");
   }
+  return res.json();
+}
+
+export async function updateBloqueo(id: string, data: BloqueoUpdatePayload, token: string) {
+  const res = await fetch(`${API_BASE_URL}scheduling/block/${id}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || "Error al actualizar bloqueo");
+  }
+
   return res.json();
 }
 

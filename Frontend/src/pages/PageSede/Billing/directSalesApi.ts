@@ -6,6 +6,7 @@ export type PaymentMethod =
   | "tarjeta"
   | "tarjeta_credito"
   | "tarjeta_debito"
+  | "giftcard"
   | "addi"
   | string;
 
@@ -56,6 +57,7 @@ export interface CreateDirectSaleInput {
   sedeId: string;
   total: number;
   paymentMethod: PaymentMethod;
+  giftCardCode?: string;
   items: DirectSaleLineItem[];
   notes?: string;
 }
@@ -65,6 +67,7 @@ export interface RegisterDirectSalePaymentInput {
   saleId: string;
   amount: number;
   paymentMethod: PaymentMethod;
+  giftCardCode?: string;
 }
 
 export interface CreatedDirectSale {
@@ -229,6 +232,7 @@ function buildCreateSalePayload(
   input: CreateDirectSaleInput,
   includeModernFields: boolean
 ): Record<string, unknown> {
+  const giftCardCode = typeof input.giftCardCode === "string" ? input.giftCardCode.trim() : "";
   const payload: Record<string, unknown> = {
     sede_id: input.sedeId,
     productos: input.items.map((item) => ({
@@ -241,6 +245,10 @@ function buildCreateSalePayload(
 
   if (input.notes && input.notes.trim().length > 0) {
     payload.notas = input.notes.trim();
+  }
+
+  if (giftCardCode.length > 0) {
+    payload.codigo_giftcard = giftCardCode;
   }
 
   if (includeModernFields) {
@@ -355,9 +363,11 @@ export async function registerDirectSalePayment(
 ): Promise<Record<string, unknown> | null> {
   const baseUrl = `${API_BASE_URL}sales/${encodeURIComponent(input.saleId)}/pago`;
   const amount = roundToTwo(input.amount);
+  const giftCardCode = typeof input.giftCardCode === "string" ? input.giftCardCode.trim() : "";
   const bodyPayload = {
     monto: amount,
     metodo_pago: input.paymentMethod,
+    ...(giftCardCode.length > 0 ? { codigo_giftcard: giftCardCode } : {}),
   };
 
   const bodyResponse = await fetch(baseUrl, {
@@ -381,6 +391,9 @@ export async function registerDirectSalePayment(
     monto: String(amount),
     metodo_pago: input.paymentMethod,
   });
+  if (giftCardCode.length > 0) {
+    query.append("codigo_giftcard", giftCardCode);
+  }
 
   const queryResponse = await fetch(`${baseUrl}?${query.toString()}`, {
     method: "POST",

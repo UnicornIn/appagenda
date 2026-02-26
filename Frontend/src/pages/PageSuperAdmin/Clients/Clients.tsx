@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Sidebar } from "../../../components/Layout/Sidebar"
 import { ClientsList } from "./clients-list"
 import { ClientDetail } from "./client-detail"
@@ -17,11 +17,13 @@ export default function ClientsPage() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [sedes, setSedes] = useState<Sede[]>([])
   const [selectedSede, setSelectedSede] = useState<string>("all")
-  const [isLoading, setIsLoading] = useState(true)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
+  const [isFetching, setIsFetching] = useState(false)
   const [_, setIsLoadingSedes] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const latestRequestIdRef = useRef(0)
 
   const { user, isLoading: authLoading } = useAuth()
 
@@ -42,34 +44,63 @@ export default function ClientsPage() {
   }
 
   // Cargar clientes desde la API
-  const loadClientes = async (sedeId?: string) => {
+  const loadClientes = async (
+    sedeId?: string,
+    options: { initial?: boolean } = {}
+  ) => {
+    const isInitialRequest = options.initial ?? false
+
     if (!user?.access_token) {
       setError('No hay token de autenticación disponible')
-      setIsLoading(false)
+      setIsInitialLoading(false)
+      setIsFetching(false)
       return
     }
 
+    const requestId = ++latestRequestIdRef.current
+
     try {
-      setIsLoading(true)
+      if (isInitialRequest) {
+        setIsInitialLoading(true)
+      } else {
+        setIsFetching(true)
+      }
+
       setError(null)
       console.log('🔄 Cargando clientes para sede:', sedeId || 'todas')
       const clientesData = await clientesService.getClientes(user.access_token, sedeId)
+
+      if (requestId !== latestRequestIdRef.current) return
+
       console.log('📥 Clientes recibidos del backend:', clientesData)
       setClientes(clientesData)
     } catch (err) {
+      if (requestId !== latestRequestIdRef.current) return
       setError(err instanceof Error ? err.message : 'Error al cargar los clientes')
       console.error('Error loading clients:', err)
     } finally {
-      setIsLoading(false)
+      if (requestId !== latestRequestIdRef.current) return
+
+      if (isInitialRequest) {
+        setIsInitialLoading(false)
+      } else {
+        setIsFetching(false)
+      }
     }
   }
 
   useEffect(() => {
     if (!authLoading && user) {
       loadSedes()
-      loadClientes()
+      loadClientes(undefined, { initial: true })
     }
   }, [user, authLoading])
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      setIsInitialLoading(false)
+    }
+  }, [authLoading, user])
 
   const handleSedeChange = (sedeId: string) => {
     console.log('🎯 Cambiando filtro de sede a:', sedeId)
@@ -123,7 +154,7 @@ export default function ClientsPage() {
   }
 
   // Mostrar loading mientras se verifica la autenticación
-  if (authLoading || isLoading) {
+  if (authLoading || (Boolean(user) && isInitialLoading)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="flex items-center gap-3">
@@ -166,6 +197,7 @@ export default function ClientsPage() {
             onSedeChange={handleSedeChange}
             selectedSede={selectedSede}
             sedes={sedes}
+            isFetching={isFetching}
           />
         )}
       </div>

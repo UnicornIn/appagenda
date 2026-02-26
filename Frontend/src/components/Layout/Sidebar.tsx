@@ -6,6 +6,7 @@ import {
   Users,
   Package,
   CreditCard,
+  Gift,
   Wallet,
   Home,
   Menu,
@@ -35,6 +36,7 @@ const navItems: NavItem[] = [
   { title: 'Usuarios Sistema', href: '/superadmin/system-users', icon: Users, roles: ['super_admin', 'superadmin'] },
   { title: 'Servicios', href: '/superadmin/services', icon: Package, roles: ['super_admin'] },
   { title: 'Ventas Facturadas', href: '/superadmin/sales-invoices', icon: CreditCard, roles: ['super_admin'] },
+  { title: 'Gift Cards', href: '/superadmin/gift-cards', icon: Gift, roles: ['super_admin', 'superadmin'] },
   { title: 'Cierre de Caja', href: '/superadmin/cierre-caja', icon: Wallet, roles: ['super_admin'], currencies: ['COP'] },
 
   { title: 'Dashboard', href: '/sede/dashboard', icon: LayoutDashboard, roles: ['admin_sede'] },
@@ -42,6 +44,7 @@ const navItems: NavItem[] = [
   { title: 'Productos', href: '/sede/products', icon: Package, roles: ['admin_sede'] },
   { title: 'Clientes', href: '/sede/clients', icon: Users, roles: ['admin_sede'] },
   { title: 'Facturacion', href: '/sede/billing', icon: CreditCard, roles: ['admin_sede'] },
+  { title: 'Gift Cards', href: '/sede/gift-cards', icon: Gift, roles: ['admin_sede'] },
   { title: 'Estilistas', href: '/sede/stylists', icon: Users, roles: ['admin_sede'] },
   { title: 'Comisiones', href: '/sede/commissions', icon: CreditCard, roles: ['admin_sede'] },
   { title: 'Ventas Facturadas', href: '/sede/sales-invoiced', icon: CreditCard, roles: ['admin_sede'] },

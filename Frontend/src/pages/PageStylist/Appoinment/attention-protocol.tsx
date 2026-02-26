@@ -2007,14 +2007,15 @@ export function AttentionProtocol({
     return (
       <>
         {/* Overlay */}
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50" onClick={cerrarModalBloqueos} />
+        <div className="fixed inset-0 z-[70] bg-black/50" onClick={cerrarModalBloqueos} />
 
         {/* Modal centrado */}
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-2 sm:p-4">
+          <div className="relative w-full max-w-[24rem] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl max-h-[88vh] sm:max-w-md">
             <BloqueosModal
               onClose={cerrarModalBloqueos}
               fecha={fechaSeleccionadaParaBloqueo}
+              compact
             />
           </div>
         </div>

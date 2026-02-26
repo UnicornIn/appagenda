@@ -13,6 +13,7 @@ import { ProductCatalogModal } from "./ProductCatalogModal"
 import { Badge } from "../../../components/ui/badge"
 import { formatSedeNombre } from "../../../lib/sede"
 import { formatDateDMY } from "../../../lib/dateFormat"
+import { handleFacturarRequest, type FacturarTipo } from "./facturarApi"
 
 // En service-protocol.tsx - REEMPLAZA toda tu interfaz Producto con esto:
 interface Producto {
@@ -434,7 +435,13 @@ export function ServiceProtocol({
   return servicioTotal + productosTotal
   }
 
-  const handleFacturarCita = async () => {
+  const handleFacturar = async ({
+    id,
+    tipo,
+  }: {
+    id: string
+    tipo: FacturarTipo
+  }) => {
     try {
       setIsFacturando(true)
 
@@ -445,19 +452,27 @@ export function ServiceProtocol({
         return
       }
 
-      if (!selectedAppointment?._id) {
+      if (!id?.trim()) {
+        alert('❌ No hay identificador válido para facturar')
+        return
+      }
+
+      const appointmentSnapshot = selectedAppointment
+      if (tipo === "cita" && !appointmentSnapshot) {
         alert('❌ No hay cita seleccionada para facturar')
         return
       }
 
-      const serviciosTexto = selectedAppointment.servicios && Array.isArray(selectedAppointment.servicios)
-      ? selectedAppointment.servicios.map((s: any) => s.nombre).join(', ')
-      : nombreServicio
+      const clienteLabel = appointmentSnapshot?.cliente_nombre || appointmentSnapshot?.cliente || "Cliente no especificado"
+      const serviciosTexto =
+        appointmentSnapshot?.servicios && Array.isArray(appointmentSnapshot.servicios)
+          ? appointmentSnapshot.servicios.map((s: any) => s.nombre).join(', ')
+          : appointmentSnapshot?.servicio_nombre || appointmentSnapshot?.servicio || "Sin servicio"
 
       // Confirmar con el usuario
       const confirmMessage =
-        `¿Estás seguro de facturar esta cita?\n\n` +
-        `👤 Cliente: ${nombreCliente}\n` +
+        `¿Estás seguro de facturar esta ${tipo}?\n\n` +
+        `👤 Cliente: ${clienteLabel}\n` +
         `✂️ Servicio: ${serviciosTexto}\n` +
         `💰 Total: $${formatMoney(calculateAppointmentTotal())}\n\n` +
         `📦 Productos incluidos: ${selectedProducts.length}` +
@@ -472,35 +487,19 @@ export function ServiceProtocol({
       const productosParaFacturar = selectedProducts.map(product => ({
         producto_id: product.id,
         nombre: product.nombre,
-        precio: product.precio,
+        precio: Number(product.precio || 0),
         cantidad: productsQuantities[product.id] || 1,
         categoria: product.categoria
       }))
 
-      // Llamar a la API de facturación
-      const response = await fetch(
-        `${API_BASE_URL}api/billing/quotes/facturar/${selectedAppointment._id}?tipo=cita`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({
-            productos: productosParaFacturar,
-            total_productos: calculateProductsTotal(),
-            total_final: calculateAppointmentTotal()
-          })
-        }
-      )
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.detail || `Error ${response.status}: ${response.statusText}`)
-      }
-
-      const result = await response.json()
+      const result = await handleFacturarRequest({
+        id,
+        tipo,
+        token,
+        productos: productosParaFacturar,
+        total_productos: calculateProductsTotal(),
+        total_final: calculateAppointmentTotal(),
+      })
 
       // Mostrar éxito
       alert(`✅ Facturación exitosa!\n\n` +
@@ -536,6 +535,18 @@ export function ServiceProtocol({
     } finally {
       setIsFacturando(false)
     }
+  }
+
+  const handleFacturarCita = async () => {
+    if (!selectedAppointment?._id) {
+      alert('❌ No hay cita seleccionada para facturar')
+      return
+    }
+
+    await handleFacturar({
+      id: selectedAppointment._id,
+      tipo: "cita",
+    })
   }
 
   const formatFechaHora = (fecha: string) => {

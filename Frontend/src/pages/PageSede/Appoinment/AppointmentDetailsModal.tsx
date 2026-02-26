@@ -7,7 +7,7 @@ import {
   CreditCard as CardIcon, Wallet, CalendarDays,
   Tag, Users, X, Bug, Landmark,
   Phone, Mail, DollarSign, AlertCircle,
-  ShoppingBag, Trash2
+  ShoppingBag, Trash2, Gift
 } from 'lucide-react';
 import Modal from '../../../components/ui/modal';
 import { useAuth } from '../../../components/Auth/AuthContext';
@@ -28,7 +28,8 @@ interface PagoModalData {
   show: boolean;
   tipo: 'pago' | 'abono';
   monto: number;
-  metodoPago: 'efectivo' | 'transferencia' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'addi';
+  metodoPago: 'efectivo' | 'transferencia' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'addi' | 'giftcard';
+  codigoGiftcard: string;
 }
 
 interface ProductoSeleccionado {
@@ -223,7 +224,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     show: false,
     tipo: 'pago',
     monto: 0,
-    metodoPago: 'efectivo'
+    metodoPago: 'efectivo',
+    codigoGiftcard: ''
   });
   const [registrandoPago, setRegistrandoPago] = useState(false);
   const [productos, setProductos] = useState<ProductoSeleccionado[]>([]);
@@ -238,6 +240,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   const [fechaEditada, setFechaEditada] = useState('');
   const [horaInicioEditada, setHoraInicioEditada] = useState('');
   const [horaFinEditada, setHoraFinEditada] = useState('');
+  const [horaFinManual, setHoraFinManual] = useState(false);
   const [profesionalEditadoId, setProfesionalEditadoId] = useState('');
   const [horarioOriginal, setHorarioOriginal] = useState({
     fecha: '',
@@ -286,6 +289,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       setFechaEditada(fechaInicial);
       setHoraInicioEditada(horaInicioInicial);
       setHoraFinEditada(horaFinInicial);
+      setHoraFinManual(false);
       setProfesionalEditadoId(profesionalInicial);
       setHorarioOriginal({
         fecha: fechaInicial,
@@ -528,8 +532,14 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     return `${String(newHours).padStart(2, '0')}:${String(newMinutes).padStart(2, '0')}`;
   };
 
+  const convertirHoraAMinutos = (hora: string): number => {
+    const [hours, minutes] = String(hora || '').split(':').map((value) => Number(value));
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return NaN;
+    return (hours * 60) + minutes;
+  };
+
   useEffect(() => {
-    if (!horaInicioEditada) return;
+    if (!horaInicioEditada || horaFinManual) return;
 
     const duracionParaCalculo = duracionTotalServicios > 0
       ? duracionTotalServicios
@@ -541,7 +551,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     if (horaFinCalculada !== horaFinEditada) {
       setHoraFinEditada(horaFinCalculada);
     }
-  }, [horaInicioEditada, duracionTotalServicios, horaFinEditada]);
+  }, [horaInicioEditada, duracionTotalServicios, horaFinEditada, horaFinManual]);
 
   const getPagosData = () => {
     if (!appointmentDetails?.rawData) {
@@ -685,6 +695,11 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     }
 
     const metodoPagoSeguro = sanitizeMetodoPago(pagoModal.metodoPago);
+    const codigoGiftcard = pagoModal.codigoGiftcard.trim();
+    if (metodoPagoSeguro === 'giftcard' && !codigoGiftcard) {
+      alert('Debes ingresar el codigo de la Gift Card para registrar el pago.');
+      return;
+    }
     const confirmacion = confirm(
       `¿Registrar ${pagoModal.tipo === 'pago' ? 'pago' : 'abono'} de $${pagoModal.monto} por ${metodoPagoSeguro}?`
     );
@@ -697,7 +712,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         appointmentDetails.id,
         {
           monto: pagoModal.monto,
-          metodo_pago: metodoPagoSeguro
+          metodo_pago: metodoPagoSeguro,
+          ...(metodoPagoSeguro === 'giftcard' && codigoGiftcard ? { codigo_giftcard: codigoGiftcard } : {})
         },
         user.access_token
       );
@@ -709,7 +725,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           abono: response.abono,
           saldo_pendiente: response.saldo_pendiente,
           estado_pago: response.estado_pago,
-          metodo_pago: metodoPagoSeguro
+          metodo_pago: metodoPagoSeguro,
+          ...(metodoPagoSeguro === 'giftcard' && codigoGiftcard ? { codigo_giftcard: codigoGiftcard } : {})
         }
       }));
 
@@ -719,7 +736,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         show: false,
         tipo: 'pago',
         monto: 0,
-        metodoPago: 'efectivo'
+        metodoPago: 'efectivo',
+        codigoGiftcard: ''
       });
 
       if (onRefresh) {
@@ -919,7 +937,14 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     }
 
     if (!fechaEditada || !horaInicioEditada || !horaFinEditada || !profesionalEditadoId) {
-      setServiceError('Debes completar fecha, hora de inicio y profesional.');
+      setServiceError('Debes completar fecha, hora de inicio, hora de fin y profesional.');
+      return;
+    }
+
+    const horaInicioMinutos = convertirHoraAMinutos(horaInicioEditada);
+    const horaFinMinutos = convertirHoraAMinutos(horaFinEditada);
+    if (!Number.isFinite(horaInicioMinutos) || !Number.isFinite(horaFinMinutos) || horaFinMinutos <= horaInicioMinutos) {
+      setServiceError('La hora de fin debe ser mayor que la hora de inicio.');
       return;
     }
 
@@ -1148,7 +1173,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                 <label className="block text-[10px] font-medium text-gray-700 mb-0.5">
                   Método de pago *
                 </label>
-                <div className={`grid grid-cols-2 sm:grid-cols-3 ${isCopCurrency ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-1`}>
+                <div className={`grid grid-cols-2 sm:grid-cols-3 ${isCopCurrency ? 'lg:grid-cols-6' : 'lg:grid-cols-5'} gap-1`}>
                   <button
                     type="button"
                     onClick={() => setPagoModal(prev => ({ ...prev, metodoPago: 'efectivo' }))}
@@ -1193,6 +1218,17 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                     <CreditCard className="w-3 h-3 text-gray-700" />
                     <span className="font-medium">T. Débito</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setPagoModal(prev => ({ ...prev, metodoPago: 'giftcard' }))}
+                    className={`p-1 rounded border flex flex-col items-center justify-center gap-0.5 text-[10px] ${
+                      pagoModal.metodoPago === 'giftcard' ? 'border-black bg-gray-50' : 'border-gray-300 hover:border-gray-400'
+                    }`}
+                    disabled={registrandoPago}
+                  >
+                    <Gift className="w-3 h-3 text-gray-700" />
+                    <span className="font-medium">Gift Card</span>
+                  </button>
                   {isCopCurrency && (
                     <button
                       type="button"
@@ -1209,6 +1245,22 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                 </div>
               </div>
 
+              {pagoModal.metodoPago === 'giftcard' && (
+                <div>
+                  <label className="block text-[10px] font-medium text-gray-700 mb-0.5">
+                    Codigo Gift Card *
+                  </label>
+                  <input
+                    type="text"
+                    value={pagoModal.codigoGiftcard}
+                    onChange={(e) => setPagoModal(prev => ({ ...prev, codigoGiftcard: e.target.value }))}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-0 focus:border-black"
+                    placeholder="Ej: RFC-GCP-1234"
+                    disabled={registrandoPago}
+                  />
+                </div>
+              )}
+
               <div className="flex gap-1 pt-1">
                 <button
                   type="button"
@@ -1221,7 +1273,12 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                 <button
                   type="button"
                   onClick={handleRegistrarPago}
-                  disabled={registrandoPago || pagoModal.monto <= 0 || pagoModal.monto > maxMonto}
+                  disabled={
+                    registrandoPago ||
+                    pagoModal.monto <= 0 ||
+                    pagoModal.monto > maxMonto ||
+                    (pagoModal.metodoPago === 'giftcard' && !pagoModal.codigoGiftcard.trim())
+                  }
                   className="flex-1 py-1 bg-black text-white rounded hover:bg-gray-800 font-medium text-[10px] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {registrandoPago ? (
@@ -1722,26 +1779,53 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                         <input
                           type="time"
                           value={horaInicioEditada}
-                          onChange={(e) => setHoraInicioEditada(e.target.value)}
+                          onChange={(e) => {
+                            setHoraInicioEditada(e.target.value);
+                          }}
                           disabled={isServiceActionsDisabled}
                           className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
                         />
                       </div>
 
                       <div>
-                        <label className="text-xs text-gray-500 font-medium mb-0.5 block">Hora fin (auto)</label>
+                        <div className="mb-0.5 flex items-center justify-between gap-2">
+                          <label className="text-xs text-gray-500 font-medium block">Hora fin</label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!horaInicioEditada) return;
+
+                              const duracionActual = convertirHoraAMinutos(horaFinEditada) - convertirHoraAMinutos(horaInicioEditada);
+                              const duracionParaAuto = duracionTotalServicios > 0
+                                ? duracionTotalServicios
+                                : (Number.isFinite(duracionActual) && duracionActual > 0 ? duracionActual : 30);
+                              setHoraFinEditada(sumarMinutosAHora(horaInicioEditada, duracionParaAuto));
+                              setHoraFinManual(false);
+                            }}
+                            disabled={isServiceActionsDisabled || !horaInicioEditada}
+                            className="text-[10px] text-gray-600 hover:text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            Auto
+                          </button>
+                        </div>
                         <input
                           type="time"
                           value={horaFinEditada}
-                          readOnly
-                          disabled
-                          className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-gray-50 text-gray-700"
+                          onChange={(e) => {
+                            setHoraFinEditada(e.target.value);
+                            setHoraFinManual(true);
+                          }}
+                          disabled={isServiceActionsDisabled}
+                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
                         />
                       </div>
                     </div>
 
                     <div className="text-[10px] text-gray-600">
                       Duración total estimada: <span className="font-semibold">{duracionTotalServicios} min</span>
+                    </div>
+                    <div className="text-[10px] text-gray-500">
+                      Hora fin actual: {horaFinManual ? 'manual' : 'automática'}
                     </div>
                     <div className="text-[10px] text-gray-500">
                       Fecha actual guardada: {formatFechaSegura(appointmentDetails.rawData?.fecha) || 'No definida'}
@@ -1786,7 +1870,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                           show: true,
                           tipo: 'pago',
                           monto: pagosData.saldoPendiente,
-                          metodoPago: 'efectivo'
+                          metodoPago: 'efectivo',
+                          codigoGiftcard: ''
                         })}
                         disabled={pagosData.estaPagadoCompleto || registrandoPago || hasUnsavedChanges}
                         className="px-2 py-1 bg-black text-white rounded hover:bg-gray-800 flex items-center justify-center gap-1 font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1799,7 +1884,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                           show: true,
                           tipo: 'abono',
                           monto: 0,
-                          metodoPago: 'efectivo'
+                          metodoPago: 'efectivo',
+                          codigoGiftcard: ''
                         })}
                         disabled={pagosData.estaPagadoCompleto || registrandoPago || hasUnsavedChanges}
                         className="px-2 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 flex items-center justify-center gap-1 font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed"

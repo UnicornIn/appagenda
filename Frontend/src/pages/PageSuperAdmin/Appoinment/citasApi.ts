@@ -64,6 +64,8 @@ export const registrarPagoCita = async (
   pagoData: {
     monto: number;
     metodo_pago: string;
+    notas?: string;
+    codigo_giftcard?: string;
   },
   token: string
 ) => {

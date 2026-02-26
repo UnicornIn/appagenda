@@ -35,6 +35,22 @@ const buildUrl = (path: string, params?: Record<string, any>) => {
   return url.toString();
 };
 
+const parseErrorMessage = async (response: Response, fallback: string) => {
+  try {
+    const data = await response.json();
+    if (typeof data?.detail === "string" && data.detail.trim()) {
+      return data.detail;
+    }
+    if (typeof data?.message === "string" && data.message.trim()) {
+      return data.message;
+    }
+  } catch {
+    // ignore parse error and fallback
+  }
+
+  return fallback;
+};
+
 const request = async <T>(
   method: "GET" | "POST" | "DELETE",
   path: string,
@@ -103,9 +119,35 @@ const requestBlob = async (
   return { blob, filename };
 };
 
+export const getEfectivoDia = async (
+  token: string,
+  params?: Record<string, any>
+): Promise<any> => {
+  const url = buildUrl("/efectivo-dia", params);
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const detail = await parseErrorMessage(response, "Error al obtener efectivo del día");
+    throw new Error(detail);
+  }
+
+  return response.json();
+};
+
 export const cashService = {
-  getEfectivoDia: (params?: Record<string, any>) =>
-    request<any>("GET", "/efectivo-dia", params),
+  getEfectivoDia: async (params?: Record<string, any>) => {
+    const token = getToken();
+    if (token) {
+      return getEfectivoDia(token, params);
+    }
+    return request<any>("GET", "/efectivo-dia", params);
+  },
 
   getIngresos: (params?: Record<string, any>) =>
     request<any>("GET", "/ingresos", params),

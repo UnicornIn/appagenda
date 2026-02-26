@@ -63,6 +63,8 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [selectedTime, setSelectedTime] = useState(horaSeleccionada || '10:00');
+    const [selectedEndTime, setSelectedEndTime] = useState('10:30');
+    const [isEndTimeManual, setIsEndTimeManual] = useState(false);
     const [showTimeSelector, setShowTimeSelector] = useState(false);
     const [showMiniCalendar, setShowMiniCalendar] = useState(false);
     const [loading, ] = useState(false);
@@ -113,6 +115,8 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
 
         if (horaSeleccionada) {
             setSelectedTime(horaSeleccionada);
+            setSelectedEndTime(horaSeleccionada);
+            setIsEndTimeManual(false);
         }
     }, [fecha, horaSeleccionada, parseDateSafely]);
 
@@ -315,6 +319,12 @@ const calcularTotales = useCallback(() => {
 
 const { total: montoTotal, duracion: duracionTotal } = calcularTotales();
 
+const convertirHoraAMinutos = useCallback((hora: string): number => {
+    const [hours, minutes] = String(hora || '').split(':').map(Number);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return NaN;
+    return (hours * 60) + minutes;
+}, []);
+
 // =================================================
 // 🔥 PASO 6: ACTUALIZAR handleContinuar
 // =================================================
@@ -345,12 +355,23 @@ const handleContinuar = async () => {
         return;
     }
 
+    if (!selectedEndTime) {
+        setError('Por favor selecciona la hora de fin');
+        return;
+    }
+
+    const inicioMinutos = convertirHoraAMinutos(selectedTime);
+    const finMinutos = convertirHoraAMinutos(selectedEndTime);
+    if (!Number.isFinite(inicioMinutos) || !Number.isFinite(finMinutos) || finMinutos <= inicioMinutos) {
+        setError('La hora de fin debe ser mayor que la hora de inicio');
+        return;
+    }
+
+    const duracionBloqueMinutos = finMinutos - inicioMinutos;
+
     setError(null);
 
     try {
-        // Calcular hora fin (basada en duración total)
-        const endTime = calculateEndTime(selectedTime, duracionTotal);
-
         // ⭐ PREPARAR ARRAY DE SERVICIOS PARA BACKEND
         const serviciosParaBackend = serviciosSeleccionados.map(s => ({
             servicio_id: s.servicio_id,
@@ -366,8 +387,8 @@ const handleContinuar = async () => {
             profesional: selectedStylist.nombre,
             fecha: formatFechaBonita(selectedDate, selectedTime),
             hora_inicio: selectedTime,
-            hora_fin: endTime,
-            duracion: calcularDuracionTexto(duracionTotal),
+            hora_fin: selectedEndTime,
+            duracion: calcularDuracionTexto(duracionBloqueMinutos),
             monto_total: montoTotal,
             cliente_id: selectedClient.cliente_id,
             profesional_id: selectedStylist.profesional_id,
@@ -531,6 +552,13 @@ const handleContinuar = async () => {
         const endMinutes = totalMinutes % 60;
         return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
     }, []);
+
+    useEffect(() => {
+        if (!selectedTime || isEndTimeManual) return;
+
+        const duracionAuto = duracionTotal > 0 ? duracionTotal : 30;
+        setSelectedEndTime(calculateEndTime(selectedTime, duracionAuto));
+    }, [selectedTime, duracionTotal, isEndTimeManual, calculateEndTime]);
 
     const handleDateButtonClick = useCallback(() => {
         setShowMiniCalendar(!showMiniCalendar);
@@ -912,6 +940,37 @@ const handleContinuar = async () => {
                                     )}
                                 </div>
                             </div>
+
+                            <div className="mt-2">
+                                <div className="mb-1 flex items-center justify-between">
+                                    <label className="block text-xs font-semibold text-gray-700">
+                                        Hora fin *
+                                    </label>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const duracionAuto = duracionTotal > 0 ? duracionTotal : 30;
+                                            setSelectedEndTime(calculateEndTime(selectedTime, duracionAuto));
+                                            setIsEndTimeManual(false);
+                                        }}
+                                        className="text-[10px] text-gray-600 hover:text-gray-900"
+                                    >
+                                        Auto
+                                    </button>
+                                </div>
+                                <input
+                                    type="time"
+                                    value={selectedEndTime}
+                                    onChange={(e) => {
+                                        setSelectedEndTime(e.target.value);
+                                        setIsEndTimeManual(true);
+                                    }}
+                                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white"
+                                />
+                                <p className="mt-1 text-[10px] text-gray-500">
+                                    Hora fin actual: {isEndTimeManual ? 'manual' : 'automática según servicios'}
+                                </p>
+                            </div>
                         </div>
 
                         {/* NOTAS */}
@@ -931,7 +990,7 @@ const handleContinuar = async () => {
                         {/* BOTÓN - CAMBIADO A handleContinuar */}
                         <button
                             onClick={handleContinuar}
-                            disabled={!selectedClient || serviciosSeleccionados.length === 0 || !selectedStylist || !selectedDate || loading}
+                            disabled={!selectedClient || serviciosSeleccionados.length === 0 || !selectedStylist || !selectedDate || !selectedEndTime || loading}
                             className="w-full bg-gray-900 text-white py-2 rounded text-xs font-semibold hover:bg-gray-800 active:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                         >
                             Continuar

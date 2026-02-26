@@ -1,7 +1,7 @@
 "use client"
 
 import { Card } from "../../components/ui/card"
-import { DollarSign, CreditCard, Wallet, Link as LinkIcon, Banknote, Globe, CheckCircle } from "lucide-react"
+import { DollarSign, CreditCard, Wallet, Link as LinkIcon, Banknote, Globe, CheckCircle, Gift } from "lucide-react"
 import { useEffect, useState } from "react"
 
 interface PaymentMethodSelectorProps {
@@ -49,6 +49,14 @@ const paymentMethodMap: PaymentMethod[] = [
     displayName: "Tarjeta de Débito",
     icon: <CreditCard className="w-5 h-5" />,
     description: "Pago con tarjeta de débito",
+    available: true
+  },
+  {
+    id: "giftcard",
+    backendValue: "giftcard",
+    displayName: "Gift Card",
+    icon: <Gift className="w-5 h-5" />,
+    description: "Pago con Gift Card",
     available: true
   },
   {

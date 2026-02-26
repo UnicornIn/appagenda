@@ -1,32 +1,31 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader, Plus, ShieldCheck, UserCog } from "lucide-react";
+import { Loader, Plus, Search, ShieldCheck, UserCog } from "lucide-react";
 import { Sidebar } from "../../../components/Layout/Sidebar";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import type { CreateSystemUserPayload, SystemUser } from "../../../types/system-user";
 import { systemUsersService } from "./systemUsersService";
 import { SystemUserFormModal } from "./system-user-form-modal";
 import { formatSedeNombre } from "../../../lib/sede";
+import { sedeService } from "../Sedes/sedeService";
 
 const roleBadgeClasses: Record<string, string> = {
   superadmin: "bg-gray-900 text-white",
-  admin: "bg-gray-100 text-gray-800",
   admin_sede: "bg-blue-50 text-blue-700",
-  call_center: "bg-green-50 text-green-700",
 };
 
 const roleLabels: Record<string, string> = {
   superadmin: "superadmin",
-  admin: "admin",
   admin_sede: "adminsede",
-  call_center: "call center",
 };
 
 export default function SystemUsersPage() {
   const { user, isLoading: authLoading } = useAuth();
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string>("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sedeNamesById, setSedeNamesById] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +41,37 @@ export default function SystemUsersPage() {
     [users, selectedUserId]
   );
 
+  const getSedeDisplayName = (systemUser: Pick<SystemUser, "sede_id" | "sede_nombre">) => {
+    const sedeNombreRaw = systemUser.sede_nombre?.trim();
+    if (sedeNombreRaw) {
+      return formatSedeNombre(sedeNombreRaw, sedeNombreRaw);
+    }
+
+    const sedeId = systemUser.sede_id?.trim();
+    if (!sedeId) {
+      return "Sin sede asignada";
+    }
+
+    return sedeNamesById[sedeId] || "Sede no disponible";
+  };
+
+  const filteredUsers = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    if (!query) return users;
+
+    return users.filter((systemUser) => {
+      const roleLabel = (roleLabels[systemUser.role] || systemUser.role).toLowerCase();
+      const sedeNombre = getSedeDisplayName(systemUser).toLowerCase();
+
+      return (
+        systemUser.nombre.toLowerCase().includes(query) ||
+        systemUser.email.toLowerCase().includes(query) ||
+        roleLabel.includes(query) ||
+        sedeNombre.includes(query)
+      );
+    });
+  }, [searchTerm, users, sedeNamesById]);
+
   const loadSystemUsers = async () => {
     if (!user?.access_token) {
       setError("No hay token de autenticación disponible");
@@ -54,9 +84,13 @@ export default function SystemUsersPage() {
       setError(null);
       const data = await systemUsersService.getSystemUsers(user.access_token);
       setUsers(data);
-      if (data.length > 0 && !selectedUserId) {
-        setSelectedUserId(data[0]._id);
-      }
+      setSelectedUserId((currentSelectedUserId) => {
+        if (data.length === 0) return "";
+        if (currentSelectedUserId && data.some((systemUser) => systemUser._id === currentSelectedUserId)) {
+          return currentSelectedUserId;
+        }
+        return data[0]._id;
+      });
     } catch (err) {
       console.error("Error cargando usuarios del sistema:", err);
       setError(err instanceof Error ? err.message : "Error al cargar usuarios del sistema");
@@ -65,9 +99,28 @@ export default function SystemUsersPage() {
     }
   };
 
+  const loadSedeNames = async () => {
+    if (!user?.access_token) return;
+    try {
+      const sedes = await sedeService.getSedes(user.access_token);
+      const nextSedeNamesById = sedes.reduce<Record<string, string>>((acc, sede) => {
+        const sedeId = sede.sede_id?.trim();
+        if (!sedeId) return acc;
+
+        const sedeNombre = formatSedeNombre(sede.nombre, sede.nombre);
+        acc[sedeId] = sedeNombre || sede.nombre || "Sede";
+        return acc;
+      }, {});
+      setSedeNamesById(nextSedeNamesById);
+    } catch (err) {
+      console.error("Error cargando nombres de sedes para usuarios del sistema:", err);
+    }
+  };
+
   useEffect(() => {
     if (!authLoading && user) {
       loadSystemUsers();
+      loadSedeNames();
     }
   }, [authLoading, user?.access_token]);
 
@@ -125,7 +178,7 @@ export default function SystemUsersPage() {
                 <ShieldCheck className="h-5 w-5 text-gray-900" />
                 <h1 className="text-lg font-semibold text-gray-900">Usuarios del Sistema</h1>
                 <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                  {users.length}
+                  {searchTerm ? `${filteredUsers.length}/${users.length}` : users.length}
                 </span>
               </div>
 
@@ -138,6 +191,17 @@ export default function SystemUsersPage() {
                   Nuevo
                 </button>
               )}
+            </div>
+
+            <div className="mt-3 relative">
+              <Search className="h-4 w-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar por nombre, email o sede..."
+                className="w-full h-9 pl-8 pr-3 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-300"
+              />
             </div>
           </div>
 
@@ -160,7 +224,13 @@ export default function SystemUsersPage() {
           )}
 
           <div className="p-2">
-            {users.map((systemUser) => {
+            {filteredUsers.length === 0 && (
+              <div className="px-4 py-6 text-center text-xs text-gray-500">
+                No se encontraron usuarios con ese criterio.
+              </div>
+            )}
+
+            {filteredUsers.map((systemUser) => {
               const badgeClass = roleBadgeClasses[systemUser.role] || "bg-gray-100 text-gray-700";
               const isSelected = selectedUserId === systemUser._id;
 
@@ -185,7 +255,7 @@ export default function SystemUsersPage() {
                   </div>
                   <div className="mt-2 flex items-center justify-between text-[11px] text-gray-500">
                     <span>{systemUser.activo ? "Activo" : "Inactivo"}</span>
-                    <span>{systemUser.sede_id || "Sin sede"}</span>
+                    <span>{getSedeDisplayName(systemUser)}</span>
                   </div>
                 </button>
               );
@@ -223,22 +293,12 @@ export default function SystemUsersPage() {
                   <div>
                     <p className="text-gray-500 mb-1">Sede</p>
                     <p className="text-gray-900 font-medium">
-                      {selectedUser.sede_id
-                        ? formatSedeNombre(selectedUser.sede_id, selectedUser.sede_id)
-                        : "Sin sede asignada"}
+                      {getSedeDisplayName(selectedUser)}
                     </p>
                   </div>
                   <div>
                     <p className="text-gray-500 mb-1">Tipo de usuario</p>
                     <p className="text-gray-900 font-medium">{selectedUser.user_type || "system"}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500 mb-1">Comisión</p>
-                    <p className="text-gray-900 font-medium">
-                      {selectedUser.comision === null || selectedUser.comision === undefined
-                        ? "No definida"
-                        : `${selectedUser.comision}%`}
-                    </p>
                   </div>
                   <div>
                     <p className="text-gray-500 mb-1">Especialidades</p>

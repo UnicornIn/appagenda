@@ -47,10 +47,6 @@ export const systemUsersService = {
       requestData.sede_id = sedeId;
     }
 
-    if (payload.comision !== undefined) {
-      requestData.comision = payload.comision;
-    }
-
     if (Array.isArray(payload.especialidades)) {
       requestData.especialidades = payload.especialidades.filter((id) => Boolean(id?.trim()));
     }
@@ -58,10 +54,6 @@ export const systemUsersService = {
     const password = payload.password?.trim();
     if (password) {
       requestData.password = password;
-    }
-
-    if (payload.horario) {
-      requestData.horario = payload.horario;
     }
 
     const response = await fetch(`${API_BASE_URL}superadmin/system-users/`, {

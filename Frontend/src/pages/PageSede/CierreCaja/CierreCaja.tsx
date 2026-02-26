@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Sidebar } from "../../../components/Layout/Sidebar";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from "../../../components/ui/dialog";
 import { Calendar, Download, Loader2, Plus, Trash2 } from "lucide-react"; //Wallet +
-import { cashService } from "./api/cashService";
+import { cashService, getEfectivoDia } from "./api/cashService";
 import type { CashCierre, CashEgreso, CashIngreso, CashResumen, CashReporteRaw } from "./types";
 import { formatDateDMY } from "../../../lib/dateFormat";
 import { toast } from "../../../hooks/use-toast";
@@ -71,6 +71,8 @@ const pickNumber = (source: any, keys: string[]): number | undefined => {
 const unwrapData = (data: any) => data?.data ?? data?.result ?? data;
 
 const formatDate = (dateString?: string) => formatDateDMY(dateString);
+const getSessionToken = () =>
+  sessionStorage.getItem("access_token") || localStorage.getItem("access_token") || "";
 
 export default function CierreCajaPage() {
   const [moneda, setMoneda] = useState("COP");
@@ -114,13 +116,17 @@ export default function CierreCajaPage() {
   const [egresoTipo, setEgresoTipo] = useState("gasto_operativo");
   const [egresoModalOpen, setEgresoModalOpen] = useState(false);
 
+  const [efectivoEnCaja, setEfectivoEnCaja] = useState<number | null>(null);
+  const [loadingEfectivoEnCaja, setLoadingEfectivoEnCaja] = useState(false);
+  const [efectivoEnCajaError, setEfectivoEnCajaError] = useState<string | null>(null);
+
+  const [cierreNota, setCierreNota] = useState("");
+  const [cierreFecha, setCierreFecha] = useState(getToday());
+  const [cierreEfectivoContado, setCierreEfectivoContado] = useState("");
+
   // const [aperturaMonto, setAperturaMonto] = useState("");
   // const [aperturaNota, setAperturaNota] = useState("");
   // // const [aperturaFecha, setAperturaFecha] = useState(getToday());
-
-  // const [cierreNota, setCierreNota] = useState("");
-  // const [cierreFecha, setCierreFecha] = useState(getToday());
-  // const [cierreEfectivoContado, setCierreEfectivoContado] = useState("0");
 
   useEffect(() => {
     const sedeStorage =
@@ -149,6 +155,19 @@ export default function CierreCajaPage() {
     const egresosValor = resumen.egresos || egresosTotal;
     return (resumen.ingresos || 0) - egresosValor;
   }, [resumen.ingresos, resumen.egresos, egresosTotal]);
+
+  const cierreDiferencia = useMemo(() => {
+    if (efectivoEnCaja === null || !cierreEfectivoContado.trim()) {
+      return null;
+    }
+
+    const contado = toNumber(cierreEfectivoContado);
+    if (Number.isNaN(contado)) {
+      return null;
+    }
+
+    return Number((contado - efectivoEnCaja).toFixed(2));
+  }, [cierreEfectivoContado, efectivoEnCaja]);
 
   const formatMoney = (value: number) => {
     const locale = monedaSede === "USD" ? "en-US" : monedaSede === "MXN" ? "es-MX" : "es-CO";
@@ -273,6 +292,55 @@ export default function CierreCajaPage() {
     });
   };
 
+  const normalizeEfectivoEnCaja = (data: any): number => {
+    const root = unwrapData(data) || {};
+    const efectivo =
+      pickNumber(root, ["efectivo", "efectivo_esperado", "efectivo_total", "saldo"]) ??
+      pickNumber(root?.resumen, ["efectivo", "efectivo_esperado", "saldo"]) ??
+      0;
+
+    return toNumber(efectivo);
+  };
+
+  const loadEfectivoEnCaja = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!sedeId) return;
+
+      const token = getSessionToken();
+      if (!token) {
+        setEfectivoEnCaja(null);
+        setEfectivoEnCajaError("No hay token de autenticación para consultar efectivo en caja");
+        return;
+      }
+
+      setLoadingEfectivoEnCaja(true);
+      setEfectivoEnCajaError(null);
+
+      try {
+        const data = await getEfectivoDia(token, {
+          sede_id: sedeId,
+          fecha: cierreFecha,
+        });
+        const efectivo = normalizeEfectivoEnCaja(data);
+        setEfectivoEnCaja(efectivo);
+      } catch (err: any) {
+        const message = err?.message || "No se pudo obtener el efectivo en caja";
+        setEfectivoEnCaja(null);
+        setEfectivoEnCajaError(message);
+
+        if (!options?.silent) {
+          toast({
+            title: "Error consultando efectivo en caja",
+            description: message,
+          });
+        }
+      } finally {
+        setLoadingEfectivoEnCaja(false);
+      }
+    },
+    [cierreFecha, sedeId]
+  );
+
   const loadResumen = async () => {
     if (!sedeId) return;
     const { start, end } = normalizeDateRange(fechaDesde, fechaHasta);
@@ -369,7 +437,13 @@ export default function CierreCajaPage() {
   };
 
   const loadAll = async () => {
-    await Promise.all([loadResumen(), loadIngresos(), loadEgresos(), loadCierres()]);
+    await Promise.all([
+      loadResumen(),
+      loadIngresos(),
+      loadEgresos(),
+      loadCierres(),
+      loadEfectivoEnCaja({ silent: true }),
+    ]);
   };
 
   useEffect(() => {
@@ -377,6 +451,12 @@ export default function CierreCajaPage() {
       loadAll();
     }
   }, [sedeId, fechaDesde, fechaHasta, monedaSede]);
+
+  useEffect(() => {
+    if (sedeId) {
+      loadEfectivoEnCaja({ silent: true });
+    }
+  }, [sedeId, loadEfectivoEnCaja]);
 
   const handleCreateIngreso = async () => {
     if (!sedeId) return;
@@ -482,6 +562,61 @@ export default function CierreCajaPage() {
       await loadAll();
     } catch (err: any) {
       setError(err?.message || "No se pudo eliminar el egreso");
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const handleCierreCaja = async () => {
+    if (!sedeId) {
+      setError("No se encontró la sede actual para cerrar caja");
+      return;
+    }
+
+    if (efectivoEnCaja === null) {
+      setError("No se pudo obtener el efectivo en caja desde backend. Actualiza e intenta de nuevo.");
+      return;
+    }
+
+    if (!cierreEfectivoContado.trim()) {
+      setError("Debes ingresar el efectivo contado para cerrar caja");
+      return;
+    }
+
+    const efectivoContadoValue = toNumber(cierreEfectivoContado);
+    if (Number.isNaN(efectivoContadoValue) || efectivoContadoValue < 0) {
+      setError("El efectivo contado debe ser mayor o igual a 0");
+      return;
+    }
+
+    const diferencia = Number((efectivoContadoValue - efectivoEnCaja).toFixed(2));
+
+    setLoadingAction(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      await cashService.cierreCaja({
+        sede_id: sedeId,
+        fecha: cierreFecha,
+        moneda: monedaSede,
+        observaciones: cierreNota.trim() || undefined,
+        efectivo_contado: efectivoContadoValue,
+        efectivo_sistema: efectivoEnCaja,
+        diferencia,
+      });
+
+      setCierreNota("");
+      setCierreEfectivoContado("");
+      setSuccess("Caja cerrada correctamente");
+      toast({
+        title: "Cierre realizado",
+        description: "La caja se cerró usando el efectivo calculado por backend.",
+      });
+
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.message || "No se pudo cerrar la caja");
     } finally {
       setLoadingAction(false);
     }
@@ -752,6 +887,129 @@ export default function CierreCajaPage() {
                   {loadingResumen ? "..." : formatMoney(resumen.balance || balanceCalculado)}
                 </div>
                 <p className="text-xs text-gray-500">Ingresos - egresos</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Efectivo en caja y cierre */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card className="border-gray-200">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-gray-700">Efectivo en caja</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
+                  {loadingEfectivoEnCaja ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Consultando efectivo del día...
+                    </div>
+                  ) : (
+                    <div className="text-3xl font-bold text-gray-900">
+                      {efectivoEnCaja === null ? "--" : formatMoney(efectivoEnCaja)}
+                    </div>
+                  )}
+                  <p className="mt-1 text-xs text-gray-500">
+                    Valor calculado por backend desde <code>GET /cash/efectivo-dia</code>
+                  </p>
+                </div>
+
+                {efectivoEnCajaError && (
+                  <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                    {efectivoEnCajaError}
+                  </div>
+                )}
+
+                <Button
+                  variant="outline"
+                  onClick={() => loadEfectivoEnCaja()}
+                  disabled={loadingEfectivoEnCaja || !sedeId}
+                  className="border-gray-300 text-gray-900 hover:bg-gray-100"
+                >
+                  {loadingEfectivoEnCaja ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : null}
+                  Actualizar efectivo en caja
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="border-gray-200">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-gray-700">Cerrar caja</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Fecha de cierre</label>
+                    <Input
+                      type="date"
+                      value={cierreFecha}
+                      onChange={(e) => setCierreFecha(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Efectivo contado</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={cierreEfectivoContado}
+                      onChange={(e) => setCierreEfectivoContado(e.target.value)}
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Observaciones (opcional)</label>
+                  <Input
+                    value={cierreNota}
+                    onChange={(e) => setCierreNota(e.target.value)}
+                    placeholder="Notas del cierre de caja"
+                  />
+                </div>
+
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
+                  <div className="flex items-center justify-between">
+                    <span>Efectivo sistema</span>
+                    <span className="font-semibold">
+                      {efectivoEnCaja === null ? "--" : formatMoney(efectivoEnCaja)}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <span>Diferencia (contado - sistema)</span>
+                    <span
+                      className={`font-semibold ${
+                        cierreDiferencia === null
+                          ? "text-gray-700"
+                          : cierreDiferencia > 0
+                            ? "text-emerald-700"
+                            : cierreDiferencia < 0
+                              ? "text-red-700"
+                              : "text-gray-700"
+                      }`}
+                    >
+                      {cierreDiferencia === null ? "--" : formatMoney(cierreDiferencia)}
+                    </span>
+                  </div>
+                </div>
+
+                <Button
+                  onClick={handleCierreCaja}
+                  disabled={
+                    loadingAction || loadingEfectivoEnCaja || efectivoEnCaja === null || !cierreEfectivoContado.trim()
+                  }
+                  className="bg-gray-900 hover:bg-gray-800 text-white"
+                >
+                  {loadingAction ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Cerrando caja...
+                    </>
+                  ) : (
+                    "Cerrar caja"
+                  )}
+                </Button>
               </CardContent>
             </Card>
           </div>

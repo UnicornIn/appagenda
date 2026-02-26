@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
-import { X, ArrowLeft, CheckCircle, CreditCard, DollarSign, Calendar, Clock, User, Scissors, Link as LinkIcon, Wallet } from "lucide-react"
+import { X, ArrowLeft, CheckCircle, CreditCard, DollarSign, Calendar, Clock, User, Scissors, Link as LinkIcon, Wallet, Gift } from "lucide-react"
 import { crearCita } from '../../../../components/Quotes/citasApi'
 import { useAuth } from '../../../../components/Auth/AuthContext'
 
@@ -70,6 +70,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     const [selectedProcessType, setSelectedProcessType] = useState<"reserva" | "pago">("reserva");
     const [selectedPaymentType, setSelectedPaymentType] = useState<"deposit" | "full">("full");
     const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("sin_pago");
+    const [giftCardCode, setGiftCardCode] = useState("");
     const [userCurrency, setUserCurrency] = useState<string>("USD");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -80,6 +81,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         { id: "link_pago", name: "Pago con link", icon: <LinkIcon className="w-4 h-4" /> },
         { id: "tarjeta_credito", name: "Tarjeta Crédito", icon: <CreditCard className="w-4 h-4" /> },
         { id: "tarjeta_debito", name: "Tarjeta Débito", icon: <CreditCard className="w-4 h-4" /> },
+        { id: "giftcard", name: "Gift Card", icon: <Gift className="w-4 h-4" /> },
         ...(isCopCurrency ? [{ id: "addi", name: "Addi", icon: <Wallet className="w-4 h-4" /> }] : []),
         { id: "efectivo", name: "Efectivo", icon: <DollarSign className="w-4 h-4" /> },
         { id: "transferencia", name: "Transferencia", icon: <Wallet className="w-4 h-4" /> },
@@ -122,6 +124,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             setSelectedPaymentMethod(selectedProcessType === "reserva" ? "sin_pago" : "efectivo");
         }
     }, [isCopCurrency, selectedPaymentMethod, selectedProcessType]);
+
+    useEffect(() => {
+        if (selectedPaymentMethod !== "giftcard" && giftCardCode) {
+            setGiftCardCode("");
+        }
+    }, [selectedPaymentMethod, giftCardCode]);
 
     // 🔥 CALCULOS
     const FIXED_DEPOSIT = getFixedDepositByCurrency(userCurrency);
@@ -183,6 +191,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         setError(null);
 
         try {
+            const metodoPagoSeleccionado = sanitizePaymentMethod(selectedPaymentMethod);
+            const codigoGiftcard = giftCardCode.trim();
+            if (withPayment && metodoPagoSeleccionado === "giftcard" && !codigoGiftcard) {
+                throw new Error("Debes ingresar el codigo de la Gift Card.");
+            }
+
             // 🔥 CALCULAR MONTOS
             let abonoMonto = 0;
             let estadoPago = "pendiente";
@@ -221,7 +235,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 moneda: userCurrency,
                 notas: citaData.notas || "",
                 cliente_nombre: citaData.cliente,
-                metodo_pago: sanitizePaymentMethod(selectedPaymentMethod),
+                metodo_pago: metodoPagoSeleccionado,
+                ...(metodoPagoSeleccionado === "giftcard" && codigoGiftcard
+                    ? { codigo_giftcard: codigoGiftcard }
+                    : {}),
             };
 
             console.log('📤 Creando cita:', citaParaCrear);
@@ -263,6 +280,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     };
 
     const handleConfirm = () => {
+        if (selectedProcessType === "pago" && selectedPaymentMethod === "giftcard" && !giftCardCode.trim()) {
+            setError("Debes ingresar el codigo de la Gift Card para continuar.");
+            return;
+        }
+
         if (selectedProcessType === "reserva") {
             handleCreateAppointment(false);
         } else {
@@ -555,6 +577,22 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                     ))}
                                     
                                 </div>
+
+                                {selectedPaymentMethod === "giftcard" && (
+                                    <div className="mt-3">
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                            Codigo Gift Card *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={giftCardCode}
+                                            onChange={(event) => setGiftCardCode(event.target.value)}
+                                            placeholder="Ej: RFC-GCP-1234"
+                                            className="w-full rounded border border-gray-300 px-2 py-2 text-xs text-gray-900 focus:border-gray-900 focus:outline-none"
+                                            disabled={loading}
+                                        />
+                                    </div>
+                                )}
                             </div>
 
                             {/* RESUMEN FINAL */}
@@ -587,10 +625,17 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                              selectedPaymentMethod === "addi" ? "Addi" :
                                              selectedPaymentMethod === "tarjeta" ? "Tarjeta" :
                                              selectedPaymentMethod === "efectivo" ? "Efectivo" :
+                                             selectedPaymentMethod === "giftcard" ? "Gift Card" :
                                              selectedPaymentMethod === "transferencia" ? "Transferencia" :
                                              "Sin pago"}
                                         </span>
                                     </div>
+                                    {selectedPaymentMethod === "giftcard" && giftCardCode.trim() && (
+                                        <div className="flex justify-between">
+                                            <span>Codigo Gift Card:</span>
+                                            <span className="font-medium text-gray-900">{giftCardCode.trim()}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>

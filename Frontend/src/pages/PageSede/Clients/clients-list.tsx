@@ -27,7 +27,7 @@ interface ClientsListProps {
     tiene_anterior: boolean;
   }
   error?: string | null
-  isLoading?: boolean
+  isFetching?: boolean
   onPageChange?: (page: number, filtro?: string) => void
   onSearch?: (filtro: string) => void
   searchValue: string
@@ -39,15 +39,15 @@ export function ClientsList({
   clientes, 
   metadata,
   error, 
-  isLoading = false,
+  isFetching = false,
   onPageChange,
   onSearch,
   searchValue
 }: ClientsListProps) {
 
   const clearSearch = () => {
-  onSearch?.("")
-}
+    onSearch?.("")
+  }
 
   // Manejar cambio de página
   const handlePageChange = (page: number) => {
@@ -75,7 +75,7 @@ export function ClientsList({
     }
   }
 
-  if (error) {
+  if (error && clientes.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center p-4">
         <div className="text-center">
@@ -127,13 +127,11 @@ export function ClientsList({
               value={searchValue}
               onChange={(e) => onSearch?.(e.target.value)}
               className="pl-9 h-8 text-sm border-gray-300"
-              disabled={isLoading}
             />
             {searchValue && (
               <button
                 onClick={clearSearch}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                disabled={isLoading}
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -152,22 +150,29 @@ export function ClientsList({
               size="sm"
               className="h-5 px-2 text-xs text-gray-500 hover:text-gray-700"
               onClick={clearSearch}
-              disabled={isLoading}
             >
               Limpiar filtro
             </Button>
+          </div>
+        )}
+
+        {error && clientes.length > 0 && (
+          <div className="mt-2 text-xs text-red-600">
+            No se pudieron actualizar los resultados: {error}
           </div>
         )}
       </div>
 
       {/* Table */}
       <div className="flex-1 overflow-auto p-4">
-        {isLoading ? (
-          <div className="flex h-48 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-            <span className="ml-2 text-sm text-gray-600">Cargando clientes...</span>
+        {isFetching && (
+          <div className="mb-3 flex items-center gap-2 text-xs text-gray-500">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
+            <span>Buscando clientes...</span>
           </div>
-        ) : clientes.length === 0 ? (
+        )}
+
+        {clientes.length === 0 ? (
           <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-white">
             <div className="text-center">
               <User className="h-8 w-8 text-gray-300 mx-auto mb-2" />
@@ -270,7 +275,7 @@ export function ClientsList({
                     variant="outline"
                     size="sm"
                     onClick={goToPreviousPage}
-                    disabled={!metadata.tiene_anterior || isLoading}
+                    disabled={!metadata.tiene_anterior || isFetching}
                     className="h-8 px-3 border-gray-300 text-gray-700 hover:bg-gray-50"
                   >
                     <ChevronLeft className="h-4 w-4 mr-1" />
@@ -297,7 +302,7 @@ export function ClientsList({
                           variant={pageNumber === metadata.pagina ? "default" : "outline"}
                           size="sm"
                           onClick={() => goToPage(pageNumber)}
-                          disabled={isLoading}
+                          disabled={isFetching}
                           className={`h-8 w-8 text-sm ${
                             pageNumber === metadata.pagina 
                               ? "bg-blue-600 text-white hover:bg-blue-700" 
@@ -316,7 +321,7 @@ export function ClientsList({
                           variant="outline"
                           size="sm"
                           onClick={() => goToPage(metadata.total_paginas)}
-                          disabled={isLoading}
+                          disabled={isFetching}
                           className="h-8 w-8 text-sm border-gray-300 text-gray-700 hover:bg-gray-50"
                         >
                           {metadata.total_paginas}
@@ -329,7 +334,7 @@ export function ClientsList({
                     variant="outline"
                     size="sm"
                     onClick={goToNextPage}
-                    disabled={!metadata.tiene_siguiente || isLoading}
+                    disabled={!metadata.tiene_siguiente || isFetching}
                     className="h-8 px-3 border-gray-300 text-gray-700 hover:bg-gray-50"
                   >
                     <span className="text-sm">Siguiente</span>

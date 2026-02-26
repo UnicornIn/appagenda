@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Sidebar } from "../../../components/Layout/Sidebar"
 import { ClientsList } from "./clients-list"
 import { ClientDetail } from "./client-detail"
@@ -11,7 +11,7 @@ import { sedeService } from "../../PageSuperAdmin/Sedes/sedeService"
 import { useAuth } from "../../../components/Auth/AuthContext"
 import { Loader } from "lucide-react"
 
-const SEARCH_DEBOUNCE_MS = 500
+const SEARCH_DEBOUNCE_MS = 400
 
 const normalizarFichas = (raw: any): any[] | undefined => {
   if (Array.isArray(raw)) return raw
@@ -54,12 +54,15 @@ export default function ClientsPage() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [metadata, setMetadata] = useState<ClientesPaginadosMetadata | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
+  const [isFetching, setIsFetching] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [sedes, setSedes] = useState<any[]>([])
   const [itemsPorPagina, setItemsPorPagina] = useState(10)
+  const hasLoadedInitialRef = useRef(false)
+  const latestRequestIdRef = useRef(0)
 
   const { user, isLoading: authLoading } = useAuth()
 
@@ -73,15 +76,29 @@ export default function ClientsPage() {
     }
   }
 
-  const loadClientes = async (pagina: number = 1, filtro: string = searchTerm) => {
+  const loadClientes = async (
+    pagina: number = 1,
+    filtro: string = searchTerm,
+    options: { initial?: boolean } = {}
+  ) => {
+    const isInitialRequest = options.initial ?? false
+
     if (!user?.access_token) {
       setError("No hay token de autenticación disponible")
-      setIsLoading(false)
+      setIsInitialLoading(false)
+      setIsFetching(false)
       return
     }
 
+    const requestId = ++latestRequestIdRef.current
+
     try {
-      setIsLoading(true)
+      if (isInitialRequest) {
+        setIsInitialLoading(true)
+      } else {
+        setIsFetching(true)
+      }
+
       setError(null)
 
       const result = await clientesService.getClientesPaginados(user.access_token, {
@@ -90,16 +107,23 @@ export default function ClientsPage() {
         filtro
       })
 
+      if (requestId !== latestRequestIdRef.current) return
+
       setClientes(result.clientes.map(asegurarClienteCompleto))
       setMetadata(result.metadata)
 
     } catch (err) {
+      if (requestId !== latestRequestIdRef.current) return
       console.error("❌ Error cargando clientes:", err)
       setError(err instanceof Error ? err.message : "Error al cargar los clientes")
-      setClientes([])
-      setMetadata(null)
     } finally {
-      setIsLoading(false)
+      if (requestId !== latestRequestIdRef.current) return
+
+      if (isInitialRequest) {
+        setIsInitialLoading(false)
+      } else {
+        setIsFetching(false)
+      }
     }
   }
 
@@ -112,12 +136,24 @@ export default function ClientsPage() {
   useEffect(() => {
     if (!user?.access_token) return
 
+    if (!hasLoadedInitialRef.current) {
+      hasLoadedInitialRef.current = true
+      loadClientes(1, searchTerm, { initial: true })
+      return
+    }
+
     const timeout = setTimeout(() => {
       loadClientes(1, searchTerm)
     }, SEARCH_DEBOUNCE_MS)
 
     return () => clearTimeout(timeout)
   }, [user?.access_token, searchTerm, itemsPorPagina])
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      setIsInitialLoading(false)
+    }
+  }, [authLoading, user])
 
   const handlePageChange = (pagina: number, filtro: string = searchTerm) => {
     loadClientes(pagina, filtro)
@@ -157,7 +193,7 @@ export default function ClientsPage() {
 
   const handleBack = () => setSelectedClient(null)
 
-  if (authLoading || isLoading) {
+  if (authLoading || (Boolean(user) && isInitialLoading)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-white">
         <div className="flex items-center gap-3">
@@ -193,7 +229,9 @@ export default function ClientsPage() {
                 <div>
                   <h1 className="text-lg font-medium text-gray-900">Clientes</h1>
                   <p className="text-xs text-gray-500 mt-1">
-                    {metadata ? `Mostrando ${clientes.length} de ${metadata.total} clientes` : "Cargando..."}
+                    {metadata
+                      ? `Mostrando ${clientes.length} de ${metadata.total} clientes`
+                      : `${clientes.length} clientes`}
                   </p>
                 </div>
                 
@@ -227,7 +265,7 @@ export default function ClientsPage() {
               clientes={clientes}
               metadata={metadata || undefined}
               error={error}
-              isLoading={isLoading}
+              isFetching={isFetching}
               onPageChange={handlePageChange}
               onSearch={handleSearch}
               searchValue={searchTerm}

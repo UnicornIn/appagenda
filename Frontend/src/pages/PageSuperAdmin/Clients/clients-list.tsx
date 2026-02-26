@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import { Search, Plus, User, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { Search, Plus, User, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2 } from 'lucide-react'
 import { Button } from "../../../components/ui/button"
 import { Input } from "../../../components/ui/input"
 import {
@@ -26,6 +26,7 @@ interface ClientsListProps {
   sedes?: Sede[]
   onExport?: () => void
   itemsPerPage?: number
+  isFetching?: boolean
 }
 
 export function ClientsList({ 
@@ -38,7 +39,8 @@ export function ClientsList({
   selectedSede = "all",
   sedes = [],
   onExport,
-  itemsPerPage = 10
+  itemsPerPage = 10,
+  isFetching = false
 }: ClientsListProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
@@ -102,7 +104,7 @@ export function ClientsList({
     return rangeWithDots
   }
 
-  if (error) {
+  if (error && clientes.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center p-8">
         <div className="text-center">
@@ -132,6 +134,12 @@ export function ClientsList({
               {filteredClientes.length} cliente{filteredClientes.length !== 1 ? 's' : ''} encontrado{filteredClientes.length !== 1 ? 's' : ''}
               {searchTerm && ` para "${searchTerm}"`}
             </p>
+            {isFetching && (
+              <div className="mt-2 inline-flex items-center gap-2 text-xs text-gray-500">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
+                <span>Actualizando clientes...</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3">
             {onExport && (
@@ -194,6 +202,12 @@ export function ClientsList({
 
       {/* Table */}
       <div className="flex-1 overflow-auto p-6">
+        {error && clientes.length > 0 && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            No se pudo actualizar la lista: {error}
+          </div>
+        )}
+
         {filteredClientes.length === 0 ? (
           <div className="flex h-64 items-center justify-center rounded-xl border-2 border-dashed border-gray-200 bg-white">
             <div className="text-center px-8">
