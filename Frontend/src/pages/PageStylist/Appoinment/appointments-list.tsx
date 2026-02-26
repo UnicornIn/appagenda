@@ -1,9 +1,11 @@
 "use client";
 
-import { Clock, PlayCircle, Ban, Trash2, X, UserX, CheckCircle, Tag } from "lucide-react";
+import { Clock, PlayCircle, Ban, Trash2, X, UserX, CheckCircle, Tag, Pencil } from "lucide-react";
 import { Cita } from '../../../types/fichas';
 import { Bloqueo, deleteBloqueo } from '../../../components/Quotes/bloqueosApi';
 import { useState } from "react";
+import BloqueosModal from "../../../components/Quotes/Bloqueos";
+import BottomSheet from "../../../components/ui/bottom-sheet";
 
 interface AppointmentsListProps {
   appointments: Cita[];
@@ -11,7 +13,9 @@ interface AppointmentsListProps {
   onCitaSelect: (cita: Cita) => void;
   citaSeleccionada: Cita | null;
   fechaFiltro?: string;
-  onBloqueoEliminado?: () => void;
+  citasValidacion?: Cita[];
+  onBloqueoEliminado?: (bloqueoId?: string) => void;
+  onBloqueoActualizado?: (bloqueo: Bloqueo) => void;
 }
 
 // 🔥 HELPER: Obtener nombres de servicios
@@ -57,15 +61,37 @@ export function AppointmentsList({
   onCitaSelect, 
   citaSeleccionada, 
   fechaFiltro,
-  onBloqueoEliminado 
+  citasValidacion = [],
+  onBloqueoEliminado,
+  onBloqueoActualizado,
 }: AppointmentsListProps) {
   const [bloqueoAEliminar, setBloqueoAEliminar] = useState<Bloqueo | null>(null);
+  const [bloqueoEditando, setBloqueoEditando] = useState<Bloqueo | null>(null);
+  const [mostrarModalEdicion, setMostrarModalEdicion] = useState(false);
   const [eliminando, setEliminando] = useState(false);
 
   const getAuthToken = () => {
     return localStorage.getItem('access_token') || 
            sessionStorage.getItem('access_token') || 
            '';
+  };
+
+  const handleEditBloqueo = (bloqueo: Bloqueo) => {
+    if (!bloqueo._id) {
+      alert("No se puede editar: bloqueo sin ID");
+      return;
+    }
+    setBloqueoEditando(bloqueo);
+    setMostrarModalEdicion(true);
+  };
+
+  const handleCloseEditModal = () => {
+    setMostrarModalEdicion(false);
+    setBloqueoEditando(null);
+  };
+
+  const handleBloqueoGuardado = (bloqueoActualizado: Bloqueo) => {
+    onBloqueoActualizado?.(bloqueoActualizado);
   };
 
   const handleEliminarBloqueo = async (bloqueo: Bloqueo) => {
@@ -82,6 +108,7 @@ export function AppointmentsList({
 
     try {
       setEliminando(true);
+      setBloqueoAEliminar(bloqueo);
       const token = getAuthToken();
       
       if (!token) {
@@ -92,7 +119,7 @@ export function AppointmentsList({
       await deleteBloqueo(bloqueo._id, token);
       
       if (onBloqueoEliminado) {
-        onBloqueoEliminado();
+        onBloqueoEliminado(bloqueo._id);
       }
 
       alert("Bloqueo eliminado");
@@ -226,8 +253,8 @@ export function AppointmentsList({
 
   if (elementosCombinados.length === 0) {
     return (
-      <div className="space-y-2">
-        <div className="rounded border border-gray-200 bg-white p-4 text-center">
+      <div className="space-y-3">
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 text-center">
           <div className="text-gray-300 mb-2">
             <svg className="w-10 h-10 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -245,14 +272,12 @@ export function AppointmentsList({
   }
 
   return (
-    <div className="space-y-1.5">
+    <>
+    <div className="space-y-3">
       {bloqueos.length > 0 && (
-        <div className="text-xs text-gray-500 mb-2 px-1 flex items-center gap-1">
+        <div className="flex items-center gap-1 rounded-xl bg-gray-100 px-3 py-2 text-xs text-gray-600">
           <Ban className="h-3 w-3" />
-          <span>{bloqueos.length} bloqueo(s)</span>
-          <span className="text-gray-400 ml-auto text-[10px]">
-            Click para eliminar
-          </span>
+          <span className="ml-1">{bloqueos.length} bloqueo(s) configurado(s)</span>
         </div>
       )}
 
@@ -274,49 +299,49 @@ export function AppointmentsList({
           return (
             <div
               key={appointment.cita_id}
-              className={`rounded border p-3 cursor-pointer transition-all ${
+              className={`cursor-pointer overflow-hidden rounded-2xl border bg-white p-4 transition-transform active:scale-[0.99] ${
                 citaSeleccionada?.cita_id === appointment.cita_id
-                  ? "border-gray-800 bg-gray-50"
-                  : `border-gray-200 hover:border-gray-300 hover:bg-gray-50`
+                  ? "border-gray-900"
+                  : "border-gray-200"
               }`}
               onClick={() => onCitaSelect(appointment)}
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between mb-1">
+                  <div className="mb-1 flex items-start justify-between gap-2">
                     {/* 🔥 MOSTRAR SERVICIOS CON BADGE SI HAY MÚLTIPLES */}
-                    <div className="flex items-center gap-1 flex-1">
-                      <h3 className="font-medium text-gray-900 text-sm line-clamp-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <h3 className="line-clamp-2 text-sm font-semibold text-gray-900">
                         {nombresServicios}
                       </h3>
                       {cantidadServicios > 1 && (
-                        <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-semibold shrink-0">
+                        <span className="shrink-0 rounded-full bg-blue-100 px-2 py-1 text-[10px] font-semibold text-blue-700">
                           {cantidadServicios}
                         </span>
                       )}
                     </div>
                     
                     {precioTotal > 0 && (
-                      <div className="text-xs text-gray-600 font-medium flex items-center gap-1 shrink-0 ml-2">
+                      <div className="ml-2 flex shrink-0 items-center gap-1 text-xs font-medium text-gray-700">
                         <Tag className="h-3 w-3" />
                         <span>${precioTotal.toLocaleString()}</span>
                       </div>
                     )}
                   </div>
                   
-                  <div className="text-xs text-gray-700 font-medium mb-1 truncate">
+                  <div className="mb-2 truncate text-xs font-medium text-gray-700">
                     {nombreCliente} {apellidoCliente}
                   </div>
                   
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-xs text-gray-500">
                       <Clock className="h-3 w-3" />
                       <span>{appointment.hora_inicio} - {appointment.hora_fin}</span>
                     </div>
                     
-                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium border ${estadoInfo.borderColor} ${estadoInfo.color}`}>
+                    <div className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${estadoInfo.borderColor} ${estadoInfo.color}`}>
                       <IconComponent className="h-3 w-3" />
-                      <span className="truncate max-w-[60px]">{estadoInfo.estado}</span>
+                      <span className="truncate max-w-[110px]">{estadoInfo.estado}</span>
                     </div>
                   </div>
                 </div>
@@ -330,28 +355,38 @@ export function AppointmentsList({
           return (
             <div
               key={bloqueo._id}
-              className="rounded border border-gray-300 bg-white p-3 hover:border-gray-400 transition-colors cursor-pointer group"
-              onClick={() => handleEliminarBloqueo(bloqueo)}
-              title="Click para eliminar este bloqueo"
+              className="overflow-hidden rounded-2xl border border-gray-300 bg-white p-4"
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Ban className="h-3.5 w-3.5 text-gray-500 group-hover:text-gray-700" />
-                  <div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex items-start gap-2">
+                  <Ban className="h-3.5 w-3.5 text-gray-500" />
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-gray-800">
+                      <span className="text-sm font-medium text-gray-800">
                         {bloqueo.hora_inicio} - {bloqueo.hora_fin}
                       </span>
-                      <span className="text-xs text-gray-500">•</span>
-                      <span className="text-xs text-gray-600 truncate max-w-[120px]">
-                        {bloqueo.motivo}
-                      </span>
                     </div>
+                    <p className="mt-1 line-clamp-2 break-words text-xs text-gray-600">{bloqueo.motivo}</p>
                   </div>
                 </div>
                 
-                <div className="opacity-0 group-hover:opacity-100 transition-opacity ml-2">
-                  <Trash2 className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                <div className="ml-2 flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleEditBloqueo(bloqueo)}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-gray-300 text-gray-700 active:scale-[0.98]"
+                    aria-label="Editar bloqueo"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleEliminarBloqueo(bloqueo)}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-gray-300 text-gray-700 active:scale-[0.98]"
+                    aria-label="Eliminar bloqueo"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
               
@@ -366,5 +401,29 @@ export function AppointmentsList({
         }
       })}
     </div>
+
+    <BottomSheet
+      open={mostrarModalEdicion}
+      onClose={handleCloseEditModal}
+      title="Editar bloqueo"
+    >
+      {bloqueoEditando && (
+        <BloqueosModal
+          onClose={handleCloseEditModal}
+          compact
+          estilistaId={bloqueoEditando.profesional_id}
+          fecha={bloqueoEditando.fecha?.split("T")[0]}
+          horaInicio={bloqueoEditando.hora_inicio}
+          editingBloqueo={bloqueoEditando}
+          citasExistentes={citasValidacion}
+          onBloqueoGuardado={(bloqueo, action) => {
+            if (action === "update") {
+              handleBloqueoGuardado(bloqueo);
+            }
+          }}
+        />
+      )}
+    </BottomSheet>
+    </>
   );
 }
