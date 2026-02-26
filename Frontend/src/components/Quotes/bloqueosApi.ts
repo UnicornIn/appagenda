@@ -31,6 +31,12 @@ export interface BloqueoCreatePayload {
   fecha_fin?: string;
 }
 
+export interface BloqueoUpdatePayload {
+  hora_inicio: string;
+  hora_fin: string;
+  motivo: string;
+}
+
 // Obtener bloqueos de un profesional específico - CAMBIÉ EL NOMBRE DEL PARÁMETRO
 export async function getBloqueosProfesional(profesional_id: string, token: string) {
   const res = await fetch(`${API_BASE_URL}scheduling/block/${profesional_id}`, {
@@ -115,6 +121,25 @@ export async function createBloqueo(data: BloqueoCreatePayload, token: string) {
     const error = await res.json();
     throw new Error(error.detail || "Error al crear bloqueo");
   }
+  return res.json();
+}
+
+export async function updateBloqueo(id: string, data: BloqueoUpdatePayload, token: string) {
+  const res = await fetch(`${API_BASE_URL}scheduling/block/${id}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || "Error al actualizar bloqueo");
+  }
+
   return res.json();
 }
 
