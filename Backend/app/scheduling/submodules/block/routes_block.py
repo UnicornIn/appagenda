@@ -27,6 +27,14 @@ class BloqueoCreatePayload(BaseModel):
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
 
+class BloqueoUpdatePayload(BaseModel):
+    hora_inicio: Optional[str] = None
+    hora_fin: Optional[str] = None
+    motivo: Optional[str] = None
+    # Solo para series recurrentes
+    fecha_fin_regla: Optional[date] = None
+    # Si True y el bloqueo es parte de una serie → edita TODOS los de la serie
+    editar_serie: bool = False
 
 def _parse_time(value: str, field_name: str) -> str:
     raw = (value or "").strip()
@@ -304,6 +312,152 @@ async def listar_bloqueos_profesional(
 
     return [_serialize_bloqueo(b) for b in bloqueos]
 
+# Nota: las siguientes rutas de edición y eliminación reutilizan la misma lógica de permisos, por eso no se repite la validación de rol sino que se delega a una función común.
+
+# ==== Edición de bloqueos ====
+@router.patch("/{bloqueo_id}", response_model=dict)
+async def editar_bloqueo(
+    bloqueo_id: str,
+    payload: BloqueoUpdatePayload,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Edita un bloqueo existente.
+
+    ⭐ REGLAS:
+    - Si el bloqueo es parte de una serie y editar_serie=True → actualiza TODOS los de la serie
+    - Si editar_serie=False (default) → actualiza solo ese bloqueo puntual
+    - Valida que la nueva hora_fin > hora_inicio
+    - Valida que no haya conflicto con otro bloqueo del mismo profesional en la misma fecha
+    """
+
+    bloqueo_oid = _to_object_id(bloqueo_id)
+    bloqueo = await collection_block.find_one({"_id": bloqueo_oid})
+    if not bloqueo:
+        raise HTTPException(status_code=404, detail="Bloqueo no encontrado")
+
+    # Reutilizar la misma lógica de permisos que el delete
+    _assert_delete_permissions(current_user, bloqueo)
+
+    # Construir campos a actualizar
+    update_fields: dict = {}
+
+    # --- HORA INICIO / FIN ---
+    hora_inicio_final = bloqueo.get("hora_inicio")
+    hora_fin_final    = bloqueo.get("hora_fin")
+
+    if payload.hora_inicio is not None:
+        hora_inicio_final = _parse_time(payload.hora_inicio, "hora_inicio")
+        update_fields["hora_inicio"] = hora_inicio_final
+
+    if payload.hora_fin is not None:
+        hora_fin_final = _parse_time(payload.hora_fin, "hora_fin")
+        update_fields["hora_fin"] = hora_fin_final
+
+    if time.fromisoformat(hora_fin_final) <= time.fromisoformat(hora_inicio_final):
+        raise HTTPException(
+            status_code=400,
+            detail="La hora de fin debe ser mayor a la hora de inicio"
+        )
+
+    # --- MOTIVO ---
+    if payload.motivo is not None:
+        motivo = payload.motivo.strip() or "Bloqueo de agenda"
+        update_fields["motivo"] = motivo
+
+    # --- FECHA FIN REGLA (solo para series) ---
+    serie_id = bloqueo.get("serie_id")
+    if payload.fecha_fin_regla is not None:
+        if not serie_id:
+            raise HTTPException(
+                status_code=400,
+                detail="fecha_fin_regla solo aplica para bloqueos recurrentes"
+            )
+        fecha_inicio_regla = bloqueo.get("fecha_inicio_regla")
+        if fecha_inicio_regla and payload.fecha_fin_regla.isoformat() < fecha_inicio_regla:
+            raise HTTPException(
+                status_code=400,
+                detail="La fecha límite no puede ser menor a la fecha de inicio de la regla"
+            )
+        update_fields["fecha_fin_regla"] = payload.fecha_fin_regla.isoformat()
+
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No se enviaron campos para actualizar")
+
+    # --- VALIDAR CONFLICTO (solo si cambia horario) ---
+    cambia_horario = "hora_inicio" in update_fields or "hora_fin" in update_fields
+
+    if cambia_horario:
+        profesional_id = bloqueo.get("profesional_id")
+
+        # Obtener fechas afectadas para validar conflictos
+        if payload.editar_serie and serie_id:
+            # Todas las fechas de la serie
+            docs_serie = await collection_block.find(
+                {"serie_id": serie_id}
+            ).to_list(None)
+            fechas_a_validar = [
+                (_to_iso_date(d.get("fecha")), str(d.get("_id")))
+                for d in docs_serie
+            ]
+        else:
+            fechas_a_validar = [
+                (_to_iso_date(bloqueo.get("fecha")), bloqueo_id)
+            ]
+
+        for fecha_iso, doc_id_str in fechas_a_validar:
+            if not fecha_iso:
+                continue
+            conflicto = await collection_block.find_one({
+                "_id":            {"$ne": ObjectId(doc_id_str)},
+                "profesional_id": profesional_id,
+                "fecha":          fecha_iso,
+                "hora_inicio":    {"$lt": hora_fin_final},
+                "hora_fin":       {"$gt": hora_inicio_final},
+            })
+            if conflicto:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El profesional ya tiene un bloqueo en conflicto el {fecha_iso}"
+                )
+
+    # --- EJECUTAR ACTUALIZACIÓN ---
+    if payload.editar_serie and serie_id:
+        # Actualizar todos los documentos de la serie
+        result = await collection_block.update_many(
+            {"serie_id": serie_id},
+            {"$set": update_fields}
+        )
+        modificados = result.modified_count
+
+        # Si cambió fecha_fin_regla, eliminar las ocurrencias que caigan después de la nueva fecha
+        if "fecha_fin_regla" in update_fields:
+            nueva_fecha_fin = update_fields["fecha_fin_regla"]
+            await collection_block.delete_many({
+                "serie_id": serie_id,
+                "fecha":    {"$gt": nueva_fecha_fin}
+            })
+
+        return {
+            "msg": f"Serie actualizada correctamente ({modificados} bloqueos modificados)",
+            "serie_id": serie_id,
+            "campos_actualizados": list(update_fields.keys())
+        }
+
+    else:
+        # Actualizar solo este bloqueo
+        result = await collection_block.update_one(
+            {"_id": bloqueo_oid},
+            {"$set": update_fields}
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Bloqueo no encontrado")
+
+        bloqueo_actualizado = await collection_block.find_one({"_id": bloqueo_oid})
+        return {
+            "msg": "Bloqueo actualizado correctamente",
+            "bloqueo": _serialize_bloqueo(bloqueo_actualizado)
+        }
 
 @router.patch("/{bloqueo_id}/exclude-day", response_model=dict)
 async def excluir_dia_bloqueo(
