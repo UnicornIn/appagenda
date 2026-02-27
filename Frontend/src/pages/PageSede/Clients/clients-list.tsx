@@ -1,5 +1,6 @@
 // components/ClientsList.tsx
 "use client"
+import { memo } from 'react'
 import { 
   Search, 
   Plus, 
@@ -33,7 +34,7 @@ interface ClientsListProps {
   searchValue: string
 }
 
-export function ClientsList({ 
+function ClientsListComponent({ 
   onSelectClient, 
   onAddClient, 
   clientes, 
@@ -205,7 +206,6 @@ export function ClientsList({
                     <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">Teléfono</th>
                     <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">Email</th>
                     <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">Cédula</th>
-                    <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">Ciudad</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -252,9 +252,6 @@ export function ClientsList({
                       </td>
                       <td className="px-3 py-2 text-gray-600">
                         {cliente.cedula || '—'}
-                      </td>
-                      <td className="px-3 py-2 text-gray-600">
-                        {cliente.ciudad || '—'}
                       </td>
                     </tr>
                   ))}
@@ -353,3 +350,5 @@ export function ClientsList({
     </div>
   )
 }
+
+export const ClientsList = memo(ClientsListComponent)

@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "../../../types/config";
 import { Cliente } from "../../../types/cliente";
 import { calcularDiasSinVenir } from "../../../lib/clientMetrics";
+import { formatCurrencyNoDecimals } from "../../../lib/currency";
 
 export interface CreateClienteData {
   nombre: string;
@@ -846,11 +847,8 @@ export const clientesService = {
         const valorTotal = cita.valor_total || 0;
         const moneda = cita.moneda || 'USD';
 
-        const valorFormateado = moneda === 'COP'
-          ? `$${valorTotal.toLocaleString('es-CO')} COP`
-          : moneda === 'USD'
-            ? `$${valorTotal.toFixed(2)} USD`
-            : `$${valorTotal} ${moneda}`;
+        const locale = moneda === "USD" ? "en-US" : moneda === "MXN" ? "es-MX" : "es-CO";
+        const valorFormateado = `${formatCurrencyNoDecimals(valorTotal, moneda, locale)} ${moneda}`;
 
         return {
           fecha: cita.fecha,

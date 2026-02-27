@@ -80,7 +80,7 @@ export default function CierreCajaPage() {
   const [sedeNombre, setSedeNombre] = useState<string | null>(null);
   const monedaSede = String(moneda || "COP").toUpperCase();
 
-  const [fechaDesde, setFechaDesde] = useState(getDateNDaysAgo(7));
+  const [fechaDesde, setFechaDesde] = useState(getToday());
   const [fechaHasta, setFechaHasta] = useState(getToday());
 
   const [resumen, setResumen] = useState<CashResumen>({

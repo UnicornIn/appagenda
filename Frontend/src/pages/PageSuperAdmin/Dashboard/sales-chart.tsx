@@ -5,6 +5,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } fro
 import { ChartTooltip } from "../../../components/ui/chart"
 import { formatMoney } from "./Api/formatMoney"
 import { memo, useMemo } from "react"
+import { getStoredCurrency, resolveCurrencyLocale } from "../../../lib/currency"
 
 interface SalesChartProps {
   salesData: Array<{ [key: string]: any; value: number }>;
@@ -19,19 +20,21 @@ export const SalesChart = memo(function SalesChart({
   title = "Tendencia de Ventas",
   xAxisKey = "month"
 }: SalesChartProps) {
+  const fallbackCurrency = getStoredCurrency("USD");
+  const fallbackLocale = resolveCurrencyLocale(fallbackCurrency, "es-CO");
   
   const formatValue = useMemo(() => (value: number) => {
     if (formatCurrency) {
       return formatCurrency(value);
     }
-    return formatMoney(value, 'USD', 'es-CO');
-  }, [formatCurrency]);
+    return formatMoney(value, fallbackCurrency, fallbackLocale);
+  }, [fallbackCurrency, fallbackLocale, formatCurrency]);
 
   const defaultFormatYAxis = useMemo(() => (value: number) => {
     if (value >= 1000000) {
-      return `$${(value / 1000000).toFixed(1)}M`;
+      return `$${Math.round(value / 1000000)}M`;
     } else if (value >= 1000) {
-      return `$${(value / 1000).toFixed(1)}K`;
+      return `$${Math.round(value / 1000)}K`;
     }
     return `$${value}`;
   }, []);

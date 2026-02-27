@@ -17,7 +17,10 @@ export function FacturaDetailModal({ factura, open, onOpenChange }: FacturaDetai
   const formatDate = (dateString: string) => formatDateDMY(dateString, "-")
 
   const formatCurrency = (amount: number, currency: string) => {
-    return `${currency} ${amount.toFixed(2)}`
+    const safeCurrency = String(currency || "COP").toUpperCase()
+    const safeAmount = Number.isFinite(amount) ? amount : 0
+    const locale = safeCurrency === "USD" ? "en-US" : safeCurrency === "MXN" ? "es-MX" : "es-CO"
+    return `${safeCurrency} ${Math.round(safeAmount).toLocaleString(locale)}`
   }
 
   return (

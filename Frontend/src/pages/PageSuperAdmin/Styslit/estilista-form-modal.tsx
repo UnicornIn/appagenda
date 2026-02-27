@@ -613,7 +613,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                     <span className="ml-2 flex-1">
                       <div className="font-medium">{servicio.nombre}</div>
                       <div className="text-sm text-gray-500">
-                        ID: {servicio.servicio_id} • {servicio.duracion} min • ${servicio.precio?.toLocaleString()}
+                        ID: {servicio.servicio_id} • {servicio.duracion} min • ${Math.round(servicio.precio || 0).toLocaleString("es-CO", { maximumFractionDigits: 0 })}
                       </div>
                     </span>
                   </label>

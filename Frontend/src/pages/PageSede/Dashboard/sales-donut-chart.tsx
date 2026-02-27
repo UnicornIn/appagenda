@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts"
 import { ChartContainer } from "../../../components/ui/chart"
 import { formatMoney } from "./formatMoney"
+import { getStoredCurrency, resolveCurrencyLocale } from "../../../lib/currency"
 
 interface DonutDataItem {
   name: string;
@@ -17,13 +18,15 @@ interface SalesDonutChartProps {
   title?: string;
 }
 
-export function SalesDonutChart({ donutData, formatCurrency, title = "Distribución de Ventas (USD)" }: SalesDonutChartProps) {
+export function SalesDonutChart({ donutData, formatCurrency, title = "Distribución de Ventas" }: SalesDonutChartProps) {
+  const fallbackCurrency = getStoredCurrency("USD");
+  const fallbackLocale = resolveCurrencyLocale(fallbackCurrency, "es-CO");
   
   const formatValue = (value: number) => {
     if (formatCurrency) {
       return formatCurrency(value);
     }
-    return formatMoney(value, 'USD', 'es-CO');
+    return formatMoney(value, fallbackCurrency, fallbackLocale);
   };
 
   const total = donutData.reduce((sum, item) => sum + item.value, 0);

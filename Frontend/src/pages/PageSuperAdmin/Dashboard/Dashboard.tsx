@@ -56,6 +56,13 @@ import {
 } from "../../../components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs";
 import { formatMoney, extractNumericValue } from "./Api/formatMoney";
+import {
+  getStoredCurrency,
+  normalizeCurrencyCode,
+  resolveCurrencyFromSede,
+  resolveCurrencyLocale,
+} from "../../../lib/currency";
+import { DEFAULT_PERIOD } from "../../../lib/period";
 
 interface DateRange {
   start_date: string;
@@ -71,7 +78,7 @@ export default function DashboardPage() {
   const [globalData, setGlobalData] = useState<DashboardResponse | null>(null);
   const [sedes, setSedes] = useState<Sede[]>([]);
   const [, setPeriods] = useState<any[]>([]);
-  const [selectedPeriod, setSelectedPeriod] = useState("last_30_days");
+  const [selectedPeriod, setSelectedPeriod] = useState(DEFAULT_PERIOD);
   const [selectedSede, setSelectedSede] = useState<string>("global");
   const [showChurnList, setShowChurnList] = useState(false);
   const [churnData, setChurnData] = useState<any[]>([]);
@@ -99,6 +106,7 @@ export default function DashboardPage() {
 
   // Opciones de período con rango personalizado
   const periodOptions = [
+    { id: "today", label: "Hoy" },
     { id: "last_7_days", label: "Últimos 7 días" },
     { id: "last_30_days", label: "Últimos 30 días" },
     { id: "month", label: "Mes actual" },
@@ -107,18 +115,7 @@ export default function DashboardPage() {
 
   // Obtener moneda del usuario
   useEffect(() => {
-    const getMonedaUsuario = () => {
-      const monedaSession = sessionStorage.getItem('beaux-moneda');
-      if (monedaSession) return monedaSession;
-
-      const monedaLocal = localStorage.getItem('beaux-moneda');
-      if (monedaLocal) return monedaLocal;
-
-      const pais = sessionStorage.getItem('beaux-pais') || localStorage.getItem('beaux-pais');
-      return pais === 'Colombia' ? 'COP' : 'COP';
-    };
-
-    setMonedaUsuario(getMonedaUsuario());
+    setMonedaUsuario(getStoredCurrency("COP"));
   }, []);
 
   // Inicializar fechas por defecto
@@ -425,34 +422,6 @@ export default function DashboardPage() {
     return periodOptions.find(p => p.id === selectedPeriod)?.label || "Período";
   };
 
-  const formatCurrency = useCallback((value: number | string): string => {
-    if (typeof value === 'string') {
-      const numericValue = extractNumericValue(value);
-      return formatMoney(numericValue, monedaUsuario, 'es-CO');
-    }
-    return formatMoney(value, monedaUsuario, 'es-CO');
-  }, [monedaUsuario]);
-
-  const formatCurrencyShort = useCallback((value: number | string): string => {
-    const numericValue = typeof value === 'string' ? extractNumericValue(value) : value;
-
-    if (monedaUsuario === 'COP') {
-      if (numericValue >= 1000000) {
-        return `$${(numericValue / 1000000).toFixed(1)}M`;
-      } else if (numericValue >= 1000) {
-        return `$${(numericValue / 1000).toFixed(0)}K`;
-      }
-      return formatMoney(numericValue, 'COP', 'es-CO');
-    } else {
-      if (numericValue >= 1000000) {
-        return `US$ ${(numericValue / 1000000).toFixed(1)}M`;
-      } else if (numericValue >= 1000) {
-        return `US$ ${(numericValue / 1000).toFixed(0)}K`;
-      }
-      return formatMoney(numericValue, 'USD', 'es-CO');
-    }
-  }, [monedaUsuario]);
-
   const getSedeInfo = useCallback((sedeId: string) => {
     return sedes.find(sede => sede.sede_id === sedeId);
   }, [sedes]);
@@ -462,8 +431,75 @@ export default function DashboardPage() {
     sede.direccion.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const resolveMetricasByCurrency = (
+    metricasPorMoneda?: VentasDashboardResponse["metricas_por_moneda"]
+  ) => {
+    const fallbackCurrency = normalizeCurrencyCode(monedaUsuario || getStoredCurrency("COP"));
+    if (!metricasPorMoneda || Object.keys(metricasPorMoneda).length === 0) {
+      return { metricas: undefined, moneda: fallbackCurrency };
+    }
+
+    const sedeSeleccionada = selectedSede === "global" ? undefined : getSedeInfo(selectedSede);
+    const preferredCurrency = resolveCurrencyFromSede(sedeSeleccionada, fallbackCurrency);
+    const candidateCurrencies = Array.from(
+      new Set(
+        [preferredCurrency, fallbackCurrency, "COP", "USD", "MXN"]
+          .map((currency) => normalizeCurrencyCode(currency))
+          .filter(Boolean)
+      )
+    );
+
+    for (const currency of candidateCurrencies) {
+      if (metricasPorMoneda[currency]) {
+        return { metricas: metricasPorMoneda[currency], moneda: currency };
+      }
+    }
+
+    const [firstCurrency] = Object.keys(metricasPorMoneda);
+    if (!firstCurrency) {
+      return { metricas: undefined, moneda: fallbackCurrency };
+    }
+
+    return {
+      metricas: metricasPorMoneda[firstCurrency],
+      moneda: normalizeCurrencyCode(firstCurrency),
+    };
+  };
+
+  const getActiveDashboardCurrency = () => {
+    const { moneda } = resolveMetricasByCurrency(ventasData?.metricas_por_moneda);
+    return moneda;
+  };
+
+  const formatCurrency = useCallback((value: number | string): string => {
+    const currency = getActiveDashboardCurrency();
+    const locale = resolveCurrencyLocale(currency, "es-CO");
+    if (typeof value === 'string') {
+      const numericValue = extractNumericValue(value);
+      return formatMoney(numericValue, currency, locale);
+    }
+    return formatMoney(value, currency, locale);
+  }, [monedaUsuario, selectedSede, sedes, ventasData]);
+
+  const formatCurrencyShort = useCallback((value: number | string): string => {
+    const numericValue = typeof value === 'string' ? extractNumericValue(value) : value;
+    const currency = getActiveDashboardCurrency();
+    const locale = resolveCurrencyLocale(currency, "es-CO");
+    const absoluteValue = Math.abs(numericValue);
+
+    if (absoluteValue >= 1000000) {
+      return `${formatMoney(Math.round(numericValue / 1000000), currency, locale)}M`;
+    }
+    if (absoluteValue >= 1000) {
+      return `${formatMoney(Math.round(numericValue / 1000), currency, locale)}K`;
+    }
+    return formatMoney(numericValue, currency, locale);
+  }, [monedaUsuario, selectedSede, sedes, ventasData]);
+
   // Función para obtener métricas de ventas de forma segura
   const getMetricasVentas = () => {
+    const fallbackCurrency = getActiveDashboardCurrency();
+
     if (!ventasData?.metricas_por_moneda) {
       return {
         ventas_totales: 0,
@@ -481,37 +517,12 @@ export default function DashboardPage() {
           addi: 0,
           sin_pago: 0
         },
-        moneda: monedaUsuario,
+        moneda: fallbackCurrency,
         tieneDatos: false
       };
     }
 
-    // Log para depuración
-
-    // Intentar obtener métricas para la moneda del usuario
-    let metricas = ventasData.metricas_por_moneda[monedaUsuario];
-
-    // Si no hay para la moneda del usuario, usar COP como fallback
-    if (!metricas && monedaUsuario !== 'COP' && ventasData.metricas_por_moneda.COP) {
-      metricas = ventasData.metricas_por_moneda.COP;
-      console.log('Usando COP como fallback');
-    }
-
-    // Si aún no hay, usar USD como último recurso
-    if (!metricas && monedaUsuario !== 'USD' && ventasData.metricas_por_moneda.USD) {
-      metricas = ventasData.metricas_por_moneda.USD;
-      console.log('Usando USD como fallback');
-    }
-
-    // Si no hay ninguna métrica, usar la primera disponible
-    if (!metricas) {
-      const monedasDisponibles = Object.keys(ventasData.metricas_por_moneda);
-      if (monedasDisponibles.length > 0) {
-        const primeraMoneda = monedasDisponibles[0];
-        metricas = ventasData.metricas_por_moneda[primeraMoneda];
-        console.log(`Usando ${primeraMoneda} como fallback`);
-      }
-    }
+    const { metricas, moneda } = resolveMetricasByCurrency(ventasData.metricas_por_moneda);
 
     if (!metricas) {
       return {
@@ -530,14 +541,14 @@ export default function DashboardPage() {
           addi: 0,
           sin_pago: 0
         },
-        moneda: monedaUsuario,
+        moneda,
         tieneDatos: false
       };
     }
 
     return {
       ...metricas,
-      moneda: monedaUsuario,
+      moneda,
       tieneDatos: true
     };
   };
@@ -1212,6 +1223,7 @@ export default function DashboardPage() {
                             tasaRecurrencia={globalData.kpis.tasa_recurrencia}
                             tasaChurn={globalData.kpis.tasa_churn}
                             ticketPromedio={convertTicketPromedioToKPI(globalData.kpis.ticket_promedio)}
+                            currency={getMetricasVentas().moneda}
                           />
                         </div>
                       </div>
@@ -1426,65 +1438,66 @@ export default function DashboardPage() {
                                   tasaRecurrencia={dashboardData.kpis.tasa_recurrencia}
                                   tasaChurn={dashboardData.kpis.tasa_churn}
                                   ticketPromedio={convertTicketPromedioToKPI(dashboardData.kpis.ticket_promedio)}
+                                  currency={getMetricasVentas().moneda}
                                 />
 
                                 {/* Churn Card */}
-                                {dashboardData.churn_actual > 0 && (
-                                  <Card className="border border-gray-200">
-                                    <CardHeader className="p-4 pb-2">
-                                      <div className="flex items-center justify-between">
-                                        <CardTitle className="text-sm font-medium text-gray-900">Clientes en Riesgo</CardTitle>
-                                        <Badge className="bg-gray-100 text-gray-800 border border-gray-300">
-                                          {dashboardData.churn_actual || 0} detectados
-                                        </Badge>
-                                      </div>
-                                    </CardHeader>
-                                    <CardContent className="p-4 pt-2">
-                                      <div className="space-y-2">
-                                        {churnData.length > 0 ? (
-                                          <>
-                                            {churnData.slice(0, 3).map((cliente, index) => (
-                                              <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200">
-                                                <div className="flex items-center gap-2">
-                                                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 border border-gray-300">
-                                                    <Users className="w-3 h-3 text-gray-700" />
-                                                  </div>
-                                                  <div>
-                                                    <span className="text-sm font-medium">{cliente.nombre}</span>
-                                                    <div className="text-xs text-gray-500">{cliente.dias_inactivo} días inactivo</div>
-                                                  </div>
+                                <Card className="border border-gray-200">
+                                  <CardHeader className="p-4 pb-2">
+                                    <div className="flex items-center justify-between">
+                                      <CardTitle className="text-sm font-medium text-gray-900">Clientes en Riesgo (Churn)</CardTitle>
+                                      <Badge className="bg-gray-100 text-gray-800 border border-gray-300">
+                                        {dashboardData.churn_actual || 0} detectados
+                                      </Badge>
+                                    </div>
+                                  </CardHeader>
+                                  <CardContent className="p-4 pt-2">
+                                    <div className="space-y-2">
+                                      {churnData.length > 0 ? (
+                                        <>
+                                          {churnData.slice(0, 3).map((cliente, index) => (
+                                            <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200">
+                                              <div className="flex items-center gap-2">
+                                                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 border border-gray-300">
+                                                  <Users className="w-3 h-3 text-gray-700" />
                                                 </div>
-                                                <Badge className={
-                                                  cliente.dias_inactivo > 90 ? 'bg-red-100 text-red-800' :
-                                                    cliente.dias_inactivo > 60 ? 'bg-yellow-100 text-yellow-800' :
-                                                      'bg-gray-100 text-gray-800'
-                                                }>
-                                                  {cliente.dias_inactivo > 90 ? 'Alto' :
-                                                    cliente.dias_inactivo > 60 ? 'Medio' : 'Bajo'}
-                                                </Badge>
+                                                <div>
+                                                  <span className="text-sm font-medium">{cliente.nombre}</span>
+                                                  <div className="text-xs text-gray-500">{cliente.dias_inactivo} días inactivo</div>
+                                                </div>
                                               </div>
-                                            ))}
-                                            {churnData.length > 3 && (
-                                              <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="w-full text-sm text-gray-600"
-                                                onClick={() => setShowChurnList(true)}
-                                              >
-                                                <ChevronDown className="w-4 h-4 mr-2" />
-                                                Ver todos ({churnData.length})
-                                              </Button>
-                                            )}
-                                          </>
-                                        ) : (
-                                          <div className="text-center py-4 text-gray-500">
-                                            Cargando clientes en riesgo...
-                                          </div>
-                                        )}
-                                      </div>
-                                    </CardContent>
-                                  </Card>
-                                )}
+                                              <Badge className={
+                                                cliente.dias_inactivo > 90 ? 'bg-red-100 text-red-800' :
+                                                  cliente.dias_inactivo > 60 ? 'bg-yellow-100 text-yellow-800' :
+                                                    'bg-gray-100 text-gray-800'
+                                              }>
+                                                {cliente.dias_inactivo > 90 ? 'Alto' :
+                                                  cliente.dias_inactivo > 60 ? 'Medio' : 'Bajo'}
+                                              </Badge>
+                                            </div>
+                                          ))}
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="w-full text-sm text-gray-600"
+                                            onClick={() => setShowChurnList(true)}
+                                          >
+                                            <ChevronDown className="w-4 h-4 mr-2" />
+                                            Ver todos ({churnData.length})
+                                          </Button>
+                                        </>
+                                      ) : (dashboardData.churn_actual || 0) > 0 ? (
+                                        <div className="text-center py-4 text-gray-500">
+                                          Cargando clientes en riesgo...
+                                        </div>
+                                      ) : (
+                                        <div className="text-center py-4 text-gray-500">
+                                          No hay clientes en riesgo de churn para este período
+                                        </div>
+                                      )}
+                                    </div>
+                                  </CardContent>
+                                </Card>
                               </>
                             )}
                           </div>

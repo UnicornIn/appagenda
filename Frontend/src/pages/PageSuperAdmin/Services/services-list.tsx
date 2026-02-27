@@ -13,6 +13,10 @@ export function ServicesList({ services, onEdit, onDelete }: ServicesListProps) 
   const getSafeValue = (obj: any, key: string, defaultValue: string = '') => {
     return obj && obj[key] !== undefined && obj[key] !== null ? obj[key] : defaultValue;
   };
+  const formatAmountNoDecimals = (value: number) => {
+    const safeValue = Number.isFinite(value) ? value : 0;
+    return Math.round(safeValue).toLocaleString("es-CO", { maximumFractionDigits: 0 });
+  };
 
   const validServices = services.filter(service => service && service.id);
 
@@ -51,7 +55,7 @@ export function ServicesList({ services, onEdit, onDelete }: ServicesListProps) 
               
               <div className="flex items-center text-xs text-gray-600">
                 <DollarSign className="h-3 w-3 mr-1.5 flex-shrink-0" />
-                <span>${service.precio?.toLocaleString() || '0'}</span>
+                <span>${formatAmountNoDecimals(service.precio || 0)}</span>
               </div>
               
               <div className="flex items-center text-xs text-gray-600">

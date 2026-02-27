@@ -127,8 +127,16 @@ export function VentasFacturadasList() {
 
   const formatDate = (dateString: string) => formatDateDMY(dateString, dateString)
 
+  const getCurrencyLocale = (currency: string) => {
+    if (currency === "USD") return "en-US"
+    if (currency === "MXN") return "es-MX"
+    return "es-CO"
+  }
+
   const formatCurrency = (amount: number, currency: string) => {
-    return `${currency} ${amount?.toFixed(2) || '0.00'}`
+    const safeCurrency = (currency || "COP").toUpperCase()
+    const safeAmount = Number.isFinite(amount) ? amount : 0
+    return `${safeCurrency} ${Math.round(safeAmount).toLocaleString(getCurrencyLocale(safeCurrency))}`
   }
 
   const selectedSedeNombre = formatSedeNombre(

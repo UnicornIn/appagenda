@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "../../../types/config";
 import { Cliente } from "../../../types/cliente";
 import { calcularDiasSinVenir } from "../../../lib/clientMetrics";
+import { formatCurrencyNoDecimals } from "../../../lib/currency";
 
 export interface CreateClienteData {
   nombre: string;
@@ -31,6 +32,8 @@ export interface ClienteResponse {
   nombre: string;
   correo?: string;
   telefono?: string;
+  cedula?: string;
+  ciudad?: string;
   sede_id: string;
   fecha_creacion: string;
   creado_por: string;
@@ -42,6 +45,22 @@ export interface ClienteResponse {
   dias_sin_visitar?: number;
   total_gastado?: number;
   ticket_promedio?: number;
+}
+
+export interface ClientesPaginadosMetadata {
+  total: number;
+  pagina: number;
+  limite: number;
+  total_paginas: number;
+  tiene_siguiente: boolean;
+  tiene_anterior: boolean;
+  rango_inicio?: number;
+  rango_fin?: number;
+}
+
+export interface ClientesPaginadosResult {
+  clientes: Cliente[];
+  metadata: ClientesPaginadosMetadata;
 }
 
 // 🔥 INTERFAZ ACTUALIZADA PARA LAS FICHAS DEL CLIENTE
@@ -134,6 +153,25 @@ const transformarHistorialCabello = (historialCitas: any[]): any[] => {
   }));
 };
 
+const mapCliente = (cliente: any): Cliente => ({
+  id: cliente.cliente_id || cliente.id || cliente._id || '',
+  nombre: cliente.nombre || '',
+  telefono: cliente.telefono || 'No disponible',
+  email: cliente.correo || cliente.email || 'No disponible',
+  cedula: cliente.cedula || '',
+  ciudad: cliente.ciudad || '',
+  diasSinVenir: calcularDiasSinVenir(cliente),
+  diasSinComprar: cliente.dias_sin_visitar || 0,
+  ltv: cliente.total_gastado || 0,
+  ticketPromedio: cliente.ticket_promedio || 0,
+  rizotipo: obtenerRizotipoAleatorio(),
+  nota: cliente.notas_historial?.[0]?.contenido || cliente.notas || '',
+  sede_id: cliente.sede_id || '',
+  historialCitas: [],
+  historialCabello: [],
+  historialProductos: []
+});
+
 // 🔥 FUNCIÓN PARA ARREGLAR URLs DE S3 HTTPS A HTTP
 const fixS3Url = (url: string): string => {
   if (!url) return '';
@@ -147,24 +185,86 @@ const fixS3Url = (url: string): string => {
 };
 
 export const clientesService = {
-  async getClientes(
+  async getClientesPaginados(
     token: string,
-    sedeId?: string,
-    options?: { filtro?: string; limite?: number }
-  ): Promise<Cliente[]> {
-    const limite = options?.limite ?? 100;
-    const filtro = options?.filtro?.trim();
+    params?: { pagina?: number; limite?: number; filtro?: string; sedeId?: string }
+  ): Promise<ClientesPaginadosResult> {
+    const paginaSolicitada = params?.pagina ?? 1;
+    const limiteSolicitado = params?.limite ?? 10;
+    const limite = Math.min(Math.max(limiteSolicitado, 1), 100);
+    const filtro = params?.filtro?.trim();
+    const sedeId = params?.sedeId?.trim();
 
-    let baseUrl = `${API_BASE_URL}clientes/`;
-    // Si se especifica una sede, usar el endpoint de filtrado
     if (sedeId && sedeId !== "all") {
-      baseUrl = `${API_BASE_URL}clientes/filtrar/${sedeId}`;
+      const urlSede = new URL(`${API_BASE_URL}clientes/filtrar/${sedeId}`);
+      if (filtro) {
+        urlSede.searchParams.set("filtro", filtro);
+      }
+
+      const response = await fetch(urlSede.toString(), {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        throw new Error(`Error al obtener clientes por sede: ${errorText || response.statusText}`);
+      }
+
+      const data = await response.json();
+      const rawClientes: any[] = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.clientes)
+          ? data.clientes
+          : Array.isArray(data?.data)
+            ? data.data
+            : [];
+
+      const filtroLower = filtro?.toLowerCase();
+      const clientesFiltrados = filtroLower
+        ? rawClientes.filter((cliente) => {
+            const nombre = String(cliente?.nombre ?? '').toLowerCase();
+            const correo = String(cliente?.correo ?? cliente?.email ?? '').toLowerCase();
+            const telefono = String(cliente?.telefono ?? '').toLowerCase();
+            const cedula = String(cliente?.cedula ?? '').toLowerCase();
+            const clienteId = String(cliente?.cliente_id ?? '').toLowerCase();
+            return (
+              nombre.includes(filtroLower) ||
+              correo.includes(filtroLower) ||
+              telefono.includes(filtroLower) ||
+              cedula.includes(filtroLower) ||
+              clienteId.includes(filtroLower)
+            );
+          })
+        : rawClientes;
+
+      const total = clientesFiltrados.length;
+      const totalPaginas = total === 0 ? 1 : Math.ceil(total / limite);
+      const pagina = Math.min(Math.max(paginaSolicitada, 1), totalPaginas);
+      const start = (pagina - 1) * limite;
+      const pageClientes = clientesFiltrados.slice(start, start + limite);
+
+      return {
+        clientes: pageClientes.map(mapCliente),
+        metadata: {
+          total,
+          pagina,
+          limite,
+          total_paginas: totalPaginas,
+          tiene_siguiente: pagina < totalPaginas,
+          tiene_anterior: pagina > 1,
+          rango_inicio: total === 0 ? 0 : start + 1,
+          rango_fin: Math.min(start + pageClientes.length, total),
+        },
+      };
     }
 
-    const url = new URL(baseUrl);
-    if (limite) {
-      url.searchParams.set("limite", String(limite));
-    }
+    const url = new URL(`${API_BASE_URL}clientes/todos`);
+    url.searchParams.set("pagina", String(paginaSolicitada));
+    url.searchParams.set("limite", String(limite));
     if (filtro) {
       url.searchParams.set("filtro", filtro);
     }
@@ -188,30 +288,53 @@ export const clientesService = {
           message = parsed.message;
         }
       } catch {
-        // mantener mensaje original
+        // Mantener mensaje original
       }
       throw new Error(`Error al obtener clientes: ${message}`);
     }
 
-    const data: ClienteResponse[] = await response.json();
+    const data = await response.json();
+    const rawClientes: any[] = Array.isArray(data?.clientes)
+      ? data.clientes
+      : Array.isArray(data)
+        ? data
+        : Array.isArray(data?.data)
+          ? data.data
+          : [];
 
-    // Transformar la respuesta del backend al formato del frontend
-    return data.map(cliente => ({
-      id: cliente.cliente_id,
-      nombre: cliente.nombre,
-      telefono: cliente.telefono || 'No disponible',
-      email: cliente.correo || 'No disponible',
-      diasSinVenir: calcularDiasSinVenir(cliente),
-      diasSinComprar: cliente.dias_sin_visitar || 0,
-      ltv: cliente.total_gastado || 0,
-      ticketPromedio: cliente.ticket_promedio || 0,
-      rizotipo: obtenerRizotipoAleatorio(),
-      nota: cliente.notas_historial?.[0]?.contenido || '',
-      sede_id: cliente.sede_id,
-      historialCitas: [],
-      historialCabello: [],
-      historialProductos: []
-    }));
+    const meta = data?.metadata || {};
+    const total = meta.total ?? rawClientes.length;
+    const totalPaginas = meta.total_paginas ?? Math.max(1, Math.ceil(total / limite));
+    const pagina = meta.pagina ?? paginaSolicitada;
+
+    return {
+      clientes: rawClientes.map(mapCliente),
+      metadata: {
+        total,
+        pagina,
+        limite: meta.limite ?? limite,
+        total_paginas: totalPaginas,
+        tiene_siguiente: meta.tiene_siguiente ?? pagina < totalPaginas,
+        tiene_anterior: meta.tiene_anterior ?? pagina > 1,
+        rango_inicio: meta.rango_inicio,
+        rango_fin: meta.rango_fin,
+      },
+    };
+  },
+
+  async getClientes(
+    token: string,
+    sedeId?: string,
+    options?: { filtro?: string; limite?: number }
+  ): Promise<Cliente[]> {
+    const limite = options?.limite ?? 100;
+    const result = await this.getClientesPaginados(token, {
+      pagina: 1,
+      limite,
+      filtro: options?.filtro,
+      sedeId
+    });
+    return result.clientes;
   },
 
   async getAllClientes(token: string): Promise<Cliente[]> {
@@ -229,22 +352,7 @@ export const clientesService = {
 
     const data: ClienteResponse[] = await response.json();
 
-    return data.map(cliente => ({
-      id: cliente.cliente_id,
-      nombre: cliente.nombre,
-      telefono: cliente.telefono || 'No disponible',
-      email: cliente.correo || 'No disponible',
-      diasSinVenir: calcularDiasSinVenir(cliente),
-      diasSinComprar: cliente.dias_sin_visitar || 0,
-      ltv: cliente.total_gastado || 0,
-      ticketPromedio: cliente.ticket_promedio || 0,
-      rizotipo: obtenerRizotipoAleatorio(),
-      nota: cliente.notas_historial?.[0]?.contenido || '',
-      sede_id: cliente.sede_id,
-      historialCitas: [],
-      historialCabello: [],
-      historialProductos: []
-    }));
+    return data.map(mapCliente);
   },
 
   async getClienteById(token: string, clienteId: string): Promise<Cliente> {
@@ -274,6 +382,8 @@ export const clientesService = {
       nombre: cliente.nombre,
       telefono: cliente.telefono || 'No disponible',
       email: cliente.correo || 'No disponible',
+      cedula: cliente.cedula || '',
+      ciudad: cliente.ciudad || '',
       diasSinVenir: calcularDiasSinVenir(cliente),
       diasSinComprar: cliente.dias_sin_visitar || 0,
       ltv: cliente.total_gastado || 0,
@@ -615,11 +725,8 @@ ${datos.observaciones_generales || 'Ninguna'}`;
         const moneda = cita.moneda || 'USD';
 
         // Formatear valor
-        const valorFormateado = moneda === 'COP'
-          ? `$${valorTotal.toLocaleString('es-CO')} COP`
-          : moneda === 'USD'
-            ? `$${valorTotal.toFixed(2)} USD`
-            : `$${valorTotal} ${moneda}`;
+        const locale = moneda === "USD" ? "en-US" : moneda === "MXN" ? "es-MX" : "es-CO";
+        const valorFormateado = `${formatCurrencyNoDecimals(valorTotal, moneda, locale)} ${moneda}`;
 
         return {
           fecha: fechaOriginal, // 🔥 DEVOLVER FECHA ORIGINAL '2025-12-19'

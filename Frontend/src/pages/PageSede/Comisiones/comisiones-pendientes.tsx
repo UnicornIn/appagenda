@@ -5,33 +5,11 @@ import { useState, useEffect } from "react";
 import { AlertTriangle, DollarSign, Users, Package, Scissors } from "lucide-react";
 import { commissionsService } from "./Api/commissionsService";
 import { PendientesResumen,  } from "../../../types/commissions";
+import { formatCurrencyNoDecimals, getStoredCurrency } from "../../../lib/currency";
 
 // Función para formatear moneda
-const formatMoneda = (monto: number, moneda: string = 'USD'): string => {
-  if (!monto) return `${moneda} 0.00`;
-  
-  const currencyConfig: Record<string, any> = {
-    'USD': { 
-      currency: 'USD', 
-      style: 'currency', 
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2 
-    },
-    'COP': { 
-      currency: 'COP', 
-      style: 'currency', 
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0 
-    }
-  };
-
-  const config = currencyConfig[moneda] || currencyConfig.USD;
-  
-  try {
-    return new Intl.NumberFormat('es-ES', config).format(monto);
-  } catch (error) {
-    return `${config.currency} ${monto.toFixed(2)}`;
-  }
+const formatMoneda = (monto: number, moneda: string = getStoredCurrency("USD")): string => {
+  return formatCurrencyNoDecimals(monto, moneda);
 };
 
 export function ComisionesPendientes() {

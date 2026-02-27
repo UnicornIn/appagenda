@@ -1,7 +1,9 @@
+import { formatCurrencyNoDecimals, getStoredCurrency, resolveCurrencyLocale } from "../../../../lib/currency";
+
 // src/utils/formatMoney.ts
 export function formatMoney(
   amount: number | string,
-  currency: string = 'USD',
+  currency: string = getStoredCurrency("USD"),
   locale: string = 'es-CO'
 ): string {
   // Convertir a número si es string
@@ -17,13 +19,8 @@ export function formatMoney(
     numAmount = amount;
   }
   
-  // Formatear como moneda
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency: currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(numAmount);
+  const resolvedLocale = locale || resolveCurrencyLocale(currency, "es-CO");
+  return formatCurrencyNoDecimals(numAmount, currency, resolvedLocale);
 }
 
 // Función para extraer solo el valor numérico de un string con moneda

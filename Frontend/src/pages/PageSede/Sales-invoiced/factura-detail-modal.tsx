@@ -39,7 +39,7 @@ export function FacturaDetailModal({ factura, open, onOpenChange }: FacturaDetai
             <span class="label">Identificador:</span> ${factura.identificador}<br/>
             <span class="label">Fecha de pago:</span> ${factura.fecha_pago ? formatDateDMY(factura.fecha_pago) : "-"}<br/>
             <span class="label">Método de pago:</span> ${factura.metodo_pago}<br/>
-            <span class="label">Total:</span> ${factura.moneda} ${factura.total?.toFixed(2) || '0.00'}<br/>
+            <span class="label">Total:</span> ${formatCurrency(factura.total, factura.moneda)}<br/>
           </div>
           <div class="section">
             <span class="label">Items Facturados:</span>
@@ -59,8 +59,8 @@ export function FacturaDetailModal({ factura, open, onOpenChange }: FacturaDetai
                     <td>${item.nombre || ''}</td>
                     <td>${item.tipo || ''}</td>
                     <td>${item.cantidad || 0}</td>
-                    <td>${factura.moneda} ${(item.precio_unitario || 0)?.toFixed(2)}</td>
-                    <td>${factura.moneda} ${(item.subtotal || 0)?.toFixed(2)}</td>
+                    <td>${formatCurrency(item.precio_unitario, factura.moneda)}</td>
+                    <td>${formatCurrency(item.subtotal, factura.moneda)}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -85,9 +85,10 @@ export function FacturaDetailModal({ factura, open, onOpenChange }: FacturaDetai
   const formatDate = (dateString: string) => formatDateDMY(dateString, "-")
 
   const formatCurrency = (amount: number | undefined, currency: string | undefined) => {
-    const safeAmount = amount || 0;
-    const safeCurrency = currency || factura.moneda || 'COP';
-    return `${safeCurrency} ${safeAmount.toFixed(2)}`;
+    const safeCurrency = String(currency || factura.moneda || "COP").toUpperCase();
+    const safeAmount = Number.isFinite(amount) ? Number(amount) : 0;
+    const locale = safeCurrency === "USD" ? "en-US" : safeCurrency === "MXN" ? "es-MX" : "es-CO";
+    return `${safeCurrency} ${Math.round(safeAmount).toLocaleString(locale)}`;
   }
 
   const getStatusIcon = (estado: string) => {

@@ -310,8 +310,8 @@ export function ProductManagementPanel({
             amount = 0
         }
         return amount.toLocaleString('es-ES', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0,
             useGrouping: true
         })
     }

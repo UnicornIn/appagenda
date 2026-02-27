@@ -1,51 +1,54 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Sidebar } from "../../../components/Layout/Sidebar"
 import { ClientsList } from "./clients-list"
 import { ClientDetail } from "./client-detail"
 import { ClientFormModal } from "./ClientFormModal"
 import type { Cliente } from "../../../types/cliente"
 import type { Sede } from "../Sedes/sedeService"
-import { clientesService } from "./clientesService"
+import { clientesService, type ClientesPaginadosMetadata } from "./clientesService"
 import { sedeService } from "../Sedes/sedeService" // ✅ Cambiado de sedesService a sedeService
 import { useAuth } from "../../../components/Auth/AuthContext"
 import { Loader } from "lucide-react"
 
+const SEARCH_DEBOUNCE_MS = 300
+
 export default function ClientsPage() {
   const [selectedClient, setSelectedClient] = useState<Cliente | null>(null)
   const [clientes, setClientes] = useState<Cliente[]>([])
+  const [searchTerm, setSearchTerm] = useState("")
+  const [metadata, setMetadata] = useState<ClientesPaginadosMetadata | null>(null)
   const [sedes, setSedes] = useState<Sede[]>([])
   const [selectedSede, setSelectedSede] = useState<string>("all")
+  const [itemsPorPagina, setItemsPorPagina] = useState(10)
   const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [isFetching, setIsFetching] = useState(false)
-  const [_, setIsLoadingSedes] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const hasLoadedInitialRef = useRef(false)
   const latestRequestIdRef = useRef(0)
 
   const { user, isLoading: authLoading } = useAuth()
 
   // Cargar sedes
-  const loadSedes = async () => {
+  const loadSedes = useCallback(async () => {
     if (!user?.access_token) return
 
     try {
-      setIsLoadingSedes(true)
       const sedesData = await sedeService.getSedes(user.access_token) // ✅ Usando sedeService
-      console.log('📥 Sedes cargadas:', sedesData)
       setSedes(sedesData)
     } catch (err) {
       console.error('Error cargando sedes:', err)
-    } finally {
-      setIsLoadingSedes(false)
     }
-  }
+  }, [user?.access_token])
 
   // Cargar clientes desde la API
-  const loadClientes = async (
-    sedeId?: string,
+  const loadClientes = useCallback(async (
+    pagina: number = 1,
+    filtro: string = searchTerm,
+    sedeId: string = selectedSede,
     options: { initial?: boolean } = {}
   ) => {
     const isInitialRequest = options.initial ?? false
@@ -67,13 +70,17 @@ export default function ClientsPage() {
       }
 
       setError(null)
-      console.log('🔄 Cargando clientes para sede:', sedeId || 'todas')
-      const clientesData = await clientesService.getClientes(user.access_token, sedeId)
+      const result = await clientesService.getClientesPaginados(user.access_token, {
+        pagina,
+        limite: itemsPorPagina,
+        filtro,
+        sedeId: sedeId !== "all" ? sedeId : undefined,
+      })
 
       if (requestId !== latestRequestIdRef.current) return
 
-      console.log('📥 Clientes recibidos del backend:', clientesData)
-      setClientes(clientesData)
+      setClientes(result.clientes)
+      setMetadata(result.metadata)
     } catch (err) {
       if (requestId !== latestRequestIdRef.current) return
       setError(err instanceof Error ? err.message : 'Error al cargar los clientes')
@@ -87,14 +94,29 @@ export default function ClientsPage() {
         setIsFetching(false)
       }
     }
-  }
+  }, [user?.access_token, itemsPorPagina, searchTerm, selectedSede])
 
   useEffect(() => {
     if (!authLoading && user) {
       loadSedes()
-      loadClientes(undefined, { initial: true })
     }
-  }, [user, authLoading])
+  }, [user, authLoading, loadSedes])
+
+  useEffect(() => {
+    if (!user?.access_token) return
+
+    if (!hasLoadedInitialRef.current) {
+      hasLoadedInitialRef.current = true
+      loadClientes(1, searchTerm, selectedSede, { initial: true })
+      return
+    }
+
+    const timeout = setTimeout(() => {
+      loadClientes(1, searchTerm, selectedSede)
+    }, SEARCH_DEBOUNCE_MS)
+
+    return () => clearTimeout(timeout)
+  }, [user?.access_token, searchTerm, selectedSede, itemsPorPagina, loadClientes])
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -102,13 +124,23 @@ export default function ClientsPage() {
     }
   }, [authLoading, user])
 
-  const handleSedeChange = (sedeId: string) => {
-    console.log('🎯 Cambiando filtro de sede a:', sedeId)
+  const handleSedeChange = useCallback((sedeId: string) => {
     setSelectedSede(sedeId)
-    loadClientes(sedeId === "all" ? undefined : sedeId)
-  }
+  }, [])
 
-  const handleSelectClient = async (client: Cliente) => {
+  const handlePageChange = useCallback((pagina: number, filtro: string = searchTerm) => {
+    loadClientes(pagina, filtro, selectedSede)
+  }, [loadClientes, searchTerm, selectedSede])
+
+  const handleSearch = useCallback((value: string) => {
+    setSearchTerm(value)
+  }, [])
+
+  const handleItemsPerPageChange = useCallback((value: number) => {
+    setItemsPorPagina(value)
+  }, [])
+
+  const handleSelectClient = useCallback(async (client: Cliente) => {
     if (!user?.access_token) {
       setError('No hay token de autenticación disponible')
       return
@@ -121,13 +153,13 @@ export default function ClientsPage() {
       console.error('Error cargando detalles del cliente:', err)
       setSelectedClient(client)
     }
-  }
+  }, [user?.access_token])
 
-  const handleAddClient = () => {
+  const handleAddClient = useCallback(() => {
     setIsModalOpen(true)
-  }
+  }, [])
 
-  const handleSaveClient = async () => {
+  const handleSaveClient = useCallback(async () => {
     if (!user?.access_token) {
       setError('No hay token de autenticación disponible')
       return
@@ -138,7 +170,7 @@ export default function ClientsPage() {
       setError(null)
 
       // Recargar la lista manteniendo el filtro actual
-      await loadClientes(selectedSede !== "all" ? selectedSede : undefined)
+      await loadClientes(1, searchTerm, selectedSede)
       setIsModalOpen(false)
 
     } catch (err) {
@@ -147,11 +179,11 @@ export default function ClientsPage() {
     } finally {
       setIsSaving(false)
     }
-  }
+  }, [user?.access_token, loadClientes, searchTerm, selectedSede])
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     setSelectedClient(null)
-  }
+  }, [])
 
   // Mostrar loading mientras se verifica la autenticación
   if (authLoading || (Boolean(user) && isInitialLoading)) {
@@ -192,11 +224,17 @@ export default function ClientsPage() {
             onSelectClient={handleSelectClient}
             onAddClient={handleAddClient}
             clientes={clientes}
+            metadata={metadata || undefined}
             error={error}
-            onRetry={() => loadClientes(selectedSede !== "all" ? selectedSede : undefined)}
+            onRetry={() => loadClientes(1, searchTerm, selectedSede)}
+            onPageChange={handlePageChange}
+            onSearch={handleSearch}
+            searchValue={searchTerm}
             onSedeChange={handleSedeChange}
             selectedSede={selectedSede}
             sedes={sedes}
+            onItemsPerPageChange={handleItemsPerPageChange}
+            itemsPerPage={itemsPorPagina}
             isFetching={isFetching}
           />
         )}

@@ -6,6 +6,7 @@ import { AlertTriangle, User } from "lucide-react";
 import { commissionsService } from "./Api/commissionsService";
 import { CommissionSummary } from "../../../types/commissions";
 import { Button } from "../../../components/ui/button";
+import { formatCurrencyNoDecimals, getStoredCurrency } from "../../../lib/currency";
 
 interface ComisionesResumenProps {
   filters?: {
@@ -19,31 +20,8 @@ interface ComisionesResumenProps {
 }
 
 // Función para formatear moneda
-const formatMoneda = (monto: number, moneda: string = 'USD'): string => {
-  if (!monto) return `${moneda} 0.00`;
-
-  const currencyConfig: Record<string, any> = {
-    'USD': {
-      currency: 'USD',
-      style: 'currency',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    },
-    'COP': {
-      currency: 'COP',
-      style: 'currency',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }
-  };
-
-  const config = currencyConfig[moneda] || currencyConfig.USD;
-
-  try {
-    return new Intl.NumberFormat('es-ES', config).format(monto);
-  } catch (error) {
-    return `${config.currency} ${monto.toFixed(2)}`;
-  }
+const formatMoneda = (monto: number, moneda: string = getStoredCurrency("USD")): string => {
+  return formatCurrencyNoDecimals(monto, moneda);
 };
 
 export function ComisionesResumen({ filters = {} }: ComisionesResumenProps) {
@@ -229,7 +207,7 @@ export function ComisionesResumen({ filters = {} }: ComisionesResumenProps) {
   }
 
   const { servicios, productos, totales } = summary;
-  const moneda = 'USD';
+  const moneda = summary.moneda || getStoredCurrency("USD");
 
   return (
     <div className="flex flex-col gap-8 lg:flex-row">

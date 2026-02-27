@@ -9,6 +9,12 @@ import { Button } from "../../../../components/ui/button"
 import { useLocation, useNavigate } from "react-router-dom"
 import { crearCita } from '../../../../components/Quotes/citasApi'
 import { useAuth } from '../../../../components/Auth/AuthContext'
+import {
+    formatCurrencyNoDecimals,
+    getStoredCurrency,
+    normalizeCurrencyCode,
+    resolveCurrencyLocale
+} from "../../../../lib/currency"
 
 // 🔥 INTERFAZ PARA LOS DATOS DE LA CITA
 interface CitaParaPago {
@@ -81,7 +87,7 @@ export default function PagosPage() {
     const [selectedPaymentType, setSelectedPaymentType] = useState<"deposit" | "full">("full")
     const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("link_pago")
     const [giftCardCode, setGiftCardCode] = useState("")
-    const userCurrency = String(user?.moneda || sessionStorage.getItem("beaux-moneda") || "USD").toUpperCase()
+    const userCurrency = normalizeCurrencyCode(user?.moneda || getStoredCurrency("USD"))
     const isCopCurrency = userCurrency === "COP"
     const sanitizePaymentMethod = (method: string): string => {
         if (!isCopCurrency && method === "addi") return "efectivo"
@@ -90,6 +96,10 @@ export default function PagosPage() {
     
     // 🔥 ABONO FIJO DE $50,000 COP
     const FIXED_DEPOSIT = 50000;
+
+    const formatAmount = (amount: number): string => {
+        return `${formatCurrencyNoDecimals(amount, userCurrency, resolveCurrencyLocale(userCurrency, "es-CO"))} ${userCurrency}`;
+    }
     
     // 🔥 ESTADOS DE CARGA Y ERROR
     const [loading, setLoading] = useState(false)
@@ -263,9 +273,9 @@ export default function PagosPage() {
             // 🔥 MOSTRAR MENSAJE DE CONFIRMACIÓN
             let mensajeConfirmacion = "";
             if (selectedPaymentType === "deposit" && canHaveDeposit) {
-                mensajeConfirmacion = `✅ Abono de $${FIXED_DEPOSIT.toLocaleString()} COP procesado exitosamente para ${citaData.cliente}. La cita está confirmada.`;
+                mensajeConfirmacion = `✅ Abono de ${formatAmount(FIXED_DEPOSIT)} procesado exitosamente para ${citaData.cliente}. La cita está confirmada.`;
             } else {
-                mensajeConfirmacion = `✅ Pago completo de $${appointment.totalAmount.toLocaleString()} COP procesado exitosamente para ${citaData.cliente}.`;
+                mensajeConfirmacion = `✅ Pago completo de ${formatAmount(appointment.totalAmount)} procesado exitosamente para ${citaData.cliente}.`;
             }
             
             alert(mensajeConfirmacion);
@@ -454,16 +464,16 @@ export default function PagosPage() {
                                 {selectedProcessType === "reserva" 
                                     ? "📅 Reserva directa" 
                                     : selectedPaymentType === "deposit" && canHaveDeposit
-                                        ? `💰 Abono de $${FIXED_DEPOSIT.toLocaleString()} COP`
-                                        : `💰 Pago completo de $${appointment.totalAmount.toLocaleString()} COP`
+                                        ? `💰 Abono de ${formatAmount(FIXED_DEPOSIT)}`
+                                        : `💰 Pago completo de ${formatAmount(appointment.totalAmount)}`
                                 }
                             </h3>
                             <p className="text-blue-700 text-sm">
                                 {selectedProcessType === "reserva" 
                                     ? "La cita se confirmará directamente sin procesar ningún pago."
                                     : selectedPaymentType === "deposit" && canHaveDeposit
-                                        ? `El cliente deberá abonar $${FIXED_DEPOSIT.toLocaleString()} COP para confirmar la cita.`
-                                        : `El cliente deberá pagar el total de $${appointment.totalAmount.toLocaleString()} COP.`
+                                        ? `El cliente deberá abonar ${formatAmount(FIXED_DEPOSIT)} para confirmar la cita.`
+                                        : `El cliente deberá pagar el total de ${formatAmount(appointment.totalAmount)}.`
                                 }
                             </p>
 
@@ -471,9 +481,9 @@ export default function PagosPage() {
                             {selectedProcessType === "pago" && !canHaveDeposit && appointment.totalAmount > 0 && (
                                 <div className="mt-3 p-3 bg-yellow-100 border border-yellow-300 rounded-lg">
                                     <p className="text-yellow-800 text-sm">
-                                        💡 <strong>Nota:</strong> Este servicio tiene un valor de ${appointment.totalAmount.toLocaleString()} COP, 
-                                        por lo que requiere <strong>pago completo</strong>. El abono de ${FIXED_DEPOSIT.toLocaleString()} COP 
-                                        no aplica para servicios menores o iguales a ${FIXED_DEPOSIT.toLocaleString()} COP.
+                                        💡 <strong>Nota:</strong> Este servicio tiene un valor de {formatAmount(appointment.totalAmount)}, 
+                                        por lo que requiere <strong>pago completo</strong>. El abono de {formatAmount(FIXED_DEPOSIT)} 
+                                        no aplica para servicios menores o iguales a {formatAmount(FIXED_DEPOSIT)}.
                                     </p>
                                 </div>
                             )}

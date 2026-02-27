@@ -10,6 +10,7 @@ import {
   CommissionTotals,
   PendientesResumen,
 } from '../../../../types/commissions';
+import { getStoredCurrency, normalizeCurrencyCode } from '../../../../lib/currency';
 
 export class CommissionsService {
   // Generar un requestKey único basado en filtros
@@ -34,7 +35,7 @@ export class CommissionsService {
         monto_total_pendiente: 0,
         total_comisiones_servicios: 0,
         total_comisiones_productos: 0,
-        moneda: 'USD',
+        moneda: getStoredCurrency('USD'),
         por_profesional: []
       };
     }
@@ -44,7 +45,7 @@ export class CommissionsService {
       monto_total_pendiente: 0,
       total_comisiones_servicios: 0,
       total_comisiones_productos: 0,
-      moneda: 'USD',
+      moneda: getStoredCurrency('USD'),
       por_profesional: []
     };
   }
@@ -119,6 +120,7 @@ export class CommissionsService {
 
   async getCommissionSummary(commissionId: string): Promise<CommissionSummary> {
     const detail = await this.getCommissionDetail(commissionId);
+    const moneda = normalizeCurrencyCode(detail.moneda || getStoredCurrency('USD'));
     
     // Transformar servicios_detalle al formato del frontend
     const servicios: ServiceCommission[] = detail.servicios_detalle
@@ -159,7 +161,7 @@ export class CommissionsService {
       totalAPagar: detail.total_comisiones
     };
 
-    return { servicios, productos, totales };
+    return { servicios, productos, totales, moneda };
   }
 
   async approveCommission(commissionId: string): Promise<boolean> {

@@ -396,7 +396,7 @@ export class FacturaService {
         factura.numero_comprobante,
         factura.metodo_pago,
         factura.moneda,
-        factura.total.toFixed(2),
+        Math.round(factura.total).toString(),
         factura.estado,
         factura.facturado_por
       ]);

@@ -23,7 +23,6 @@ import {
   BarChart3,
   Users,
   RefreshCw,
-  ChevronDown,
   Building2,
   DollarSign,
   Package,
@@ -32,16 +31,15 @@ import {
   Receipt,
   Calendar,
 } from "lucide-react";
-import { Badge } from "../../../components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../../../components/ui/table";
 import { formatMoney, extractNumericValue } from "./formatMoney";
+import {
+  getStoredCurrency,
+  normalizeCurrencyCode,
+  resolveCurrencyFromCountry,
+  resolveCurrencyFromSede,
+  resolveCurrencyLocale,
+} from "../../../lib/currency";
+import { DEFAULT_PERIOD } from "../../../lib/period";
 
 interface DateRange {
   start_date: string;
@@ -55,14 +53,14 @@ export default function DashboardPage() {
   const [dashboardData, setDashboardData] = useState<VentasDashboardResponse | null>(null);
   const [sedes, setSedes] = useState<Sede[]>([]);
   const [, setPeriods] = useState<PeriodOption[]>([]);
-  const [selectedPeriod, setSelectedPeriod] = useState("last_7_days");
+  const [selectedPeriod, setSelectedPeriod] = useState(DEFAULT_PERIOD);
   const [selectedSede, setSelectedSede] = useState<string>("");
-  const [showChurnList, setShowChurnList] = useState(false);
+  // const [showChurnList, setShowChurnList] = useState(false); // Módulo churn oculto
   const [churnData, setChurnData] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   
-  // Obtener moneda del usuario desde el contexto de autenticación
-  const monedaUsuario = user?.moneda || "COP";
+  // Moneda base del usuario/sesión (normalizada)
+  const monedaUsuario = normalizeCurrencyCode(user?.moneda || getStoredCurrency("COP"));
   
   // Estados para el rango de fechas personalizado
   const [showDateModal, setShowDateModal] = useState(false);
@@ -88,6 +86,43 @@ export default function DashboardPage() {
     { id: "month", label: "Mes actual" },
     { id: "custom", label: "Rango personalizado" },
   ];
+
+  const resolveMetricasByCurrency = (
+    metricasPorMoneda?: VentasDashboardResponse["metricas_por_moneda"]
+  ) => {
+    const fallbackCurrency = normalizeCurrencyCode(monedaUsuario || getStoredCurrency("COP"));
+    if (!metricasPorMoneda || Object.keys(metricasPorMoneda).length === 0) {
+      return { metricas: undefined, moneda: fallbackCurrency };
+    }
+
+    const sedeActual = sedes.find((sede) => sede.sede_id === selectedSede);
+    const sedeCurrency = resolveCurrencyFromSede(sedeActual, fallbackCurrency);
+    const countryCurrency = resolveCurrencyFromCountry(user?.pais, sedeCurrency);
+
+    const candidateCurrencies = Array.from(
+      new Set(
+        [sedeCurrency, countryCurrency, fallbackCurrency, "COP", "USD", "MXN"]
+          .map((currency) => normalizeCurrencyCode(currency))
+          .filter(Boolean)
+      )
+    );
+
+    for (const currency of candidateCurrencies) {
+      if (metricasPorMoneda[currency]) {
+        return { metricas: metricasPorMoneda[currency], moneda: currency };
+      }
+    }
+
+    const [firstCurrency] = Object.keys(metricasPorMoneda);
+    if (!firstCurrency) {
+      return { metricas: undefined, moneda: fallbackCurrency };
+    }
+
+    return {
+      metricas: metricasPorMoneda[firstCurrency],
+      moneda: normalizeCurrencyCode(firstCurrency),
+    };
+  };
 
   // Inicializar fechas por defecto
   useEffect(() => {
@@ -272,31 +307,15 @@ export default function DashboardPage() {
         return;
       }
 
-      // Usar la moneda del usuario
-      let metricas = data.metricas_por_moneda[monedaUsuario];
-      
-      // Si no hay métricas para la moneda del usuario, usar COP como fallback para Colombia
-      if (!metricas) {
-        if (user?.pais === 'Colombia' && data.metricas_por_moneda.COP) {
-          metricas = data.metricas_por_moneda.COP;
-          console.log(`Usando COP como fallback para Colombia`);
-        } else if (user?.pais !== 'Colombia' && data.metricas_por_moneda.USD) {
-          metricas = data.metricas_por_moneda.USD;
-          console.log(`Usando USD como fallback para ${user?.pais}`);
-        } else if (data.metricas_por_moneda.COP) {
-          metricas = data.metricas_por_moneda.COP;
-          console.log(`Usando COP como fallback general`);
-        } else if (data.metricas_por_moneda.USD) {
-          metricas = data.metricas_por_moneda.USD;
-          console.log(`Usando USD como fallback general`);
-        }
-      }
+      const { metricas, moneda } = resolveMetricasByCurrency(data.metricas_por_moneda);
 
       if (!metricas) {
         console.error('No hay métricas disponibles para ninguna moneda:', data.metricas_por_moneda);
         processChartDataWithFallback(data);
         return;
       }
+
+      console.log(`Moneda activa para gráficos de sede: ${moneda}`);
 
       // Generar datos para gráfico de línea (tendencia semanal)
       const days = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
@@ -453,43 +472,43 @@ export default function DashboardPage() {
     setTempDateRange(newRange);
   };
 
+  const getActiveDashboardCurrency = (): string => {
+    const { moneda } = resolveMetricasByCurrency(dashboardData?.metricas_por_moneda);
+    return moneda;
+  };
+
   const formatCurrency = (value: number | string): string => {
     try {
+      const activeCurrency = getActiveDashboardCurrency();
+      const locale = resolveCurrencyLocale(activeCurrency, "es-CO");
       if (typeof value === 'string') {
         const numericValue = extractNumericValue(value);
-        return formatMoney(numericValue, monedaUsuario, user?.pais === 'Colombia' ? 'es-CO' : 'en-US');
+        return formatMoney(numericValue, activeCurrency, locale);
       }
-      return formatMoney(value, monedaUsuario, user?.pais === 'Colombia' ? 'es-CO' : 'en-US');
+      return formatMoney(value, activeCurrency, locale);
     } catch (error) {
       console.error("Error formateando moneda:", error);
-      return monedaUsuario === 'COP' ? '$0' : 'US$ 0';
+      return formatMoney(0, getActiveDashboardCurrency(), resolveCurrencyLocale(getActiveDashboardCurrency(), "es-CO"));
     }
   };
 
   const formatCurrencyShort = (value: number | string): string => {
     try {
       const numericValue = typeof value === 'string' ? extractNumericValue(value) : value;
+      const activeCurrency = getActiveDashboardCurrency();
+      const locale = resolveCurrencyLocale(activeCurrency, "es-CO");
+      const absoluteValue = Math.abs(numericValue);
 
-      if (monedaUsuario === 'COP') {
-        // Formato especial para COP
-        if (numericValue >= 1000000) {
-          return `$${(numericValue / 1000000).toFixed(1)}M`;
-        } else if (numericValue >= 1000) {
-          return `$${(numericValue / 1000).toFixed(0)}K`;
-        }
-        return formatMoney(numericValue, 'COP', 'es-CO');
-      } else {
-        // Formato para USD
-        if (numericValue >= 1000000) {
-          return `US$ ${(numericValue / 1000000).toFixed(1)}M`;
-        } else if (numericValue >= 1000) {
-          return `US$ ${(numericValue / 1000).toFixed(0)}K`;
-        }
-        return formatMoney(numericValue, 'USD', 'en-US');
+      if (absoluteValue >= 1000000) {
+        return `${formatMoney(Math.round(numericValue / 1000000), activeCurrency, locale)}M`;
       }
+      if (absoluteValue >= 1000) {
+        return `${formatMoney(Math.round(numericValue / 1000), activeCurrency, locale)}K`;
+      }
+      return formatMoney(numericValue, activeCurrency, locale);
     } catch (error) {
       console.error("Error formateando moneda corta:", error);
-      return monedaUsuario === 'COP' ? '$0' : 'US$ 0';
+      return formatMoney(0, getActiveDashboardCurrency(), resolveCurrencyLocale(getActiveDashboardCurrency(), "es-CO"));
     }
   };
 
@@ -635,6 +654,8 @@ export default function DashboardPage() {
 
   // Función para obtener métricas de forma segura
   const getMetricas = () => {
+    const fallbackCurrency = getActiveDashboardCurrency();
+
     if (!dashboardData?.metricas_por_moneda) {
       return {
         ventas_totales: 0,
@@ -652,29 +673,11 @@ export default function DashboardPage() {
           addi: 0,
           sin_pago: 0
         },
-        moneda: monedaUsuario
+        moneda: fallbackCurrency
       };
     }
-    
-    // Buscar métricas para la moneda del usuario
-    let metricas = dashboardData.metricas_por_moneda[monedaUsuario];
-    
-    // Si no hay para la moneda del usuario, usar COP como fallback para Colombia
-    if (!metricas) {
-      if (user?.pais === 'Colombia' && dashboardData.metricas_por_moneda.COP) {
-        metricas = dashboardData.metricas_por_moneda.COP;
-        console.log(`Usando COP como fallback para Colombia`);
-      } else if (user?.pais !== 'Colombia' && dashboardData.metricas_por_moneda.USD) {
-        metricas = dashboardData.metricas_por_moneda.USD;
-        console.log(`Usando USD como fallback para ${user?.pais}`);
-      } else if (dashboardData.metricas_por_moneda.COP) {
-        metricas = dashboardData.metricas_por_moneda.COP;
-        console.log(`Usando COP como fallback general`);
-      } else if (dashboardData.metricas_por_moneda.USD) {
-        metricas = dashboardData.metricas_por_moneda.USD;
-        console.log(`Usando USD como fallback general`);
-      }
-    }
+
+    const { metricas, moneda } = resolveMetricasByCurrency(dashboardData.metricas_por_moneda);
     
     // Si no hay ninguna métrica, crear una vacía
     if (!metricas) {
@@ -694,13 +697,13 @@ export default function DashboardPage() {
           addi: 0,
           sin_pago: 0
         },
-        moneda: monedaUsuario
+        moneda
       };
     }
     
     return {
       ...metricas,
-      moneda: monedaUsuario
+      moneda
     };
   };
 
@@ -1025,151 +1028,25 @@ export default function DashboardPage() {
                       valor: metricas.ticket_promedio || 0,
                       crecimiento: ""  // Valor vacío
                     }}
+                    currency={metricas.moneda}
                   />
 
-                  {/* Churn Card */}
-                  <Card className="border-gray-200">
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-base font-semibold">
-                          Clientes en Riesgo (Churn)
-                        </CardTitle>
-                        <div className="flex items-center gap-2">
-                          <Badge className="bg-gray-100 text-gray-800 border border-gray-300">
-                            {churnData.length} detectados
-                          </Badge>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        {churnData.length > 0 ? (
-                          <>
-                            {churnData.slice(0, 3).map((cliente, index) => (
-                              <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                <div className="flex items-center gap-3">
-                                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 border border-gray-300">
-                                    <Users className="w-4 h-4 text-gray-700" />
-                                  </div>
-                                  <div>
-                                    <span className="font-medium">{cliente.nombre}</span>
-                                    <div className="text-xs text-gray-500">{cliente.dias_inactivo} días inactivo</div>
-                                  </div>
-                                </div>
-                                <div className="text-right">
-                                  <div className={`text-xs font-medium ${cliente.dias_inactivo > 90 ? 'text-gray-900' :
-                                      cliente.dias_inactivo > 60 ? 'text-gray-700' : 'text-gray-500'
-                                    }`}>
-                                    {cliente.dias_inactivo > 90 ? 'Alto riesgo' :
-                                      cliente.dias_inactivo > 60 ? 'Riesgo medio' : 'Riesgo bajo'}
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </>
-                        ) : (
-                          <div className="text-center py-4 text-gray-500">
-                            No hay clientes en riesgo de churn para este período
-                          </div>
-                        )}
-                        {churnData.length > 0 && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="w-full"
-                            onClick={() => setShowChurnList(!showChurnList)}
-                          >
-                            <ChevronDown className={`w-4 h-4 mr-2 transition-transform ${showChurnList ? 'rotate-180' : ''}`} />
-                            {showChurnList ? 'Ocultar detalles' : 'Ver todos los clientes en riesgo'}
-                          </Button>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
+                  {/*
+                    Módulo de Clientes en Riesgo (Churn) oculto por requerimiento.
+                    <Card className="border-gray-200">...</Card>
+                  */}
                 </div>
               </div>
 
-              {/* Información del período */}
-              <div className="text-center pt-4 border-t border-gray-200">
-                <p className="text-sm text-gray-500">
-                  Mostrando datos para: {getPeriodDisplay()} • Moneda: {metricas.moneda} • País: {user?.pais || 'Colombia'}
-                </p>
-                <p className="text-xs text-gray-400 mt-1">
-                  Última actualización: {new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                </p>
-              </div>
+              {/*
+                Footer del dashboard oculto por requerimiento.
+                <div className="text-center pt-4 border-t border-gray-200">...</div>
+              */}
 
-              {/* Detailed Churn List Modal */}
-              {showChurnList && churnData.length > 0 && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                  <div className="bg-white rounded-xl w-full max-w-4xl max-h-[80vh] overflow-hidden border border-gray-200">
-                    <div className="p-6 border-b border-gray-200">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="text-xl font-bold">Clientes en Riesgo de Abandono - {currentSede.nombre}</h3>
-                          <p className="text-gray-600 mt-2">
-                            {churnData.length} clientes inactivos detectados
-                          </p>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setShowChurnList(false)}
-                        >
-                          Cerrar
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="overflow-y-auto max-h-[60vh]">
-                      <Table>
-                        <TableHeader className="bg-gray-50">
-                          <TableRow>
-                            <TableHead>Cliente</TableHead>
-                            <TableHead>Contacto</TableHead>
-                            <TableHead>Última Visita</TableHead>
-                            <TableHead>Días Inactivo</TableHead>
-                            <TableHead>Riesgo</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {churnData.map((cliente, index) => (
-                            <TableRow key={cliente.cliente_id || index} className="hover:bg-gray-50">
-                              <TableCell>
-                                <div className="font-medium">{cliente.nombre}</div>
-                                <div className="text-xs text-gray-500">ID: {cliente.cliente_id}</div>
-                              </TableCell>
-                              <TableCell>
-                                <div className="text-sm">{cliente.correo}</div>
-                                <div className="text-xs text-gray-500">{cliente.telefono}</div>
-                              </TableCell>
-                              <TableCell>
-                                {formatDateDMY(cliente.ultima_visita)}
-                              </TableCell>
-                              <TableCell>
-                                <div className={`font-semibold ${cliente.dias_inactivo > 90 ? 'text-gray-900' :
-                                    cliente.dias_inactivo > 60 ? 'text-gray-700' : 'text-gray-500'
-                                  }`}>
-                                  {cliente.dias_inactivo} días
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <Badge className={
-                                  cliente.dias_inactivo > 90 ? 'bg-gray-900 text-white border-gray-900' :
-                                    cliente.dias_inactivo > 60 ? 'bg-gray-700 text-white border-gray-700' :
-                                      'bg-gray-500 text-white border-gray-500'
-                                }>
-                                  {cliente.dias_inactivo > 90 ? 'Alto' :
-                                    cliente.dias_inactivo > 60 ? 'Medio' : 'Bajo'}
-                                </Badge>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/*
+                Modal de detalle de churn oculto por requerimiento.
+                {showChurnList && churnData.length > 0 && (...)}
+              */}
             </div>
           ) : (
             <div className="text-center py-12 bg-white rounded-xl border border-gray-200">

@@ -88,10 +88,10 @@ export function AppointmentSummary({
       case "COP":
         return `$${amountNum.toLocaleString("es-CO", { maximumFractionDigits: 0 })} COP`
       case "MXN":
-        return `$${amountNum.toLocaleString("es-MX", { minimumFractionDigits: 2 })} MXN`
+        return `$${amountNum.toLocaleString("es-MX", { maximumFractionDigits: 0 })} MXN`
       case "USD":
       default:
-        return `$${amountNum.toLocaleString("en-US", { minimumFractionDigits: 2 })} USD`
+        return `$${amountNum.toLocaleString("en-US", { maximumFractionDigits: 0 })} USD`
     }
   }
 

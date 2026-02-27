@@ -211,10 +211,10 @@ export function PaymentMethodSelector({
       case "COP":
         return `$${amountNumber.toLocaleString("es-CO", { maximumFractionDigits: 0 })} COP`
       case "MXN":
-        return `$${amountNumber.toLocaleString("es-MX", { minimumFractionDigits: 2 })} MXN`
+        return `$${amountNumber.toLocaleString("es-MX", { maximumFractionDigits: 0 })} MXN`
       case "USD":
       default:
-        return `$${amountNumber.toLocaleString("en-US", { minimumFractionDigits: 2 })} USD`
+        return `$${amountNumber.toLocaleString("en-US", { maximumFractionDigits: 0 })} USD`
     }
   }
   
