@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
-from app.clients_service.models import Cliente, NotaCliente,ClientesPaginados
-from app.database.mongo import collection_clients, collection_citas, collection_card,collection_servicios, collection_locales,collection_estilista, collection_sales
+from app.clients_service.models import Cliente, NotaCliente, ClientesPaginados
+from app.database.mongo import (
+    collection_clients, collection_citas, collection_card,
+    collection_servicios, collection_locales, collection_estilista, collection_sales
+)
 from app.auth.routes import get_current_user
 from app.id_generator.generator import generar_id
 from datetime import datetime
@@ -49,6 +52,17 @@ async def verificar_duplicado_cliente(
     return await collection_clients.find_one(query)
 
 
+async def _get_franquicia_id_de_sede(sede_id: str) -> Optional[str]:
+    """Obtiene el franquicia_id de una sede. Utilidad reutilizable."""
+    if not sede_id:
+        return None
+    sede = await collection_locales.find_one(
+        {"sede_id": sede_id},
+        {"franquicia_id": 1, "_id": 0}
+    )
+    return sede.get("franquicia_id") if sede else None
+
+
 # ============================================================
 # CREAR CLIENTE
 # ============================================================
@@ -70,29 +84,29 @@ async def crear_cliente(
                 status_code=400,
                 detail="Debes seleccionar una sede para crear el cliente"
             )
-        
-        # ✅ Consultar información de la sede
+
+        # Consultar información de la sede
         sede_info = await collection_locales.find_one({"sede_id": sede_objetivo})
-        
         if not sede_info:
             raise HTTPException(400, f"Sede no encontrada: {sede_objetivo}")
-        
-        # ✅ Verificar si la sede maneja clientes globales
-        es_global = sede_info.get("es_global", False)
-        
-        # ✅ Generar ID del cliente
+
+        # Obtener franquicia_id de la sede
+        franquicia_id = sede_info.get("franquicia_id")
+
+        # Generar ID del cliente
         cliente_id = await generar_id("cliente", sede_objetivo)
 
         data = cliente.dict(exclude_none=True)
         data["cliente_id"] = cliente_id
         data["fecha_creacion"] = datetime.now()
         data["creado_por"] = current_user.get("email", "unknown")
-        
-        # ⭐ Si es sede global, no asignar sede_id específica
-        data["sede_id"] = None if es_global else sede_objetivo
-        
+        data["sede_id"] = sede_objetivo
+        data["franquicia_id"] = franquicia_id  # ⭐ Heredado de la sede
         data["pais"] = sede_info.get("pais", "")
         data["notas_historial"] = []
+
+        # Limpiar campo obsoleto si venía en el payload
+        data.pop("es_global", None)
 
         result = await collection_clients.insert_one(data)
         data["_id"] = str(result.inserted_id)
@@ -109,7 +123,6 @@ async def crear_cliente(
 # ============================================================
 # LISTAR CLIENTES (NORMAL)
 # ============================================================
-
 @router.get("/", response_model=List[dict])
 async def listar_clientes(
     filtro: Optional[str] = Query(None),
@@ -118,35 +131,48 @@ async def listar_clientes(
 ):
     try:
         rol = current_user.get("rol")
-        if rol not in ["admin_sede", "admin_franquicia", "super_admin", "estilista"]:
+        if rol not in ["admin_sede", "super_admin", "estilista"]:
             raise HTTPException(403, "No autorizado")
 
         query = {}
 
         if rol in ["admin_sede", "estilista"]:
-            query["sede_id"] = current_user.get("sede_id")
+            sede_id = current_user.get("sede_id")
+            franquicia_id = await _get_franquicia_id_de_sede(sede_id)
+
+            if franquicia_id:
+                # ⭐ Filtrar por franquicia: muestra todos los clientes de la franquicia
+                query["franquicia_id"] = franquicia_id
+            else:
+                # Fallback: solo clientes de la sede específica
+                query["sede_id"] = sede_id
 
         if filtro:
-            query["$or"] = [
-                {"nombre": {"$regex": filtro, "$options": "i"}},
-                {"correo": {"$regex": filtro, "$options": "i"}},
-                {"telefono": {"$regex": filtro, "$options": "i"}},
-                {"cliente_id": {"$regex": filtro, "$options": "i"}},
+            filtro_regex = {"$regex": filtro, "$options": "i"}
+            filtro_condiciones = [
+                {"nombre": filtro_regex},
+                {"correo": filtro_regex},
+                {"telefono": filtro_regex},
+                {"cliente_id": filtro_regex},
             ]
+            if query:
+                query = {"$and": [query, {"$or": filtro_condiciones}]}
+            else:
+                query["$or"] = filtro_condiciones
 
         clientes = await collection_clients.find(query).limit(limite).to_list(None)
-
         return [cliente_to_dict(c) for c in clientes]
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error listando clientes: {e}", exc_info=True)
         raise HTTPException(500, "Error al listar clientes")
 
 
 # ============================================================
-# LISTAR TODOS LOS CLIENTES - VERSIÓN OPTIMIZADA
+# LISTAR TODOS LOS CLIENTES - VERSIÓN OPTIMIZADA CON PAGINACIÓN
 # ============================================================
-
 @router.get("/todos", response_model=ClientesPaginados)
 async def listar_todos(
     filtro: Optional[str] = Query(None, description="Búsqueda por nombre, ID o teléfono"),
@@ -156,126 +182,82 @@ async def listar_todos(
 ):
     """
     Endpoint optimizado para listar clientes con lazy loading.
-    
-    🚀 OPTIMIZACIONES APLICADAS:
-    - Proyección mínima (solo campos necesarios)
-    - Count optimizado (estimated cuando es posible)
-    - Lazy loading: solo carga la página solicitada
-    - Compatible con 43K+ registros
-    
-    PARÁMETROS:
-    - filtro: Texto para buscar (nombre, cedula, teléfono)
-    - limite: Items por página (default: 30, max: 100)
-    - pagina: Página actual (empieza en 1)
-    
-    RETORNA:
-    - clientes: Lista de clientes de la página actual
-    - metadata: Info completa de paginación (total, páginas, etc.)
+    Filtra por franquicia_id para admin_sede y estilista.
     """
     try:
         rol = current_user.get("rol")
-        
-        # ============================================================
-        # 🔐 VALIDACIÓN DE PERMISOS
-        # ============================================================
+
         if rol not in ["super_admin", "admin_sede", "estilista"]:
-            raise HTTPException(
-                status_code=403,
-                detail="No tienes permisos para ver clientes"
-            )
+            raise HTTPException(403, "No tienes permisos para ver clientes")
 
         # ============================================================
-        # 🏢 FILTRO BASE POR SEDE (según rol)
+        # 🏢 FILTRO BASE POR FRANQUICIA (según rol)
         # ============================================================
         query = {}
-        
+
         if rol in ["admin_sede", "estilista"]:
             sede_id = current_user.get("sede_id")
-            
+
             if not sede_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Tu usuario no tiene sede asignada"
-                )
-            
-            # Consultar si la sede es global (optimizado con proyección)
+                raise HTTPException(400, "Tu usuario no tiene sede asignada")
+
+            # Obtener franquicia_id de la sede (con proyección mínima)
             sede_info = await collection_locales.find_one(
                 {"sede_id": sede_id},
-                {"es_global": 1, "_id": 0}
+                {"franquicia_id": 1, "_id": 0}
             )
-            
-            
-            # Aplicar filtro de sede
-            if sede_info and sede_info.get("es_global") == True:
-                query["sede_id"] = None  # Sede universal
+
+            franquicia_id = sede_info.get("franquicia_id") if sede_info else None
+
+            if franquicia_id:
+                # ⭐ Muestra todos los clientes de la franquicia
+                query["franquicia_id"] = franquicia_id
             else:
-                query["sede_id"] = sede_id  # Sede específica
+                # Fallback: solo sede específica (sede sin franquicia asignada)
+                query["sede_id"] = sede_id
 
         # ============================================================
-        # 🔍 BÚSQUEDA INTELIGENTE (SIN $text search)
+        # 🔍 BÚSQUEDA INTELIGENTE
         # ============================================================
         if filtro:
-            filtro = re.escape(filtro.strip())
-            regex_inicio = {"$regex": f"^{filtro}", "$options": "i"}
-            regex_contiene = {"$regex": filtro, "$options": "i"}
-            
-            if not filtro:
-                # Filtro vacío después de strip -> ignorar
+            filtro_escapado = re.escape(filtro.strip())
+
+            if not filtro_escapado:
                 pass
             else:
-                # ============================================================
-                # ESTRATEGIA DE BÚSQUEDA OPTIMIZADA:
-                # ============================================================
-                # 1. Búsquedas cortas (1-2 chars): Solo inicio (^)
-                # 2. Búsquedas largas (3+ chars): Inicio y contiene
-                # 3. Usa índices normales (más rápido que $text)
-                # ============================================================
-                
-                if len(filtro) <= 2:
-                    # Búsqueda corta: solo inicio de palabra (muy rápido)
+                regex_inicio = {"$regex": f"^{filtro_escapado}", "$options": "i"}
+                regex_contiene = {"$regex": filtro_escapado, "$options": "i"}
+
+                if len(filtro_escapado) <= 2:
                     filtro_condiciones = [
                         {"nombre": regex_inicio},
                         {"cliente_id": regex_inicio},
                         {"telefono": regex_inicio},
                     ]
                 else:
-                    # Búsqueda larga: inicio + contiene (balance velocidad/resultados)
                     filtro_condiciones = [
-                        # Prioridad 1: Empieza con el filtro (usa índice)
                         {"nombre": regex_inicio},
                         {"cliente_id": regex_inicio},
                         {"telefono": regex_inicio},
-                        # Prioridad 2: Contiene el filtro (backup)
                         {"nombre": regex_contiene},
                         {"correo": regex_contiene},
                     ]
-                
-                # Combinar con filtro de sede (si existe)
+
                 if query:
-                    query = {
-                        "$and": [
-                            query,  # Filtro de sede
-                            {"$or": filtro_condiciones}  # Búsqueda
-                        ]
-                    }
+                    query = {"$and": [query, {"$or": filtro_condiciones}]}
                 else:
                     query = {"$or": filtro_condiciones}
 
         # ============================================================
         # 📊 CONTEO OPTIMIZADO
         # ============================================================
-        # ESTRATEGIA: Usar estimated_document_count cuando sea posible
-        # (es 100x más rápido que count_documents)
-        
         if not filtro and not query and rol == "super_admin":
-            # Super admin SIN filtros: usar estimación (ultra rápido)
             total_clientes = await collection_clients.estimated_document_count()
         else:
-            # Con filtros: usar count normal (usa índices)
             total_clientes = await collection_clients.count_documents(query)
 
         # ============================================================
-        # 📄 PROYECCIÓN: Solo campos necesarios (reduce payload 70%)
+        # 📄 PROYECCIÓN MÍNIMA
         # ============================================================
         projection = {
             "_id": 1,
@@ -284,40 +266,26 @@ async def listar_todos(
             "correo": 1,
             "telefono": 1,
             "sede_id": 1,
+            "franquicia_id": 1,
             "fecha_registro": 1,
-            # ❌ EXCLUIDOS: historial_citas, preferencias, notas, etc.
         }
 
         # ============================================================
-        # 🎯 PAGINACIÓN CALCULADA
+        # 🎯 PAGINACIÓN
         # ============================================================
         skip = (pagina - 1) * limite
-        total_paginas = (total_clientes + limite - 1) // limite
-        
-        # Validar que la página solicitada existe
+        total_paginas = (total_clientes + limite - 1) // limite if total_clientes > 0 else 1
+
         if pagina > total_paginas and total_paginas > 0:
             raise HTTPException(
-                status_code=404,
-                detail=f"Página {pagina} no existe. Total de páginas: {total_paginas}"
+                404,
+                f"Página {pagina} no existe. Total de páginas: {total_paginas}"
             )
 
-        # ============================================================
-        # 🚀 QUERY FINAL OPTIMIZADO
-        # ============================================================
         cursor = collection_clients.find(query, projection)
-        
-        # Ordenar alfabéticamente (usa índice de nombre)
-        cursor = cursor.sort("nombre", 1)
-        
-        # Aplicar paginación (lazy loading: solo la página actual)
-        cursor = cursor.skip(skip).limit(limite)
-        
-        # Ejecutar query
+        cursor = cursor.sort("nombre", 1).skip(skip).limit(limite)
         clientes = await cursor.to_list(limite)
 
-        # ============================================================
-        # 📦 RESPUESTA CON METADATA COMPLETA
-        # ============================================================
         return {
             "clientes": [cliente_to_dict_ligero(c) for c in clientes],
             "metadata": {
@@ -336,21 +304,13 @@ async def listar_todos(
         raise
     except Exception as e:
         logger.error(f"Error al obtener clientes: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Error al obtener clientes. Por favor intenta de nuevo."
-        )
+        raise HTTPException(500, "Error al obtener clientes. Por favor intenta de nuevo.")
 
 
 # ============================================================
 # 🪶 FUNCIÓN AUXILIAR: Convertir a dict ligero
 # ============================================================
-
 def cliente_to_dict_ligero(cliente: dict) -> dict:
-    """
-    Convierte documento MongoDB a dict ligero para API.
-    Solo incluye campos esenciales (reduce payload).
-    """
     return {
         "id": str(cliente.get("_id", "")),
         "cliente_id": cliente.get("cliente_id", ""),
@@ -358,13 +318,14 @@ def cliente_to_dict_ligero(cliente: dict) -> dict:
         "correo": cliente.get("correo", ""),
         "telefono": cliente.get("telefono", ""),
         "sede_id": cliente.get("sede_id"),
+        "franquicia_id": cliente.get("franquicia_id"),
         "fecha_registro": cliente.get("fecha_registro")
     }
+
 
 # ============================================================
 # LISTAR CLIENTES POR ID DE SEDE
 # ============================================================
-
 @router.get("/filtrar/{id}", response_model=List[dict])
 async def listar_por_id(
     id: str,
@@ -373,7 +334,7 @@ async def listar_por_id(
     try:
         rol = current_user.get("rol")
 
-        if rol not in ["super_admin", "admin_franquicia", "admin_sede", "estilista"]:
+        if rol not in ["super_admin", "admin_sede", "estilista"]:
             raise HTTPException(403, "No autorizado")
 
         if rol in ["admin_sede", "estilista"]:
@@ -383,6 +344,8 @@ async def listar_por_id(
         clientes = await collection_clients.find({"sede_id": id}).to_list(None)
         return [cliente_to_dict(c) for c in clientes]
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error filtrando clientes: {e}", exc_info=True)
         raise HTTPException(500, "Error al filtrar clientes")
@@ -391,7 +354,6 @@ async def listar_por_id(
 # ============================================================
 # OBTENER CLIENTE
 # ============================================================
-
 @router.get("/{id}", response_model=dict)
 async def obtener_cliente(
     id: str,
@@ -401,12 +363,11 @@ async def obtener_cliente(
         rol = current_user.get("rol")
         user_sede_id = current_user.get("sede_id")
 
-        if rol not in ["admin_sede", "admin_franquicia", "super_admin", "estilista"]:
+        if rol not in ["admin_sede", "super_admin", "estilista"]:
             raise HTTPException(status_code=403, detail="No autorizado")
 
-        # 1️⃣ Buscar cliente por cliente_id o _id
+        # Buscar cliente por cliente_id o _id
         cliente = await collection_clients.find_one({"cliente_id": id})
-
         if not cliente:
             try:
                 cliente = await collection_clients.find_one({"_id": ObjectId(id)})
@@ -416,29 +377,19 @@ async def obtener_cliente(
         if not cliente:
             raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
-        # 2️⃣ Reglas de acceso SOLO para admin_sede / estilista
+        # Validación de acceso para admin_sede y estilista
         if rol in ["admin_sede", "estilista"]:
-            cliente_sede_id = cliente.get("sede_id")
+            cliente_franquicia_id = cliente.get("franquicia_id")
+            user_franquicia_id = await _get_franquicia_id_de_sede(user_sede_id)
 
-            # ✅ Cliente sin sede → permitido
-            if cliente_sede_id is None:
-                return cliente_to_dict(cliente)
-
-            # 3️⃣ Validar sede del cliente
-            sede_cliente = await collection_locales.find_one(
-                {"sede_id": cliente_sede_id},
-                {"es_global": 1}
-            )
-
-            # ✅ Si la sede del cliente es global → permitido
-            if sede_cliente and sede_cliente.get("es_global") is True:
-                return cliente_to_dict(cliente)
-
-            # ❌ Sede internacional: debe coincidir con la del usuario
-            if cliente_sede_id != user_sede_id:
+            if cliente_franquicia_id and user_franquicia_id:
+                # ⭐ Si comparten franquicia → acceso permitido
+                if cliente_franquicia_id != user_franquicia_id:
+                    raise HTTPException(status_code=403, detail="No autorizado")
+            elif cliente.get("sede_id") and cliente.get("sede_id") != user_sede_id:
+                # Fallback: verificar por sede directa
                 raise HTTPException(status_code=403, detail="No autorizado")
 
-        # 4️⃣ Roles altos pasan directo
         return cliente_to_dict(cliente)
 
     except HTTPException:
@@ -448,11 +399,9 @@ async def obtener_cliente(
         raise HTTPException(status_code=500, detail="Error al obtener cliente")
 
 
-
 # ============================================================
 # EDITAR CLIENTE
 # ============================================================
-
 @router.put("/{id}", response_model=dict)
 async def editar_cliente(
     id: str,
@@ -461,11 +410,10 @@ async def editar_cliente(
 ):
     try:
         rol = current_user.get("rol")
-        if rol not in ["admin_sede", "admin_franquicia", "super_admin"]:
+        if rol not in ["admin_sede", "super_admin"]:
             raise HTTPException(403, "No autorizado")
 
         cliente = await collection_clients.find_one({"cliente_id": id})
-
         if not cliente:
             try:
                 cliente = await collection_clients.find_one({"_id": ObjectId(id)})
@@ -475,8 +423,19 @@ async def editar_cliente(
         if not cliente:
             raise HTTPException(404, "Cliente no encontrado")
 
-        if rol == "admin_sede" and cliente["sede_id"] != current_user.get("sede_id"):
-            raise HTTPException(403, "No autorizado")
+        # Validar acceso por franquicia
+        if rol == "admin_sede":
+            user_sede_id = current_user.get("sede_id")
+            user_franquicia_id = await _get_franquicia_id_de_sede(user_sede_id)
+            cliente_franquicia_id = cliente.get("franquicia_id")
+
+            tiene_acceso = (
+                (user_franquicia_id and user_franquicia_id == cliente_franquicia_id) or
+                cliente.get("sede_id") == user_sede_id
+            )
+
+            if not tiene_acceso:
+                raise HTTPException(403, "No autorizado")
 
         existing = await verificar_duplicado_cliente(
             correo=data_update.correo,
@@ -485,15 +444,14 @@ async def editar_cliente(
         )
 
         if existing:
-            campo = (
-                "correo" if data_update.correo == existing.get("correo") else "teléfono"
-            )
+            campo = "correo" if data_update.correo == existing.get("correo") else "teléfono"
             raise HTTPException(400, f"Ya existe otro cliente con este {campo}")
 
         update_data = data_update.dict(exclude_none=True)
         update_data["modificado_por"] = current_user.get("email")
         update_data["fecha_modificacion"] = datetime.now()
         update_data.pop("cliente_id", None)
+        update_data.pop("es_global", None)  # Nunca permitir setear campo obsoleto
 
         await collection_clients.update_one(
             {"_id": cliente["_id"]},
@@ -502,6 +460,8 @@ async def editar_cliente(
 
         return {"success": True, "msg": "Cliente actualizado"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error editando cliente: {e}", exc_info=True)
         raise HTTPException(500, "Error al editar cliente")
@@ -510,7 +470,6 @@ async def editar_cliente(
 # ============================================================
 # AGREGAR NOTA
 # ============================================================
-
 @router.post("/{id}/notas", response_model=dict)
 async def agregar_nota(
     id: str,
@@ -519,7 +478,6 @@ async def agregar_nota(
 ):
     try:
         cliente = await collection_clients.find_one({"cliente_id": id})
-
         if not cliente:
             try:
                 cliente = await collection_clients.find_one({"_id": ObjectId(id)})
@@ -540,6 +498,8 @@ async def agregar_nota(
 
         return {"success": True, "msg": "Nota agregada"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error agregando nota: {e}")
         raise HTTPException(500, "Error al agregar nota")
@@ -548,7 +508,6 @@ async def agregar_nota(
 # ============================================================
 # HISTORIAL DEL CLIENTE
 # ============================================================
-
 @router.get("/{id}/historial", response_model=List[dict])
 async def historial_cliente(
     id: str,
@@ -556,18 +515,21 @@ async def historial_cliente(
 ):
     try:
         rol = current_user.get("rol")
-        if rol not in ["admin_sede", "admin_franquicia", "super_admin", "estilista"]:
+        if rol not in ["admin_sede", "super_admin", "estilista"]:
             raise HTTPException(403, "No autorizado")
 
         citas = await collection_citas.find({"cliente_id": id}).sort("fecha", -1).to_list(None)
         return [cita_to_dict(c) for c in citas]
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error historial cliente: {e}")
         raise HTTPException(500, "Error al obtener historial")
 
+
 # ============================================================
-# OBTENER FICHAS DEL CLIENTE (servicio, sede, estilista y sede del estilista)
+# OBTENER FICHAS DEL CLIENTE
 # ============================================================
 @router.get("/fichas/{cliente_id}", response_model=List[dict])
 async def obtener_fichas_cliente(
@@ -577,11 +539,9 @@ async def obtener_fichas_cliente(
     try:
         rol = current_user.get("rol")
 
-        # ---- Permisos ----
-        if rol not in ["admin_sede", "admin_franquicia", "super_admin", "estilista"]:
+        if rol not in ["admin_sede", "super_admin", "estilista"]:
             raise HTTPException(403, "No autorizado")
 
-        # ---- Obtener fichas ----
         fichas = await collection_card.find(
             {"cliente_id": cliente_id}
         ).sort("fecha_ficha", -1).to_list(None)
@@ -589,7 +549,7 @@ async def obtener_fichas_cliente(
         if not fichas:
             return []
 
-        # ---- Filtrar por sede ----
+        # Filtrar por sede para roles no super_admin
         if rol in ["admin_sede", "estilista"]:
             sede_usuario = current_user.get("sede_id")
             fichas = [f for f in fichas if f.get("sede_id") == sede_usuario]
@@ -599,67 +559,38 @@ async def obtener_fichas_cliente(
         for ficha in fichas:
             ficha["_id"] = str(ficha["_id"])
 
-            # Normalizar fechas
             for campo in ["fecha_ficha", "fecha_reserva"]:
                 if isinstance(ficha.get(campo), datetime):
                     ficha[campo] = ficha[campo].strftime("%Y-%m-%d")
 
-            # ======================================================
-            # 1️⃣ Obtener servicio
-            # ======================================================
             servicio_nombre = None
-            servicio = await collection_servicios.find_one(
-                {"servicio_id": ficha.get("servicio_id")}
-            )
+            servicio = await collection_servicios.find_one({"servicio_id": ficha.get("servicio_id")})
             if servicio:
                 servicio_nombre = servicio.get("nombre")
 
-            # ======================================================
-            # 2️⃣ Obtener sede
-            # ======================================================
             sede_nombre = None
-            sede = await collection_locales.find_one(
-                {"sede_id": ficha.get("sede_id")}
-            )
+            sede = await collection_locales.find_one({"sede_id": ficha.get("sede_id")})
             if sede:
-                sede_nombre = (
-                    sede.get("nombre_sede")
-                    or sede.get("nombre")
-                    or sede.get("local")
-                )
+                sede_nombre = sede.get("nombre_sede") or sede.get("nombre") or sede.get("local")
 
-            # ======================================================
-            # 3️⃣ Obtener estilista por profesional_id
-            # ======================================================
-            profesional_id = ficha.get("profesional_id")  # <── AQUÍ!
-
+            profesional_id = ficha.get("profesional_id")
             estilista_nombre = "Desconocido"
             sede_estilista_nombre = "Desconocida"
 
             if profesional_id:
-                estilista = await collection_estilista.find_one(
-                    {"profesional_id": profesional_id}  # <── AQUÍ FUNCIONA
-                )
-
+                estilista = await collection_estilista.find_one({"profesional_id": profesional_id})
                 if estilista:
                     estilista_nombre = estilista.get("nombre")
-
-                    # buscar sede del estilista
                     est_sede_id = estilista.get("sede_id")
                     if est_sede_id:
-                        sede_est = await collection_locales.find_one(
-                            {"sede_id": est_sede_id}
-                        )
+                        sede_est = await collection_locales.find_one({"sede_id": est_sede_id})
                         if sede_est:
                             sede_estilista_nombre = (
-                                sede_est.get("nombre_sede")
-                                or sede_est.get("nombre")
-                                or sede_est.get("local")
+                                sede_est.get("nombre_sede") or
+                                sede_est.get("nombre") or
+                                sede_est.get("local")
                             )
 
-            # ======================================================
-            # 4️⃣ Construir respuesta final
-            # ======================================================
             resultado_final.append({
                 **ficha,
                 "servicio": servicio_nombre,
@@ -670,32 +601,23 @@ async def obtener_fichas_cliente(
 
         return resultado_final
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error obteniendo fichas del cliente: {e}", exc_info=True)
         raise HTTPException(500, "Error al obtener fichas del cliente")
 
+
 # ============================================================
-# 📅 Obtener todos los clientes de la sede del usuario autenticado
+# CLIENTES DE MI SEDE
 # ============================================================
 @router.get("/clientes/mi-sede", response_model=List[dict])
 async def get_clientes_mi_sede(
     current_user: dict = Depends(get_current_user)
 ):
-    # 1️⃣ Verifica que el usuario tenga sede
     sede_usuario = current_user.get("sede_id")
     if not sede_usuario:
-        raise HTTPException(
-            status_code=400,
-            detail="El usuario autenticado no tiene una sede asignada"
-        )
+        raise HTTPException(400, "El usuario autenticado no tiene una sede asignada")
 
-    # 2️⃣ Obtener clientes de la sede
-    clientes_cursor = collection_clients.find(
-        {"sede_id": sede_usuario},
-        {"_id": 0}  # opcional
-    )
-
-    # Motor necesita to_list()
-    clientes = await clientes_cursor.to_list(length=None)
-
-    return clientes  # Devuelve directamente el array
+    clientes_cursor = collection_clients.find({"sede_id": sede_usuario}, {"_id": 0})
+    return await clientes_cursor.to_list(length=None)

@@ -38,14 +38,14 @@ def get_date_range(
         if not start_date_custom or not end_date_custom:
             raise ValueError(
                 "Para período 'custom' debe proporcionar 'start_date' y 'end_date' "
-                "en formato YYYY-MM-DD"
+                "en formato DD-MM-YYYY"
             )
         
         try:
-            start = datetime.strptime(start_date_custom, "%Y-%m-%d").replace(
+            start = datetime.strptime(start_date_custom, "%d-%m-%Y").replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
-            end = datetime.strptime(end_date_custom, "%Y-%m-%d").replace(
+            end = datetime.strptime(end_date_custom, "%d-%m-%Y").replace(
                 hour=23, minute=59, second=59, microsecond=999999
             )
             
@@ -62,7 +62,7 @@ def get_date_range(
         except ValueError as e:
             if "does not match format" in str(e):
                 raise ValueError(
-                    "Formato de fecha inválido. Use YYYY-MM-DD (ej: 2024-12-01)"
+                    "Formato de fecha inválido. Use DD-MM-YYYY (ej: 01-12-2024)"
                 )
             raise
 
@@ -163,6 +163,7 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
                     "link_de_pago": 0,
                     "tarjeta_credito": 0,
                     "tarjeta_debito": 0,
+                    "abonos": 0
                 }
             }
         
@@ -185,7 +186,7 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
                 metricas_por_moneda[moneda]["ventas_productos"] += subtotal
         
         # Métodos de pago desde desglose_pagos
-        for metodo in ["efectivo", "transferencia","tarjeta", "tarjeta_credito", "tarjeta_debito", "link_de_pago", "giftcard", "addi", "otros"]:
+        for metodo in ["efectivo", "transferencia","tarjeta", "tarjeta_credito", "tarjeta_debito", "link_de_pago", "giftcard", "addi", "abonos", "otros"]:
             valor = desglose_pagos.get(metodo, 0)
             if valor > 0:
                 metricas_por_moneda[moneda]["metodos_pago"][metodo] += valor
@@ -313,13 +314,13 @@ async def ventas_dashboard(
     ),
     start_date: Optional[str] = Query(
         None,
-        description="Fecha inicio para período 'custom' (YYYY-MM-DD)",
-        regex="^\\d{4}-\\d{2}-\\d{2}$"
+        description="Fecha inicio para período 'custom' (DD-MM-YYYY)",
+        regex="^\\d{2}-\\d{2}-\\d{4}$"
     ),
     end_date: Optional[str] = Query(
         None,
-        description="Fecha fin para período 'custom' (YYYY-MM-DD)",
-        regex="^\\d{4}-\\d{2}-\\d{2}$"
+        description="Fecha fin para período 'custom' (DD-MM-YYYY)",
+        regex="^\\d{2}-\\d{2}-\\d{4}$"
     ),
     sede_id: Optional[str] = Query(None, description="Filtrar por sede"),
     current_user: dict = Depends(get_current_user)

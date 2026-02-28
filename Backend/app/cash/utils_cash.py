@@ -49,10 +49,21 @@ def generar_apertura_id(sede_id: str, fecha: str) -> str:
 # VALIDACIONES DE FECHAS
 # ============================================================
 
+def normalizar_fecha(fecha: str) -> str:
+    """
+    Acepta DD-MM-YYYY o YYYY-MM-DD y siempre devuelve YYYY-MM-DD
+    """
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(fecha, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    raise ValueError(f"Formato de fecha inválido: '{fecha}'. Use DD-MM-YYYY o YYYY-MM-DD")
+
 def validar_fecha_formato(fecha: str) -> bool:
     """Valida que la fecha esté en formato YYYY-MM-DD"""
     try:
-        datetime.strptime(fecha, "%Y-%m-%d")
+        normalizar_fecha(fecha)
         return True
     except ValueError:
         return False
@@ -62,14 +73,14 @@ def obtener_rango_fecha(fecha: str) -> tuple:
     Obtiene el rango de inicio y fin para un día completo
     Returns: (datetime_inicio, datetime_fin)
     """
-    fecha_dt = datetime.strptime(fecha, "%Y-%m-%d")
+    fecha_dt = datetime.strptime(normalizar_fecha(fecha), "%Y-%m-%d")
     fecha_inicio = fecha_dt.replace(hour=0, minute=0, second=0, microsecond=0)
     fecha_fin = fecha_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
     return (fecha_inicio, fecha_fin)
 
 def fecha_a_datetime(fecha: str) -> datetime:
     """Convierte string YYYY-MM-DD a datetime"""
-    return datetime.strptime(fecha, "%Y-%m-%d")
+    return datetime.strptime(normalizar_fecha(fecha), "%Y-%m-%d") 
 
 # ============================================================
 # FORMATEADORES
