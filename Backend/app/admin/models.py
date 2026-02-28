@@ -105,3 +105,18 @@ class ServicioAdmin(BaseModel):
         if v is not None and (v < 0 or v > 100):
             raise ValueError('Comisión debe estar entre 0 y 100')
         return v
+
+class Franquicia(BaseModel):
+    nombre: str
+    pais: Optional[str] = None
+    descripcion: Optional[str] = None
+
+
+class FranquiciaUpdate(BaseModel):
+    nombre: Optional[str] = None
+    pais: Optional[str] = None
+    descripcion: Optional[str] = None
+
+
+class AsignarSede(BaseModel):
+    sede_id: str

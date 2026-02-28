@@ -28,7 +28,7 @@ from .models_cash import (
 from .utils_cash import (
     generar_cierre_id, generar_egreso_id, generar_ingreso_id, generar_apertura_id,
     calcular_diferencia, validar_diferencia_aceptable,
-    construir_filtro_fecha, convertir_mongo_a_json
+    construir_filtro_fecha, convertir_mongo_a_json, normalizar_fecha
 )
 
 # Importar autenticación
@@ -89,7 +89,9 @@ async def calcular_efectivo_dia_endpoint(
     """
     
     if not fecha:
-        fecha = datetime.now().strftime("%Y-%m-%d")
+        fecha = datetime.now().strftime("%d-%m-%Y")
+
+    fecha = normalizar_fecha(fecha)
     
     # Usar lógica contable separada
     resumen = await calcular_resumen_dia(sede_id, fecha)
@@ -111,13 +113,12 @@ async def calcular_efectivo_dia_endpoint(
 
 def _parse_date(value: str, field_name: str) -> datetime:
     try:
-        return datetime.strptime(value, "%Y-%m-%d")
+        return datetime.strptime(normalizar_fecha(value), "%Y-%m-%d")
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"'{field_name}' debe tener formato YYYY-MM-DD"
+            detail=f"'{field_name}' debe tener formato DD-MM-YYYY o YYYY-MM-DD"
         ) from exc
-
 
 def _normalize_range(fecha_inicio: str, fecha_fin: str) -> tuple[str, str]:
     inicio_dt = _parse_date(fecha_inicio, "fecha_inicio")
@@ -687,11 +688,11 @@ async def reporte_periodo(
 
 def _parse_date_yyyy_mm_dd(value: str, field_name: str) -> datetime:
     try:
-        return datetime.strptime(value, "%Y-%m-%d")
+        return datetime.strptime(normalizar_fecha(value), "%Y-%m-%d")
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"'{field_name}' debe tener formato YYYY-MM-DD"
+            detail=f"'{field_name}' debe tener formato DD-MM-YYYY o YYYY-MM-DD"
         ) from exc
 
 
@@ -869,9 +870,9 @@ async def _build_period_report_data(
 @router.get("/reporte-excel")
 async def descargar_reporte_excel(
     sede_id: str = Query(..., description="ID de la sede"),
-    fecha: Optional[str] = Query(None, description="Fecha del cierre (YYYY-MM-DD)"),
-    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
-    fecha_fin: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
+    fecha: Optional[str] = Query(None, description="Fecha del cierre (DD-MM-YYYY o YYYY-MM-DD)"),
+    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio (DD-MM-YYYY o YYYY-MM-DD)"),
+    fecha_fin: Optional[str] = Query(None, description="Fecha fin (DD-MM-YYYY o YYYY-MM-DD)"),
     current_user: dict = Depends(get_current_user)
 ):
     """

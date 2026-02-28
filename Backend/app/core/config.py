@@ -24,6 +24,7 @@ from app.sales.routes import router as sales_router
 from app.cash.routes_cash import router as cash_router
 from app.giftcards.routes_giftcards import router as giftcards_router
 from app.scheduling.submodules.fichas.routes_fichas import router as routes_fichas_router
+from app.admin.routes_franquicias import router as admin_franquicias_router
 # from app.database.indexes import create_indexes
 from app.database.mongo import db  
 # from app.database.indexes import create_indexes  
@@ -37,11 +38,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
         "https://agenda.rizosfelices.co",
         "https://staging-agenda.rizosfelices.co",
-        "https://preview.agenda.rizosfelices.co",
         "https://previewapi.rizosfelices.co",
     ],
     allow_credentials=True,
@@ -75,6 +73,7 @@ async def lifespan(app: FastAPI):
 # Incluir todos los routers
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(scheduling_router, prefix="/scheduling")
+app.include_router(admin_franquicias_router, prefix="/admin/franquicias", tags=["Franquicias"])
 app.include_router(routes_fichas_router, tags=["Fichas"])
 app.include_router(admin_locales_router)
 app.include_router(admin_servicios_router)
