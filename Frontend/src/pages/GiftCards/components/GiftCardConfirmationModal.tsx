@@ -11,7 +11,7 @@ import {
 } from "../../../components/ui/dialog";
 import type { GiftCard } from "../types";
 import { GiftCardStatusBadge } from "./GiftCardStatusBadge";
-import { formatGiftCardDate, formatMoney, NEVER_EXPIRES_LABEL, resolveGiftCardSedeName } from "./utils";
+import { formatGiftCardDate, formatMoney, getGiftCardValidityLabel, resolveGiftCardSedeName } from "./utils";
 
 interface GiftCardConfirmationModalProps {
   open: boolean;
@@ -68,6 +68,15 @@ export function GiftCardConfirmationModal({
     return `mailto:${destination}?subject=${subject}&body=${body}`;
   }, [beneficiaryEmail, currency, giftCard]);
 
+  const validityLabel = useMemo(() => {
+    if (!giftCard) return "-";
+    return getGiftCardValidityLabel({
+      fechaVencimiento: giftCard.fecha_vencimiento,
+      fechaEmision: giftCard.fecha_emision,
+      createdAt: giftCard.created_at,
+    });
+  }, [giftCard]);
+
   const handlePrint = () => {
     if (!giftCard) return;
 
@@ -103,7 +112,7 @@ export function GiftCardConfirmationModal({
         <div class="row"><span>Nombre sede</span><span>${escapeForHtml(resolvedSedeName)}</span></div>
         <div class="row"><span>Saldo disponible</span><span>${escapeForHtml(formatMoney(Number(giftCard.saldo_disponible || 0), currency))}</span></div>
         <div class="row"><span>Fecha emisión</span><span>${escapeForHtml(formatGiftCardDate(giftCard.fecha_emision || giftCard.created_at))}</span></div>
-        <div class="row"><span>Vigencia</span><span>${escapeForHtml(NEVER_EXPIRES_LABEL)}</span></div>
+        <div class="row"><span>Vigencia</span><span>${escapeForHtml(validityLabel)}</span></div>
       </div>
     </div>
     <script>window.print(); window.close();</script>
@@ -177,7 +186,7 @@ export function GiftCardConfirmationModal({
 
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
                 <p className="text-xs text-gray-500">Vigencia</p>
-                <p className="mt-1 text-sm font-semibold text-gray-900">{NEVER_EXPIRES_LABEL}</p>
+                <p className="mt-1 text-sm font-semibold text-gray-900">{validityLabel}</p>
               </div>
             </div>
           </div>

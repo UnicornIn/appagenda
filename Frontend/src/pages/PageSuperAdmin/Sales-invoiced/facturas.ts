@@ -1,5 +1,9 @@
 // src/api/facturas.ts
 import { API_BASE_URL } from "../../../types/config";
+import {
+  extractPaymentMethodTotalsFromApiSummary,
+  type PaymentMethodTotals,
+} from "../../../lib/payment-methods-summary";
 
 export interface FacturaAPI {
   _id: string;
@@ -103,6 +107,7 @@ export interface FacturaConverted {
   estado: string;
   items?: ItemFactura[];
   historial_pagos?: HistorialPago[];
+  desglose_pagos?: DesglosePagos;
 }
 
 export class FacturaService {
@@ -181,7 +186,12 @@ export class FacturaService {
       profesional_id?: string;
       search?: string;
     }
-  ): Promise<{ facturas: FacturaConverted[]; pagination?: FacturaResponse["pagination"]; filters_applied?: FacturaResponse["filters_applied"] }> {
+  ): Promise<{
+    facturas: FacturaConverted[];
+    pagination?: FacturaResponse["pagination"];
+    filters_applied?: FacturaResponse["filters_applied"];
+    paymentSummary?: PaymentMethodTotals | null;
+  }> {
     try {
       const queryParams = new URLSearchParams();
       const normalizedRange = this.normalizeDateRange(params?.fecha_desde, params?.fecha_hasta);
@@ -223,13 +233,16 @@ export class FacturaService {
       }
 
       const data: FacturaResponse = await response.json();
-      console.log(`✅ Facturas obtenidas: ${data.ventas.length} registros`);
+      const ventas = Array.isArray(data.ventas) ? data.ventas : [];
+      const paymentSummary = extractPaymentMethodTotalsFromApiSummary(data);
+      console.log(`✅ Facturas obtenidas: ${ventas.length} registros`);
       
       // Convertir los datos de la API al formato que usa nuestra aplicación
       return {
-        facturas: data.ventas.map(factura => this.convertToAppFormat(factura)),
+        facturas: ventas.map(factura => this.convertToAppFormat(factura)),
         pagination: data.pagination,
         filters_applied: data.filters_applied,
+        paymentSummary,
       };
       
     } catch (error) {
@@ -321,7 +334,8 @@ export class FacturaService {
       }
 
       const data: FacturaResponse = await response.json();
-      return data.ventas.map(factura => this.convertToAppFormat(factura));
+      const ventas = Array.isArray(data.ventas) ? data.ventas : [];
+      return ventas.map(factura => this.convertToAppFormat(factura));
       
     } catch (error) {
       console.error("Error obteniendo facturas del cliente:", error);
@@ -349,18 +363,21 @@ export class FacturaService {
 
   // Convertir datos de API al formato de la aplicación
   private convertToAppFormat(factura: FacturaAPI): FacturaConverted {
+    const historial = Array.isArray(factura.historial_pagos) ? factura.historial_pagos : [];
+    const items = Array.isArray(factura.items) ? factura.items : [];
+
     // Determinar el método de pago principal (el que tenga mayor monto)
-    const metodoPago = this.getMetodoPagoPrincipal(factura.historial_pagos);
+    const metodoPago = this.getMetodoPagoPrincipal(historial, factura.desglose_pagos);
     
     // Determinar el estado basado en el historial de pagos
-    const estado = this.getEstadoFactura(factura.historial_pagos);
+    const estado = this.getEstadoFactura(historial);
     
     // Obtener el total del desglose de pagos
     const total = factura.desglose_pagos?.total || 0;
     
     // Obtener fecha comprobante (usar la primera fecha del historial)
-    const fechaComprobante = factura.historial_pagos.length > 0 
-      ? factura.historial_pagos[0].fecha 
+    const fechaComprobante = historial.length > 0 
+      ? historial[0].fecha 
       : factura.fecha_pago;
 
     // Obtener el tipo de comprobante basado en el identificador
@@ -374,7 +391,7 @@ export class FacturaService {
       moneda: factura.moneda,
       tipo_comision: factura.tipo_comision,
       cliente_id: factura.cliente_id,
-      nombre_cliente: factura.nombre_cliente.trim(),
+      nombre_cliente: (factura.nombre_cliente || "").trim(),
       cedula_cliente: factura.cedula_cliente,
       email_cliente: factura.email_cliente,
       telefono_cliente: factura.telefono_cliente,
@@ -388,17 +405,36 @@ export class FacturaService {
       metodo_pago: metodoPago,
       facturado_por: factura.facturado_por,
       estado: estado,
-      items: factura.items,
-      historial_pagos: factura.historial_pagos
+      items: items,
+      historial_pagos: historial,
+      desglose_pagos: factura.desglose_pagos,
     };
   }
 
-  private getMetodoPagoPrincipal(historial: HistorialPago[]): string {
-    if (historial.length === 0) return "efectivo";
+  private getMetodoPagoPrincipal(historial?: HistorialPago[], desglose?: DesglosePagos): string {
+    const historialSeguro = Array.isArray(historial) ? historial : [];
+    if (historialSeguro.length === 0) {
+      if (!desglose) return "efectivo";
+
+      const metodos = [
+        { metodo: "efectivo", monto: desglose.efectivo || 0 },
+        { metodo: "tarjeta_credito", monto: desglose.tarjeta_credito || 0 },
+        { metodo: "tarjeta_debito", monto: desglose.tarjeta_debito || 0 },
+        { metodo: "addi", monto: desglose.addi || 0 },
+        { metodo: "tarjeta", monto: desglose.tarjeta || 0 },
+        { metodo: "transferencia", monto: desglose.transferencia || 0 },
+      ];
+
+      const metodoPrincipal = metodos.reduce((prev, current) =>
+        prev.monto > current.monto ? prev : current
+      );
+
+      return metodoPrincipal.monto > 0 ? metodoPrincipal.metodo : "efectivo";
+    }
     
     // Contar montos totales por método de pago
     const montosPorMetodo: Record<string, number> = {};
-    historial.forEach(pago => {
+    historialSeguro.forEach(pago => {
       montosPorMetodo[pago.metodo] = (montosPorMetodo[pago.metodo] || 0) + pago.monto;
     });
     
@@ -407,11 +443,12 @@ export class FacturaService {
       .sort((a, b) => b[1] - a[1])[0][0] || "efectivo";
   }
 
-  private getEstadoFactura(historial: HistorialPago[]): string {
-    if (historial.length === 0) return "pendiente";
+  private getEstadoFactura(historial?: HistorialPago[]): string {
+    const historialSeguro = Array.isArray(historial) ? historial : [];
+    if (historialSeguro.length === 0) return "pagado";
     
     // Verificar el último pago para determinar el estado
-    const ultimoPago = historial[historial.length - 1];
+    const ultimoPago = historialSeguro[historialSeguro.length - 1];
     return ultimoPago.saldo_despues === 0 ? "pagado" : "pendiente";
   }
 

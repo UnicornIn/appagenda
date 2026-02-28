@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../../components/ui/select"
+import { useAuth } from "../../../components/Auth/AuthContext"
 import type { Cliente } from "../../../types/cliente"
 import type { Sede } from "../Sedes/sedeService"
 import type { ClientesPaginadosMetadata } from "./clientesService"
@@ -55,11 +56,21 @@ interface ClientRowProps {
   cliente: Cliente
   onSelectClient: (client: Cliente) => void
   sedeNombre: string
+  isSuperAdmin: boolean
 }
 
 const formatCedula = (cedula?: string) => {
   const value = cedula?.trim()
   return value ? value : "—"
+}
+
+type ClienteConDiasOpcional = Cliente & {
+  diasSinVenir?: number | null
+}
+
+const getDiasSinVenirValue = (cliente: Cliente): number | null => {
+  const diasSinVenir = (cliente as ClienteConDiasOpcional).diasSinVenir
+  return typeof diasSinVenir === "number" && Number.isFinite(diasSinVenir) ? diasSinVenir : null
 }
 
 const getDiasSinVenirBadgeClass = (diasSinVenir: number) => {
@@ -72,10 +83,12 @@ const ClientRow = memo(function ClientRow({
   cliente,
   onSelectClient,
   sedeNombre,
+  isSuperAdmin,
 }: ClientRowProps) {
   const handleSelect = useCallback(() => {
     onSelectClient(cliente)
   }, [onSelectClient, cliente])
+  const diasSinVenir = getDiasSinVenirValue(cliente)
 
   return (
     <tr
@@ -98,15 +111,21 @@ const ClientRow = memo(function ClientRow({
         <div className="text-sm text-gray-500">{cliente.email}</div>
       </td>
       <td className="px-6 py-4 text-gray-700">{formatCedula(cliente.cedula)}</td>
-      <td className="px-6 py-4">
-        <span
-          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getDiasSinVenirBadgeClass(
-            cliente.diasSinVenir
-          )}`}
-        >
-          {cliente.diasSinVenir} días
-        </span>
-      </td>
+      {isSuperAdmin && (
+        <td className="px-6 py-4">
+          {diasSinVenir === null ? (
+            <span className="text-gray-500">—</span>
+          ) : (
+            <span
+              className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getDiasSinVenirBadgeClass(
+                diasSinVenir
+              )}`}
+            >
+              {diasSinVenir} días
+            </span>
+          )}
+        </td>
+      )}
       <td className="px-6 py-4">
         <div className="text-gray-900">{sedeNombre}</div>
       </td>
@@ -132,6 +151,10 @@ function ClientsListComponent({
   itemsPerPage = 10,
   isFetching = false
 }: ClientsListProps) {
+  const { user } = useAuth()
+  const isSuperAdmin =
+    user?.role === "SUPERADMIN" || user?.role === "super_admin" || user?.role === "superadmin"
+
   const totalClientes = metadata?.total ?? clientes.length
   const totalPages = metadata?.total_paginas ?? 1
   const currentPage = metadata?.pagina ?? 1
@@ -140,8 +163,8 @@ function ClientsListComponent({
   const tieneAnterior = metadata?.tiene_anterior ?? currentPage > 1
   const tieneSiguiente = metadata?.tiene_siguiente ?? currentPage < totalPages
 
-  const tableColumns = useMemo<TableColumn[]>(
-    () => [
+  const tableColumns = useMemo<TableColumn[]>(() => {
+    const columns: TableColumn[] = [
       {
         key: "cliente",
         label: "Cliente",
@@ -157,19 +180,24 @@ function ClientsListComponent({
         label: "Cédula",
         className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
       },
-      {
+    ]
+
+    if (isSuperAdmin) {
+      columns.push({
         key: "dias_sin_venir",
         label: "Días sin venir",
         className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
-      },
-      {
-        key: "sede",
-        label: "Sede",
-        className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
-      },
-    ],
-    []
-  )
+      })
+    }
+
+    columns.push({
+      key: "sede",
+      label: "Sede",
+      className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
+    })
+
+    return columns
+  }, [isSuperAdmin])
 
   const sedeNombresById = useMemo(() => {
     const byId = new Map<string, string>()
@@ -238,10 +266,11 @@ function ClientsListComponent({
           cliente={cliente}
           onSelectClient={onSelectClient}
           sedeNombre={sedeNombre}
+          isSuperAdmin={isSuperAdmin}
         />
       )
     })
-  }, [clientes, onSelectClient, sedeNombresById])
+  }, [clientes, isSuperAdmin, onSelectClient, sedeNombresById])
 
   if (error && clientes.length === 0) {
     return (

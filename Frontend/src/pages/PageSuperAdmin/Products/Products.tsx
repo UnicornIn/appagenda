@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Search, Package, AlertTriangle, Loader2, Filter, ChevronRight, Box, Edit2, Save, X, Plus } from "lucide-react"
 import { Button } from "../../../components/ui/button"
 import { Input } from "../../../components/ui/input"
@@ -14,6 +14,15 @@ import type { InventarioProducto } from "../../PageSede/Products/inventario"
 import { Sidebar } from "../../../components/Layout/Sidebar"
 import { useAuth } from "../../../components/Auth/AuthContext" // Ajusta la ruta según tu estructura
 import { formatDateDMY } from "../../../lib/dateFormat"
+import { API_BASE_URL } from "../../../types/config"
+import { sedeService } from "../Sedes/sedeService"
+import type { Sede } from "../../../types/sede"
+
+type CatalogoProducto = {
+  id: string
+  nombre: string
+  codigo: string
+}
 
 export function ProductsList() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -22,7 +31,6 @@ export function ProductsList() {
   const [productos, setProductos] = useState<InventarioProducto[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [categorias, setCategorias] = useState<string[]>([])
 
   // Estados para edición de stock
   const [productoEditando, setProductoEditando] = useState<string | null>(null)
@@ -33,6 +41,10 @@ export function ProductsList() {
   const [isCreatingInventario, setIsCreatingInventario] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [createSuccess, setCreateSuccess] = useState<string | null>(null)
+  const [modalDataError, setModalDataError] = useState<string | null>(null)
+  const [isLoadingCreateData, setIsLoadingCreateData] = useState(false)
+  const [sedesDisponibles, setSedesDisponibles] = useState<Sede[]>([])
+  const [productosCatalogo, setProductosCatalogo] = useState<CatalogoProducto[]>([])
   const [nuevoProductoId, setNuevoProductoId] = useState("")
   const [nuevoSedeId, setNuevoSedeId] = useState("")
   const [nuevoStockInicial, setNuevoStockInicial] = useState("0")
@@ -61,13 +73,17 @@ export function ProductsList() {
     }
   }, [authLoading, isAuthenticated])
 
-  // Extraer categorías únicas
-  useEffect(() => {
-    if (productos.length > 0) {
-      const categoriasUnicas = Array.from(new Set(productos.map(p => p.categoria).filter(Boolean)))
-      setCategorias(categoriasUnicas)
-    }
-  }, [productos])
+  const categorias = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          productos
+            .map((producto) => producto.categoria)
+            .filter((categoria): categoria is string => Boolean(categoria))
+        )
+      ),
+    [productos]
+  )
 
   useEffect(() => {
     if (sedeId && !nuevoSedeId) {
@@ -108,29 +124,30 @@ export function ProductsList() {
     }
   }
 
-  // Filtrar productos
-  const productosFiltrados = productos.filter(producto => {
-    // Filtro por término de búsqueda
-    if (searchTerm) {
-      const termino = searchTerm.toLowerCase()
-      const cumpleBusqueda =
-        producto.nombre.toLowerCase().includes(termino) ||
-        producto.producto_id.toLowerCase().includes(termino) ||
-        producto.producto_codigo.toLowerCase().includes(termino)
+  const searchTermLower = searchTerm.trim().toLowerCase()
 
-      if (!cumpleBusqueda) return false
-    }
+  const productosFiltrados = useMemo(() => {
+    return productos.filter((producto) => {
+      if (searchTermLower) {
+        const cumpleBusqueda =
+          producto.nombre.toLowerCase().includes(searchTermLower) ||
+          producto.producto_id.toLowerCase().includes(searchTermLower) ||
+          producto.producto_codigo.toLowerCase().includes(searchTermLower)
 
-    // Filtro por categoría
-    if (selectedCategoria !== "all" && producto.categoria !== selectedCategoria) {
-      return false
-    }
+        if (!cumpleBusqueda) {
+          return false
+        }
+      }
 
-    return true
-  })
+      if (selectedCategoria !== "all" && producto.categoria !== selectedCategoria) {
+        return false
+      }
 
-  // Calcular estadísticas
-  const calcularEstadisticas = () => {
+      return true
+    })
+  }, [productos, searchTermLower, selectedCategoria])
+
+  const stats = useMemo(() => {
     const totalProductos = productos.length
     const productosBajoStock = productos.filter(p => p.stock_actual <= p.stock_minimo).length
     const productosSinStock = productos.filter(p => p.stock_actual === 0).length
@@ -144,9 +161,7 @@ export function ProductsList() {
       totalStock,
       stockPromedio
     }
-  }
-
-  const stats = calcularEstadisticas()
+  }, [productos])
 
   // Función para iniciar edición de stock
   const iniciarEdicionStock = (producto: InventarioProducto) => {
@@ -209,16 +224,133 @@ export function ProductsList() {
 
   const abrirModalCreacion = () => {
     setCreateError(null)
+    setModalDataError(null)
     setNuevoProductoId("")
     setNuevoSedeId(sedeId || "")
     setNuevoStockInicial("0")
     setNuevoStockMinimo("5")
     setIsCreateModalOpen(true)
+    void cargarDatosModalCreacion()
   }
 
   const cerrarModalCreacion = () => {
     setIsCreateModalOpen(false)
     setCreateError(null)
+    setModalDataError(null)
+  }
+
+  const parseApiError = async (response: Response, fallback: string) => {
+    try {
+      const body = await response.json() as { detail?: string | Array<{ msg?: string }> }
+      if (typeof body?.detail === "string" && body.detail.trim().length > 0) {
+        return body.detail
+      }
+      if (Array.isArray(body?.detail) && body.detail.length > 0) {
+        const firstMessage = body.detail[0]?.msg
+        if (typeof firstMessage === "string" && firstMessage.trim().length > 0) {
+          return firstMessage
+        }
+      }
+      return fallback
+    } catch {
+      return fallback
+    }
+  }
+
+  const cargarCatalogoProductos = async (token: string): Promise<CatalogoProducto[]> => {
+    const moneda = (user?.moneda || sessionStorage.getItem("beaux-moneda") || "USD").toUpperCase()
+    const params = new URLSearchParams()
+    params.set("moneda", moneda)
+    const url = `${API_BASE_URL}inventary/product/productos/?${params.toString()}`
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(await parseApiError(response, `Error ${response.status}: ${response.statusText}`))
+    }
+
+    const data = await response.json()
+    const rawProductos: Array<Record<string, unknown>> = Array.isArray(data)
+      ? data
+      : Array.isArray((data as { productos?: Array<Record<string, unknown>> })?.productos)
+        ? (data as { productos: Array<Record<string, unknown>> }).productos
+        : Array.isArray((data as { items?: Array<Record<string, unknown>> })?.items)
+          ? (data as { items: Array<Record<string, unknown>> }).items
+          : []
+
+    const productosNormalizados = rawProductos
+      .map((producto) => {
+        const id = String(producto.id ?? producto._id ?? producto.producto_id ?? "").trim()
+        const nombre = String(producto.nombre ?? producto.producto_nombre ?? "").trim()
+        const codigo = String(producto.codigo ?? producto.producto_codigo ?? "").trim()
+        if (!id || !nombre) {
+          return null
+        }
+        return { id, nombre, codigo }
+      })
+      .filter((producto): producto is CatalogoProducto => Boolean(producto))
+
+    const mapPorId = new Map<string, CatalogoProducto>()
+    productosNormalizados.forEach((producto) => {
+      if (!mapPorId.has(producto.id)) {
+        mapPorId.set(producto.id, producto)
+      }
+    })
+
+    return Array.from(mapPorId.values()).sort((a, b) => a.nombre.localeCompare(b.nombre))
+  }
+
+  const cargarDatosModalCreacion = async () => {
+    const token = user?.token || sessionStorage.getItem("access_token")
+    if (!token) {
+      setModalDataError("No hay token de autenticación disponible para cargar los catálogos")
+      return
+    }
+
+    setIsLoadingCreateData(true)
+    setModalDataError(null)
+
+    const [sedesResult, productosResult] = await Promise.allSettled([
+      sedeService.getSedes(token),
+      cargarCatalogoProductos(token),
+    ])
+
+    const errores: string[] = []
+
+    if (sedesResult.status === "fulfilled") {
+      const sedes = sedesResult.value
+      setSedesDisponibles(sedes)
+      if (!nuevoSedeId && sedes.length > 0) {
+        const sedeActual = sedes.find((sede) => sede.sede_id === sedeId || sede._id === sedeId)
+        setNuevoSedeId(sedeActual?.sede_id || sedes[0].sede_id)
+      }
+    } else {
+      setSedesDisponibles([])
+      errores.push("No se pudieron cargar las sedes")
+    }
+
+    if (productosResult.status === "fulfilled") {
+      const catalogo = productosResult.value
+      setProductosCatalogo(catalogo)
+      if (!nuevoProductoId && catalogo.length === 1) {
+        setNuevoProductoId(catalogo[0].id)
+      }
+    } else {
+      setProductosCatalogo([])
+      errores.push("No se pudieron cargar los productos")
+    }
+
+    if (errores.length > 0) {
+      setModalDataError(`${errores.join(". ")}.`)
+    }
+
+    setIsLoadingCreateData(false)
   }
 
   const crearInventario = async () => {
@@ -401,13 +533,13 @@ export function ProductsList() {
 
                 <div className="flex gap-3">
                   <Select value={selectedCategoria} onValueChange={setSelectedCategoria} disabled={isLoading}>
-                    <SelectTrigger className="w-full lg:w-48 border-gray-300">
+                    <SelectTrigger className="w-full lg:w-48 border-gray-300 bg-white text-gray-900">
                       <SelectValue placeholder="Categoría" />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todas las categorías</SelectItem>
+                    <SelectContent className="z-[60] bg-white border-gray-200 text-gray-900">
+                      <SelectItem className="text-gray-900 focus:bg-gray-100 focus:text-gray-900" value="all">Todas las categorías</SelectItem>
                       {categorias.map((categoria, index) => (
-                        <SelectItem key={index} value={categoria}>{categoria}</SelectItem>
+                        <SelectItem className="text-gray-900 focus:bg-gray-100 focus:text-gray-900" key={index} value={categoria}>{categoria}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -669,7 +801,7 @@ export function ProductsList() {
           setIsCreateModalOpen(true)
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md bg-white border-gray-200 text-gray-900">
           <DialogHeader>
             <DialogTitle>Crear producto en inventario</DialogTitle>
             <DialogDescription>
@@ -678,30 +810,72 @@ export function ProductsList() {
           </DialogHeader>
 
           <div className="space-y-4">
+            {isLoadingCreateData && (
+              <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Cargando productos y sedes...
+              </div>
+            )}
+
+            {modalDataError && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                {modalDataError}
+              </div>
+            )}
+
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-700" htmlFor="producto-id">
-                Producto ID
+                Producto
               </label>
-              <Input
-                id="producto-id"
-                placeholder="Ej: P001"
-                value={nuevoProductoId}
-                onChange={(e) => setNuevoProductoId(e.target.value)}
-                disabled={isCreatingInventario}
-              />
+              {productosCatalogo.length > 0 ? (
+                <Select
+                  value={nuevoProductoId}
+                  onValueChange={setNuevoProductoId}
+                  disabled={isCreatingInventario || isLoadingCreateData}
+                >
+                  <SelectTrigger id="producto-id" className="bg-white border-gray-300 text-gray-900">
+                    <SelectValue placeholder="Selecciona un producto" />
+                  </SelectTrigger>
+                  <SelectContent className="z-[60] bg-white border-gray-200 text-gray-900">
+                    {productosCatalogo.map((producto) => (
+                      <SelectItem className="text-gray-900 focus:bg-gray-100 focus:text-gray-900" key={producto.id} value={producto.id}>
+                        {producto.nombre}{producto.codigo ? ` (${producto.codigo})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="producto-id"
+                  placeholder="Ej: P001"
+                  value={nuevoProductoId}
+                  onChange={(e) => setNuevoProductoId(e.target.value)}
+                  disabled={isCreatingInventario || isLoadingCreateData}
+                  className="bg-white"
+                />
+              )}
             </div>
 
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-700" htmlFor="sede-id">
-                Sede ID
+                Sede
               </label>
-              <Input
-                id="sede-id"
-                placeholder="Ej: SD-88809"
+              <Select
                 value={nuevoSedeId}
-                onChange={(e) => setNuevoSedeId(e.target.value)}
-                disabled={isCreatingInventario}
-              />
+                onValueChange={setNuevoSedeId}
+                disabled={isCreatingInventario || isLoadingCreateData || sedesDisponibles.length === 0}
+              >
+                <SelectTrigger id="sede-id" className="bg-white border-gray-300 text-gray-900">
+                  <SelectValue placeholder="Selecciona una sede" />
+                </SelectTrigger>
+                <SelectContent className="z-[60] bg-white border-gray-200 text-gray-900">
+                  {sedesDisponibles.map((sede) => (
+                    <SelectItem className="text-gray-900 focus:bg-gray-100 focus:text-gray-900" key={sede._id} value={sede.sede_id}>
+                      {sede.nombre}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -716,6 +890,7 @@ export function ProductsList() {
                   value={nuevoStockInicial}
                   onChange={(e) => setNuevoStockInicial(e.target.value)}
                   disabled={isCreatingInventario}
+                  className="bg-white"
                 />
               </div>
 
@@ -730,6 +905,7 @@ export function ProductsList() {
                   value={nuevoStockMinimo}
                   onChange={(e) => setNuevoStockMinimo(e.target.value)}
                   disabled={isCreatingInventario}
+                  className="bg-white"
                 />
               </div>
             </div>
@@ -753,7 +929,7 @@ export function ProductsList() {
             <Button
               type="button"
               onClick={crearInventario}
-              disabled={isCreatingInventario}
+              disabled={isCreatingInventario || isLoadingCreateData || !nuevoProductoId || !nuevoSedeId}
               className="gap-2"
             >
               {isCreatingInventario && <Loader2 className="h-4 w-4 animate-spin" />}

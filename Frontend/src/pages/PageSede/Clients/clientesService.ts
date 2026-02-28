@@ -220,6 +220,31 @@ const mapCliente = (cliente: any): Cliente => ({
   historialProductos: []
 });
 
+const CLIENTES_FETCH_TIMEOUT_MS = 20000;
+
+const fetchWithTimeout = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs: number = CLIENTES_FETCH_TIMEOUT_MS
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Tiempo de espera agotado al obtener clientes");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 export const clientesService = {
   async getClientesPaginados(
     token: string,
@@ -237,7 +262,7 @@ export const clientesService = {
       url.searchParams.set("filtro", filtro);
     }
 
-    const response = await fetch(url.toString(), {
+    const response = await fetchWithTimeout(url.toString(), {
       method: "GET",
       headers: {
         accept: "application/json",

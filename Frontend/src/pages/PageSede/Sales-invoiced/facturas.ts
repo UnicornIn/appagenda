@@ -1,5 +1,9 @@
 // src/api/facturas.ts
 import { API_BASE_URL } from "../../../types/config";
+import {
+  extractPaymentMethodTotalsFromApiSummary,
+  type PaymentMethodTotals,
+} from "../../../lib/payment-methods-summary";
 
 export interface FacturaAPI {
   _id: string;
@@ -343,7 +347,12 @@ export class FacturaService {
     fecha_hasta?: string;
     page?: number;
     limit?: number;
-  }): Promise<{ facturas: FacturaConverted[]; pagination?: any; filters_applied?: any }> {
+  }): Promise<{
+    facturas: FacturaConverted[];
+    pagination?: any;
+    filters_applied?: any;
+    paymentSummary?: PaymentMethodTotals | null;
+  }> {
     try {
       // Obtener el sede_id del usuario
       const sede_id = sessionStorage.getItem("beaux-sede_id");
@@ -382,6 +391,7 @@ export class FacturaService {
       }
 
       const data: FacturaResponse = await response.json();
+      const paymentSummary = extractPaymentMethodTotalsFromApiSummary(data);
       
       // Validar y convertir datos
       const facturas = data.ventas
@@ -393,7 +403,8 @@ export class FacturaService {
       return {
         facturas: facturas,
         pagination: data.pagination,
-        filters_applied: data.filters_applied
+        filters_applied: data.filters_applied,
+        paymentSummary,
       };
       
     } catch (error) {

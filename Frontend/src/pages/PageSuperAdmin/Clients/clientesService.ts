@@ -176,6 +176,54 @@ const extractCedula = (cliente: any): string =>
     cliente?.dni
   )
 
+const parseDiasSinVenir = (value: unknown): number | undefined => {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? Math.floor(value) : undefined
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) return undefined
+
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed)) {
+      return Math.floor(parsed)
+    }
+
+    const numberInText = trimmed.match(/-?\d+/)
+    if (numberInText) {
+      const extracted = Number(numberInText[0])
+      return Number.isFinite(extracted) ? extracted : undefined
+    }
+
+    return undefined
+  }
+  return undefined
+}
+
+const getDiasSinVenir = (cliente: any): number => {
+  const diasDirectos = parseDiasSinVenir(
+    cliente?.diasSinVenir ??
+      cliente?.dias_sin_venir ??
+      cliente?.dias_sin_visitar
+  )
+  if (typeof diasDirectos === "number") {
+    return diasDirectos
+  }
+
+  const diasCalculados = calcularDiasSinVenir({
+    dias_sin_visitar: parseDiasSinVenir(cliente?.dias_sin_visitar),
+    ultima_visita:
+      cliente?.ultima_visita ??
+      cliente?.ultimaVisita ??
+      cliente?.fecha_ultima_visita ??
+      cliente?.fechaUltimaVisita,
+    fecha_creacion: cliente?.fecha_creacion ?? cliente?.fechaCreacion,
+    created_at: cliente?.created_at ?? cliente?.createdAt,
+  })
+
+  return Number.isFinite(diasCalculados) ? Math.max(0, Math.floor(diasCalculados)) : Number.NaN
+}
+
 const mapCliente = (cliente: any): Cliente => ({
   id: cliente.cliente_id || cliente.id || cliente._id || '',
   nombre: cliente.nombre || '',
@@ -183,7 +231,7 @@ const mapCliente = (cliente: any): Cliente => ({
   email: cliente.correo || cliente.email || 'No disponible',
   cedula: extractCedula(cliente),
   ciudad: cliente.ciudad || '',
-  diasSinVenir: calcularDiasSinVenir(cliente),
+  diasSinVenir: getDiasSinVenir(cliente),
   diasSinComprar: cliente.dias_sin_visitar || 0,
   ltv: cliente.total_gastado || 0,
   ticketPromedio: cliente.ticket_promedio || 0,
@@ -194,6 +242,31 @@ const mapCliente = (cliente: any): Cliente => ({
   historialCabello: [],
   historialProductos: []
 });
+
+const CLIENTES_FETCH_TIMEOUT_MS = 20000;
+
+const fetchWithTimeout = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs: number = CLIENTES_FETCH_TIMEOUT_MS
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Tiempo de espera agotado al obtener clientes");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
 
 // 🔥 FUNCIÓN PARA ARREGLAR URLs DE S3 HTTPS A HTTP
 const fixS3Url = (url: string): string => {
@@ -224,7 +297,7 @@ export const clientesService = {
         urlSede.searchParams.set("filtro", filtro);
       }
 
-      const response = await fetch(urlSede.toString(), {
+      const response = await fetchWithTimeout(urlSede.toString(), {
         method: "GET",
         headers: {
           accept: "application/json",
@@ -292,7 +365,7 @@ export const clientesService = {
       url.searchParams.set("filtro", filtro);
     }
 
-    const response = await fetch(url.toString(), {
+    const response = await fetchWithTimeout(url.toString(), {
       method: "GET",
       headers: {
         accept: "application/json",
@@ -428,7 +501,7 @@ export const clientesService = {
       email: cliente.correo || 'No disponible',
       cedula: extractCedula(cliente),
       ciudad: cliente.ciudad || '',
-      diasSinVenir: calcularDiasSinVenir(cliente),
+      diasSinVenir: getDiasSinVenir(cliente),
       diasSinComprar: cliente.dias_sin_visitar || 0,
       ltv: cliente.total_gastado || 0,
       ticketPromedio: cliente.ticket_promedio || 0,

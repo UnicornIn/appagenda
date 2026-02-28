@@ -33,18 +33,27 @@ export default function ClientsPage() {
   const cedulaCacheRef = useRef<Map<string, string | null>>(new Map())
 
   const { user, isLoading: authLoading } = useAuth()
+  const getAccessToken = useCallback((): string => {
+    if (user?.access_token) return user.access_token
+    return (
+      sessionStorage.getItem("access_token") ||
+      localStorage.getItem("access_token") ||
+      ""
+    )
+  }, [user?.access_token])
 
   // Cargar sedes
   const loadSedes = useCallback(async () => {
-    if (!user?.access_token) return
+    const token = getAccessToken()
+    if (!token) return
 
     try {
-      const sedesData = await sedeService.getSedes(user.access_token) // ✅ Usando sedeService
+      const sedesData = await sedeService.getSedes(token) // ✅ Usando sedeService
       setSedes(sedesData)
     } catch (err) {
       console.error('Error cargando sedes:', err)
     }
-  }, [user?.access_token])
+  }, [getAccessToken])
 
   // Cargar clientes desde la API
   const applyCedulaCache = useCallback((listado: Cliente[]): Cliente[] => {
@@ -64,8 +73,9 @@ export default function ClientsPage() {
     options: { initial?: boolean } = {}
   ) => {
     const isInitialRequest = options.initial ?? false
+    const token = getAccessToken()
 
-    if (!user?.access_token) {
+    if (!token) {
       setError('No hay token de autenticación disponible')
       setIsInitialLoading(false)
       setIsFetching(false)
@@ -82,7 +92,7 @@ export default function ClientsPage() {
       }
 
       setError(null)
-      const result = await clientesService.getClientesPaginados(user.access_token, {
+      const result = await clientesService.getClientesPaginados(token, {
         pagina,
         limite: itemsPorPagina,
         filtro,
@@ -106,7 +116,7 @@ export default function ClientsPage() {
         setIsFetching(false)
       }
     }
-  }, [user?.access_token, itemsPorPagina, applyCedulaCache])
+  }, [getAccessToken, itemsPorPagina, applyCedulaCache])
 
   useEffect(() => {
     if (!authLoading && user) {
@@ -115,7 +125,12 @@ export default function ClientsPage() {
   }, [user, authLoading, loadSedes])
 
   useEffect(() => {
-    if (!user?.access_token) return
+    const token = getAccessToken()
+    if (!token) {
+      setError((prev) => prev || "No hay token de autenticación disponible")
+      setIsInitialLoading(false)
+      return
+    }
 
     if (!hasLoadedInitialRef.current) {
       hasLoadedInitialRef.current = true
@@ -128,7 +143,7 @@ export default function ClientsPage() {
     }, SEARCH_DEBOUNCE_MS)
 
     return () => clearTimeout(timeout)
-  }, [user?.access_token, searchTerm, selectedSede, itemsPorPagina, loadClientes])
+  }, [getAccessToken, searchTerm, selectedSede, itemsPorPagina, loadClientes])
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -137,7 +152,8 @@ export default function ClientsPage() {
   }, [authLoading, user])
 
   useEffect(() => {
-    if (!user?.access_token || clientes.length === 0) return
+    const token = getAccessToken()
+    if (!token || clientes.length === 0) return
 
     const idsSinCedula = clientes
       .filter((cliente) => !cliente.cedula?.trim() && !cedulaCacheRef.current.has(cliente.id))
@@ -153,7 +169,7 @@ export default function ClientsPage() {
 
       const results = await Promise.allSettled(
         idsSinCedula.map(async (clienteId) => {
-          const cedula = await clientesService.getClienteCedula(user.access_token, clienteId)
+          const cedula = await clientesService.getClienteCedula(token, clienteId)
           return { clienteId, cedula: cedula.trim() }
         })
       )
@@ -189,7 +205,7 @@ export default function ClientsPage() {
     return () => {
       cancelled = true
     }
-  }, [clientes, user?.access_token])
+  }, [clientes, getAccessToken])
 
   const handleSedeChange = useCallback((sedeId: string) => {
     setSelectedSede(sedeId)
@@ -212,19 +228,20 @@ export default function ClientsPage() {
   }, [loadClientes, searchTerm, selectedSede])
 
   const handleSelectClient = useCallback(async (client: Cliente) => {
-    if (!user?.access_token) {
+    const token = getAccessToken()
+    if (!token) {
       setError('No hay token de autenticación disponible')
       return
     }
 
     try {
-      const clienteCompleto = await clientesService.getClienteById(user.access_token, client.id)
+      const clienteCompleto = await clientesService.getClienteById(token, client.id)
       setSelectedClient(clienteCompleto)
     } catch (err) {
       console.error('Error cargando detalles del cliente:', err)
       setSelectedClient(client)
     }
-  }, [user?.access_token])
+  }, [getAccessToken])
 
   const handleAddClient = useCallback(() => {
     setIsModalOpen(true)
@@ -235,7 +252,8 @@ export default function ClientsPage() {
   }, [])
 
   const handleSaveClient = useCallback(async () => {
-    if (!user?.access_token) {
+    const token = getAccessToken()
+    if (!token) {
       setError('No hay token de autenticación disponible')
       return
     }
@@ -254,23 +272,24 @@ export default function ClientsPage() {
     } finally {
       setIsSaving(false)
     }
-  }, [user?.access_token, loadClientes, searchTerm, selectedSede])
+  }, [getAccessToken, loadClientes, searchTerm, selectedSede])
 
   const handleBack = useCallback(() => {
     setSelectedClient(null)
   }, [])
 
   const handleClientUpdated = useCallback(async () => {
-    if (!user?.access_token || !selectedClient) return
+    const token = getAccessToken()
+    if (!token || !selectedClient) return
 
     try {
-      const clienteActualizado = await clientesService.getClienteById(user.access_token, selectedClient.id)
+      const clienteActualizado = await clientesService.getClienteById(token, selectedClient.id)
       setSelectedClient(clienteActualizado)
       await loadClientes(metadata?.pagina ?? 1, searchTerm, selectedSede)
     } catch (err) {
       console.error('Error refrescando cliente actualizado:', err)
     }
-  }, [user?.access_token, selectedClient, loadClientes, metadata?.pagina, searchTerm, selectedSede])
+  }, [getAccessToken, selectedClient, loadClientes, metadata?.pagina, searchTerm, selectedSede])
 
   // Mostrar loading mientras se verifica la autenticación
   if (authLoading || (Boolean(user) && isInitialLoading)) {

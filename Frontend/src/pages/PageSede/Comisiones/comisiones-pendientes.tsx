@@ -97,8 +97,8 @@ export function ComisionesPendientes() {
                 {total_comisiones_pendientes}
               </p>
             </div>
-            <div className="rounded-full bg-blue-100 p-3">
-              <DollarSign className="h-6 w-6 text-blue-600" />
+            <div className="rounded-full bg-gray-200 p-3">
+              <DollarSign className="h-6 w-6 text-gray-700" />
             </div>
           </div>
           <div className="mt-4 text-sm text-gray-500">
@@ -115,8 +115,8 @@ export function ComisionesPendientes() {
                 {formatMoneda(monto_total_pendiente, moneda)}
               </p>
             </div>
-            <div className="rounded-full bg-green-100 p-3">
-              <DollarSign className="h-6 w-6 text-green-600" />
+            <div className="rounded-full bg-gray-200 p-3">
+              <DollarSign className="h-6 w-6 text-gray-700" />
             </div>
           </div>
           <div className="mt-4 text-sm text-gray-500">
@@ -133,8 +133,8 @@ export function ComisionesPendientes() {
                 {formatMoneda(total_comisiones_servicios, moneda)}
               </p>
             </div>
-            <div className="rounded-full bg-purple-100 p-3">
-              <Scissors className="h-6 w-6 text-purple-600" />
+            <div className="rounded-full bg-gray-200 p-3">
+              <Scissors className="h-6 w-6 text-gray-700" />
             </div>
           </div>
           <div className="mt-4 text-sm text-gray-500">
@@ -151,8 +151,8 @@ export function ComisionesPendientes() {
                 {formatMoneda(total_comisiones_productos, moneda)}
               </p>
             </div>
-            <div className="rounded-full bg-orange-100 p-3">
-              <Package className="h-6 w-6 text-orange-600" />
+            <div className="rounded-full bg-gray-200 p-3">
+              <Package className="h-6 w-6 text-gray-700" />
             </div>
           </div>
           <div className="mt-4 text-sm text-gray-500">
@@ -206,18 +206,12 @@ export function ComisionesPendientes() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-200 text-gray-800">
                         {prof.cantidad_periodos} períodos
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                        prof.tipo_comision === 'servicios' 
-                          ? 'bg-purple-100 text-purple-800'
-                          : prof.tipo_comision === 'productos'
-                          ? 'bg-orange-100 text-orange-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-200 text-gray-800">
                         {prof.tipo_comision || 'mixto'}
                       </span>
                     </td>

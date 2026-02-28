@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Search, Package, AlertTriangle, BarChart3, Loader2, Filter, ChevronRight, TrendingUp, TrendingDown, Box, Edit2, Save, X } from "lucide-react"
 import { Button } from "../../../components/ui/button"
 import { Input } from "../../../components/ui/input"
@@ -21,7 +21,6 @@ export function ProductsList() {
   const [productos, setProductos] = useState<InventarioProducto[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [categorias, setCategorias] = useState<string[]>([])
 
   // Estados para edición de stock
   const [productoEditando, setProductoEditando] = useState<string | null>(null)
@@ -52,13 +51,17 @@ export function ProductsList() {
     }
   }, [authLoading, isAuthenticated])
 
-  // Extraer categorías únicas
-  useEffect(() => {
-    if (productos.length > 0) {
-      const categoriasUnicas = Array.from(new Set(productos.map(p => p.categoria).filter(Boolean)))
-      setCategorias(categoriasUnicas)
-    }
-  }, [productos])
+  const categorias = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          productos
+            .map((producto) => producto.categoria)
+            .filter((categoria): categoria is string => Boolean(categoria))
+        )
+      ),
+    [productos]
+  )
 
   const cargarInventario = async () => {
     try {
@@ -93,29 +96,30 @@ export function ProductsList() {
     }
   }
 
-  // Filtrar productos
-  const productosFiltrados = productos.filter(producto => {
-    // Filtro por término de búsqueda
-    if (searchTerm) {
-      const termino = searchTerm.toLowerCase()
-      const cumpleBusqueda =
-        producto.nombre.toLowerCase().includes(termino) ||
-        producto.producto_id.toLowerCase().includes(termino) ||
-        producto.producto_codigo.toLowerCase().includes(termino)
+  const searchTermLower = searchTerm.trim().toLowerCase()
 
-      if (!cumpleBusqueda) return false
-    }
+  const productosFiltrados = useMemo(() => {
+    return productos.filter((producto) => {
+      if (searchTermLower) {
+        const cumpleBusqueda =
+          producto.nombre.toLowerCase().includes(searchTermLower) ||
+          producto.producto_id.toLowerCase().includes(searchTermLower) ||
+          producto.producto_codigo.toLowerCase().includes(searchTermLower)
 
-    // Filtro por categoría
-    if (selectedCategoria !== "all" && producto.categoria !== selectedCategoria) {
-      return false
-    }
+        if (!cumpleBusqueda) {
+          return false
+        }
+      }
 
-    return true
-  })
+      if (selectedCategoria !== "all" && producto.categoria !== selectedCategoria) {
+        return false
+      }
 
-  // Calcular estadísticas
-  const calcularEstadisticas = () => {
+      return true
+    })
+  }, [productos, searchTermLower, selectedCategoria])
+
+  const stats = useMemo(() => {
     const totalProductos = productos.length
     const productosBajoStock = productos.filter(p => p.stock_actual <= p.stock_minimo).length
     const productosSinStock = productos.filter(p => p.stock_actual === 0).length
@@ -129,9 +133,7 @@ export function ProductsList() {
       totalStock,
       stockPromedio
     }
-  }
-
-  const stats = calcularEstadisticas()
+  }, [productos])
 
   // Función para iniciar edición de stock
   const iniciarEdicionStock = (producto: InventarioProducto) => {
@@ -344,12 +346,12 @@ export function ProductsList() {
                     <p className="text-sm font-medium text-gray-600 mb-2">Total Productos</p>
                     <p className="text-2xl font-bold text-gray-900">{stats.totalProductos}</p>
                   </div>
-                  <div className="p-3 bg-blue-50 rounded-lg">
-                    <Package className="h-5 w-5 text-blue-600" />
+                  <div className="p-3 bg-gray-100 rounded-lg">
+                    <Package className="h-5 w-5 text-gray-700" />
                   </div>
                 </div>
                 <div className="mt-4 flex items-center text-xs text-gray-500">
-                  <TrendingUp className="h-3 w-3 text-green-500 mr-1" />
+                  <TrendingUp className="h-3 w-3 text-gray-500 mr-1" />
                   <span>En inventario</span>
                 </div>
               </CardContent>
@@ -362,8 +364,8 @@ export function ProductsList() {
                     <p className="text-sm font-medium text-gray-600 mb-2">Stock Total</p>
                     <p className="text-2xl font-bold text-gray-900">{stats.totalStock}</p>
                   </div>
-                  <div className="p-3 bg-emerald-50 rounded-lg">
-                    <BarChart3 className="h-5 w-5 text-emerald-600" />
+                  <div className="p-3 bg-gray-100 rounded-lg">
+                    <BarChart3 className="h-5 w-5 text-gray-700" />
                   </div>
                 </div>
                 <div className="mt-4 flex items-center text-xs text-gray-500">
@@ -379,13 +381,13 @@ export function ProductsList() {
                     <p className="text-sm font-medium text-gray-600 mb-2">Bajo Stock</p>
                     <p className="text-2xl font-bold text-gray-900">{stats.productosBajoStock}</p>
                   </div>
-                  <div className="p-3 bg-amber-50 rounded-lg">
-                    <AlertTriangle className="h-5 w-5 text-amber-600" />
+                  <div className="p-3 bg-gray-100 rounded-lg">
+                    <AlertTriangle className="h-5 w-5 text-gray-700" />
                   </div>
                 </div>
                 <div className="mt-4">
                   <div className="flex items-center text-xs text-gray-500">
-                    <TrendingDown className="h-3 w-3 text-amber-500 mr-1" />
+                    <TrendingDown className="h-3 w-3 text-gray-500 mr-1" />
                     <span>{stats.totalProductos > 0 ? Math.round((stats.productosBajoStock / stats.totalProductos) * 100) : 0}% del inventario</span>
                   </div>
                 </div>
@@ -399,13 +401,13 @@ export function ProductsList() {
                     <p className="text-sm font-medium text-gray-600 mb-2">Sin Stock</p>
                     <p className="text-2xl font-bold text-gray-900">{stats.productosSinStock}</p>
                   </div>
-                  <div className="p-3 bg-red-50 rounded-lg">
-                    <AlertTriangle className="h-5 w-5 text-red-600" />
+                  <div className="p-3 bg-gray-100 rounded-lg">
+                    <AlertTriangle className="h-5 w-5 text-gray-700" />
                   </div>
                 </div>
                 <div className="mt-4">
                   <div className="flex items-center text-xs text-gray-500">
-                    <TrendingDown className="h-3 w-3 text-red-500 mr-1" />
+                    <TrendingDown className="h-3 w-3 text-gray-500 mr-1" />
                     <span>Requieren atención inmediata</span>
                   </div>
                 </div>

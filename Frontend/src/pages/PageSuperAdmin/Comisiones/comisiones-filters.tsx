@@ -225,9 +225,9 @@ export function ComisionesFilters({ onFiltersChange }: ComisionesFiltersProps) {
       </div>
 
       {/* Estado */}
-      <div className="flex items-center gap-2 rounded-lg border bg-green-50 px-4 py-2.5">
+      <div className="flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-100 px-4 py-2.5">
         <span className="text-sm font-medium">Estado:</span>
-        <span className="text-sm font-semibold text-green-600">
+        <span className="text-sm font-semibold text-gray-700">
           Pendiente
         </span>
       </div>

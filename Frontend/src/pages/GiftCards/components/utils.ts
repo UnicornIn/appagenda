@@ -1,7 +1,15 @@
 import { formatDateDMY } from "../../../lib/dateFormat";
 import type { GiftCardStatus } from "../types";
 
-export const NEVER_EXPIRES_LABEL = "Nunca se vence";
+export const NEVER_EXPIRES_LABEL = "No tiene vencimiento";
+const ONE_YEAR_RANGE_MIN_DAYS = 360;
+const ONE_YEAR_RANGE_MAX_DAYS = 370;
+
+function toValidDate(value?: string | null): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 
 export function formatMoney(value: number, currency: string): string {
   const normalizedCurrency = (currency || "COP").toUpperCase();
@@ -21,6 +29,26 @@ export function formatMoney(value: number, currency: string): string {
 export function formatGiftCardDate(value?: string | null): string {
   if (!value) return "-";
   return formatDateDMY(value, value);
+}
+
+export function getGiftCardValidityLabel(args: {
+  fechaVencimiento?: string | null;
+  fechaEmision?: string | null;
+  createdAt?: string | null;
+}): string {
+  const fechaVencimiento = toValidDate(args.fechaVencimiento);
+  if (!fechaVencimiento) return NEVER_EXPIRES_LABEL;
+
+  const fechaEmision = toValidDate(args.fechaEmision) ?? toValidDate(args.createdAt);
+  if (fechaEmision) {
+    const diffMs = fechaVencimiento.getTime() - fechaEmision.getTime();
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays >= ONE_YEAR_RANGE_MIN_DAYS && diffDays <= ONE_YEAR_RANGE_MAX_DAYS) {
+      return `12 meses (${formatGiftCardDate(args.fechaVencimiento)})`;
+    }
+  }
+
+  return `Personalizada (${formatGiftCardDate(args.fechaVencimiento)})`;
 }
 
 export function resolveGiftCardSedeName({

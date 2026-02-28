@@ -139,9 +139,9 @@ export function ComisionesResumen({ filters = {} }: ComisionesResumenProps) {
   // ✅ ESTADO INICIAL: Cuando no hay estilista seleccionado
   if (!filters.profesional_id) {
     return (
-      <div className="rounded-lg border border-gray-300 bg-blue-50 p-8 text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100">
-          <User className="h-8 w-8 text-blue-600" />
+      <div className="rounded-lg border border-gray-300 bg-gray-100 p-8 text-center">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-200">
+          <User className="h-8 w-8 text-gray-700" />
         </div>
         <h3 className="mb-2 text-lg font-medium text-gray-900">
           Selecciona un estilista
@@ -296,8 +296,8 @@ export function ComisionesResumen({ filters = {} }: ComisionesResumenProps) {
 
         {/* Si no hay servicios ni productos */}
         {servicios.length === 0 && productos.length === 0 && summary && (
-          <div className="rounded-lg border border-gray-300 bg-yellow-50 p-6 text-center">
-            <AlertTriangle className="mx-auto mb-4 h-12 w-12 text-yellow-600" />
+          <div className="rounded-lg border border-gray-300 bg-gray-100 p-6 text-center">
+            <AlertTriangle className="mx-auto mb-4 h-12 w-12 text-gray-600" />
             <h3 className="mb-2 text-lg font-medium text-gray-900">
               Comisión encontrada sin detalle
             </h3>
