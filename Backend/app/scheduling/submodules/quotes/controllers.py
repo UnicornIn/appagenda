@@ -188,7 +188,7 @@ async def crear_cabecera(story, estilos):
     
     story.append(Paragraph("COMPROBANTE DE SERVICIO", estilos['title_style']))
     story.append(Spacer(1, 5))
-    story.append(Paragraph(f"Fecha de generación: {datetime.now().strftime('%d/%m/%Y %H:%M')}", 
+    story.append(Paragraph(f"Fecha de generación: {datetime.utcnow().strftime('%d/%m/%Y %H:%M')}", 
                           ParagraphStyle('Date', parent=estilos['footer_style'],
                                        fontSize=9)))
     story.append(Spacer(1, 20))
@@ -989,7 +989,7 @@ async def generar_pdf_simple(ficha_data: dict, cita_data: dict) -> bytes:
     <b>Servicio:</b> {ficha_data.get('servicio_nombre', '')}<br/>
     <b>Profesional:</b> {ficha_data.get('profesional_nombre', '')}<br/>
     <b>Sede:</b> {ficha_data.get('sede_nombre', '')}<br/>
-    <b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}<br/>
+    <b>Fecha:</b> {datetime.utcnow().strftime('%d/%m/%Y %H:%M')}<br/>
     <b>Valor:</b> ${cita_data.get('valor_total', 0):,.0f}
     """
     

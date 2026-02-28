@@ -36,27 +36,11 @@ const paymentMethodMap: PaymentMethod[] = [
     available: true
   },
   { 
-    id: "tarjeta_credito",
-    backendValue: "tarjeta_credito", 
-    displayName: "Tarjeta de Crédito", 
+    id: "tarjeta",
+    backendValue: "tarjeta", 
+    displayName: "Tarjeta", 
     icon: <CreditCard className="w-5 h-5" />,
-    description: "Pago con tarjeta de crédito",
-    available: true
-  },
-  {
-    id: "tarjeta_debito",
-    backendValue: "tarjeta_debito",
-    displayName: "Tarjeta de Débito",
-    icon: <CreditCard className="w-5 h-5" />,
-    description: "Pago con tarjeta de débito",
-    available: true
-  },
-  {
-    id: "addi",
-    backendValue: "addi",
-    displayName: "Addi",
-    icon: <Wallet className="w-5 h-5" />,
-    description: "Pago con Addi",
+    description: "Tarjeta de crédito/débito",
     available: true
   },
   { 
@@ -76,18 +60,6 @@ const paymentMethodMap: PaymentMethod[] = [
     available: true
   }
 ];
-
-// 🔥 MÉTODOS LEGACY PARA MOSTRAR ETIQUETA CORRECTA EN DATOS ANTIGUOS
-const legacyMethods: Record<string, PaymentMethod> = {
-  tarjeta: {
-    id: "tarjeta",
-    backendValue: "tarjeta",
-    displayName: "Tarjeta",
-    icon: <CreditCard className="w-5 h-5" />,
-    description: "Método anterior (compatibilidad)",
-    available: true
-  }
-}
 
 // 🔥 OPCIONES ESPECIALES (con id incluido)
 const specialMethods: Record<string, PaymentMethod> = {
@@ -114,7 +86,6 @@ export function PaymentMethodSelector({
   // 🔥 ESTADOS
   const [currency, setCurrency] = useState<string>("USD")
   const [loading, setLoading] = useState(true)
-  const isCopCurrency = currency === "COP"
   
   // 🔥 OBTENER MONEDA DEL USUARIO
   useEffect(() => {
@@ -159,9 +130,7 @@ export function PaymentMethodSelector({
   
   // 🔥 OBTENER TODOS LOS MÉTODOS DISPONIBLES
   const getAllMethods = (): PaymentMethod[] => {
-    const allMethods = paymentMethodMap.filter(
-      (method) => isCopCurrency || method.backendValue !== "addi"
-    )
+    const allMethods = [...paymentMethodMap]
     
     // Si es reserva sin pago, agregar opción especial
     if (paymentType.toLowerCase().includes("reserva") || selectedMethod === "sin_pago") {
@@ -170,21 +139,11 @@ export function PaymentMethodSelector({
     
     return allMethods
   }
-
-  // 🔒 Addi solo aplica para sedes COP
-  useEffect(() => {
-    if (loading) return
-    if (!isCopCurrency && selectedMethod === "addi") {
-      const fallbackMethod = paymentType.toLowerCase().includes("reserva") ? "sin_pago" : "efectivo"
-      onMethodChange(fallbackMethod)
-    }
-  }, [loading, isCopCurrency, paymentType, selectedMethod, onMethodChange])
   
   // 🔥 OBTENER MÉTODO ACTUAL
   const getCurrentMethod = (): PaymentMethod => {
     const allMethods = getAllMethods()
-    return allMethods.find(m => m.backendValue === selectedMethod) ||
-           legacyMethods[selectedMethod] ||
+    return allMethods.find(m => m.backendValue === selectedMethod) || 
            paymentMethodMap[0] // Fallback
   }
   

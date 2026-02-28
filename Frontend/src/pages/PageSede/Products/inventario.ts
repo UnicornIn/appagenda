@@ -16,13 +16,6 @@ export interface InventarioProducto {
   categoria: string;
 }
 
-export interface CrearInventarioInput {
-  producto_id: string;
-  sede_id: string;
-  stock_actual: number;
-  stock_minimo: number;
-}
-
 export class InventarioService {
   // No almacenar token en el constructor
   private getHeaders(token: string | null) {
@@ -36,30 +29,6 @@ export class InventarioService {
     }
 
     return headers;
-  }
-
-  private parseErrorDetail(detail: unknown): string {
-    if (typeof detail === "string") {
-      return detail;
-    }
-
-    if (Array.isArray(detail)) {
-      const mensajes = detail
-        .map((item) => {
-          if (item && typeof item === "object" && "msg" in item) {
-            const msg = (item as { msg?: unknown }).msg;
-            return typeof msg === "string" ? msg : null;
-          }
-          return null;
-        })
-        .filter((msg): msg is string => Boolean(msg));
-
-      if (mensajes.length > 0) {
-        return mensajes.join(", ");
-      }
-    }
-
-    return "No se pudo procesar la solicitud";
   }
 
   // Obtener inventario de una sede específica
@@ -169,49 +138,6 @@ export class InventarioService {
       return {
         success: false,
         error: error instanceof Error ? error.message : "Error desconocido"
-      };
-    }
-  }
-
-  // Crear inventario inicial
-  async crearInventario(
-    payload: CrearInventarioInput,
-    token?: string | null
-  ): Promise<{ success: boolean; message?: string; error?: string }> {
-    try {
-      const actualToken = token || sessionStorage.getItem("access_token");
-
-      if (!actualToken) {
-        throw new Error("No se encontró token de autenticación");
-      }
-
-      const response = await fetch(
-        `${API_BASE_URL}inventary/inventarios/inventarios/`,
-        {
-          method: "POST",
-          headers: this.getHeaders(actualToken),
-          body: JSON.stringify(payload),
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        return {
-          success: false,
-          error: this.parseErrorDetail((data as { detail?: unknown }).detail),
-        };
-      }
-
-      return {
-        success: true,
-        message: (data as { msg?: string }).msg || "Inventario creado correctamente",
-      };
-    } catch (error) {
-      console.error("Error creando inventario:", error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Error desconocido",
       };
     }
   }

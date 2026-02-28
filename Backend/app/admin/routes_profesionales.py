@@ -180,7 +180,6 @@ async def create_profesional(
         "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "activo": True,
         "creado_por": current_user["email"],
-        "user_type": "staff",
     }
 
     print("📤 Datos que se guardarán en collection_auth:")

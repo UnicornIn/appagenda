@@ -13,7 +13,6 @@ import SuperServices from './pages/PageSuperAdmin/Services/Services';
 import SuperComisiones from "./pages/PageSuperAdmin/Comisiones/Comisiones";
 import SuperStylist from "./pages/PageSuperAdmin/Styslit/Sytlist";
 import SuperClients from "./pages/PageSuperAdmin/Clients/Clients";
-import SuperSystemUsers from "./pages/PageSuperAdmin/SystemUsers/SystemUsers";
 import SuperPay from "./pages/PageSuperAdmin/Appoinment/PaymentMethods/PaymentMethods"
 import SuperInvoices from "./pages/PageSuperAdmin/Sales-invoiced/Sales-invoiced"
 
@@ -28,7 +27,7 @@ import SedeServices from './pages/PageSede/Services/Services';
 import SedeStylists from './pages/PageSede/Styslit/Sytlist';
 import SedeCommissions from './pages/PageSede/Comisiones/Comisiones'
 import SedeInvoices from "./pages/PageSede/Sales-invoiced/Sales-invoiced"
-import CierreCajaPage from "./pages/PageSede/CierreCaja/CierreCaja"
+// import CierreCajaPage from "./pages/PageSede/CierreCaja/CierreCaja"
 
 /* --- Stylist Pages --- */
 import StylistAppointment from "./pages/PageStylist/Appoinment/Appointment";
@@ -38,11 +37,9 @@ import StylistCommissions from "./pages/PageStylist/Comisiones/Comisiones";
 const PrivateRoute = ({
   children,
   allowedRoles,
-  allowedCurrencies,
 }: {
   children: JSX.Element;
   allowedRoles: string[];
-  allowedCurrencies?: string[];
 }) => {
   const { user, isLoading } = useAuth();
 
@@ -61,16 +58,6 @@ const PrivateRoute = ({
   // Si el rol del usuario no está permitido
   if (!allowedRoles.includes(user.role)) {
     return <Navigate to="/unauthorized" replace />;
-  }
-
-  if (allowedCurrencies && allowedCurrencies.length > 0) {
-    const userCurrency = String(
-      user.moneda || sessionStorage.getItem("beaux-moneda") || ""
-    ).toUpperCase();
-
-    if (!allowedCurrencies.map((currency) => currency.toUpperCase()).includes(userCurrency)) {
-      return <Navigate to="/unauthorized" replace />;
-    }
   }
 
   return children;
@@ -174,22 +161,6 @@ function App() {
                 </PrivateRoute>
               }
             />
-            <Route
-              path="/superadmin/system-users"
-              element={
-                <PrivateRoute allowedRoles={["super_admin", "superadmin"]}>
-                  <SuperSystemUsers />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/superadmin/cierre-caja"
-              element={
-                <PrivateRoute allowedRoles={["super_admin"]} allowedCurrencies={["COP"]}>
-                  <CierreCajaPage />
-                </PrivateRoute>
-              }
-            />
 
 
             {/* --- ADMIN SEDE --- */}
@@ -209,14 +180,14 @@ function App() {
                 </PrivateRoute>
               }
             />
-            <Route
+            {/* <Route
               path="/sede/cierre-caja"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]} allowedCurrencies={["COP"]}>
+                <PrivateRoute allowedRoles={["admin_sede"]}>
                   <CierreCajaPage />
                 </PrivateRoute>
               }
-            />
+            /> */}
             <Route
               path="/sede/commissions"
               element={

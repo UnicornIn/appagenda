@@ -1,52 +1,63 @@
-"use client";
+"use client"
 
-import { useState } from "react";
-import { Search, Edit2, User, Filter, X } from "lucide-react";
-import type { Estilista } from "../../../types/estilista";
-import { formatSedeNombre } from "../../../lib/sede";
+import { useState } from "react"
+import { Search, MoreVertical, Edit, Trash2, User, Filter, X } from 'lucide-react'
+import type { Estilista } from "../../../types/estilista"
+import { formatSedeNombre } from "../../../lib/sede"
 
 interface EstilistasListProps {
-  estilistas: Estilista[];
-  selectedEstilista: Estilista | null;
-  onSelectEstilista: (estilista: Estilista) => void;
-  onEdit?: (estilista: Estilista) => void;
-  onDelete?: (estilista: Estilista) => void;
+  estilistas: Estilista[]
+  selectedEstilista: Estilista | null
+  onSelectEstilista: (estilista: Estilista) => void
+  onEdit?: (estilista: Estilista) => void
+  onDelete?: (estilista: Estilista) => void
 }
 
-export function EstilistasList({
-  estilistas,
-  selectedEstilista,
+export function EstilistasList({ 
+  estilistas, 
+  selectedEstilista, 
   onSelectEstilista,
   onEdit,
+  onDelete 
 }: EstilistasListProps) {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filterActive, setFilterActive] = useState<boolean | null>(null);
+  const [searchTerm, setSearchTerm] = useState("")
+  const [filterActive, setFilterActive] = useState<boolean | null>(null)
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
 
-  const safeEstilistas = Array.isArray(estilistas) ? estilistas : [];
+  const safeEstilistas = Array.isArray(estilistas) ? estilistas : []
+  
+  const filteredEstilistas = safeEstilistas.filter(estilista => {
+    if (!estilista) return false
+    
+    const matchesSearch = estilista.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         estilista.email?.toLowerCase().includes(searchTerm.toLowerCase())
+    
+    const matchesFilter = filterActive === null || estilista.activo === filterActive
+    
+    return matchesSearch && matchesFilter
+  })
 
-  const filteredEstilistas = safeEstilistas.filter((estilista) => {
-    if (!estilista) return false;
-
-    const matchesSearch =
-      estilista.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      estilista.email?.toLowerCase().includes(searchTerm.toLowerCase());
-
-    const matchesFilter =
-      filterActive === null || estilista.activo === filterActive;
-
-    return matchesSearch && matchesFilter;
-  });
+  const toggleMenu = (id: string) => {
+    setMenuOpenId(menuOpenId === id ? null : id)
+  }
 
   const handleEdit = (estilista: Estilista, e: React.MouseEvent) => {
-    e.stopPropagation();
-    onEdit?.(estilista);
-  };
+    e.stopPropagation()
+    setMenuOpenId(null)
+    onEdit?.(estilista)
+  }
+
+  const handleDelete = (estilista: Estilista, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setMenuOpenId(null)
+    if (confirm(`¿Estás seguro de que quieres eliminar a ${estilista.nombre}?`)) {
+      onDelete?.(estilista)
+    }
+  }
 
   const getEspecialidades = (estilista: Estilista) => {
-    return Array.isArray(estilista.especialidades)
-      ? estilista.especialidades
-      : [];
-  };
+    return Array.isArray(estilista.especialidades) ? estilista.especialidades : []
+  }
 
   return (
     <div className="h-full flex flex-col border border-gray-200 rounded-lg bg-white">
@@ -75,9 +86,9 @@ export function EstilistasList({
           <button
             onClick={() => setFilterActive(null)}
             className={`flex items-center gap-1 px-2 py-1 text-xs rounded border ${
-              filterActive === null
-                ? "bg-black text-white border-black"
-                : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+              filterActive === null 
+                ? 'bg-black text-white border-black' 
+                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
             }`}
           >
             <Filter className="w-3 h-3" />
@@ -86,9 +97,9 @@ export function EstilistasList({
           <button
             onClick={() => setFilterActive(true)}
             className={`flex-1 px-2 py-1 text-xs rounded border ${
-              filterActive === true
-                ? "bg-black text-white border-black"
-                : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+              filterActive === true 
+                ? 'bg-black text-white border-black' 
+                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
             }`}
           >
             Activos
@@ -96,9 +107,9 @@ export function EstilistasList({
           <button
             onClick={() => setFilterActive(false)}
             className={`flex-1 px-2 py-1 text-xs rounded border ${
-              filterActive === false
-                ? "bg-black text-white border-black"
-                : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+              filterActive === false 
+                ? 'bg-black text-white border-black' 
+                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
             }`}
           >
             Inactivos
@@ -110,9 +121,7 @@ export function EstilistasList({
       <div className="px-3 py-1.5 border-b border-gray-200 bg-gray-50">
         <div className="flex justify-between items-center">
           <p className="text-xs text-gray-600">
-            <span className="font-medium">{filteredEstilistas.length}</span> de{" "}
-            <span className="font-medium">{safeEstilistas.length}</span>{" "}
-            estilistas
+            <span className="font-medium">{filteredEstilistas.length}</span> de <span className="font-medium">{safeEstilistas.length}</span> estilistas
           </p>
           {filterActive !== null && (
             <button
@@ -144,20 +153,19 @@ export function EstilistasList({
         ) : (
           <div className="divide-y divide-gray-100">
             {filteredEstilistas.map((estilista) => {
-              if (!estilista) return null;
-
-              const especialidades = getEspecialidades(estilista);
-              const especialidadesCount = especialidades.length;
+              if (!estilista) return null
+              
+              const especialidades = getEspecialidades(estilista)
+              const especialidadesCount = especialidades.length
 
               return (
                 <div
                   key={estilista.profesional_id}
                   onClick={() => onSelectEstilista(estilista)}
                   className={`p-2.5 cursor-pointer transition-colors relative group ${
-                    selectedEstilista?.profesional_id ===
-                    estilista.profesional_id
-                      ? "bg-gray-100 border-l-2 border-black"
-                      : "hover:bg-gray-50"
+                    selectedEstilista?.profesional_id === estilista.profesional_id
+                      ? 'bg-gray-100 border-l-2 border-black'
+                      : 'hover:bg-gray-50'
                   }`}
                 >
                   <div className="flex items-start justify-between">
@@ -169,48 +177,40 @@ export function EstilistasList({
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
                             <h3 className="text-sm font-semibold text-gray-900 truncate">
-                              {estilista.nombre || "Nombre no disponible"}
+                              {estilista.nombre || 'Nombre no disponible'}
                             </h3>
                             <span
                               className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${
                                 estilista.activo
-                                  ? "bg-gray-100 text-gray-900 border-gray-300"
-                                  : "bg-gray-100 text-gray-900 border-gray-300"
+                                  ? 'bg-gray-100 text-gray-900 border-gray-300'
+                                  : 'bg-gray-100 text-gray-900 border-gray-300'
                               }`}
                             >
-                              {estilista.activo ? "Activo" : "Inactivo"}
+                              {estilista.activo ? 'Activo' : 'Inactivo'}
                             </span>
                           </div>
-
+                          
                           <p className="text-xs text-gray-600 truncate mt-0.5">
-                            {estilista.email || "Email no disponible"}
+                            {estilista.email || 'Email no disponible'}
                           </p>
                         </div>
                       </div>
-
+                      
                       <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-1">
-                        <span>
-                          Sede:{" "}
-                          {formatSedeNombre(
-                            (estilista as any).sede_nombre,
-                            "Sin sede",
-                          )}
-                        </span>
+                        <span>Sede: {formatSedeNombre((estilista as any).sede_nombre, 'Sin sede')}</span>
                       </div>
 
                       {especialidadesCount > 0 && (
                         <div className="mt-1.5">
                           <div className="flex flex-wrap gap-1">
-                            {especialidades
-                              .slice(0, 2)
-                              .map((especialidad, index) => (
-                                <span
-                                  key={index}
-                                  className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded text-[10px] border border-gray-200"
-                                >
-                                  {especialidad}
-                                </span>
-                              ))}
+                            {especialidades.slice(0, 2).map((especialidad, index) => (
+                              <span
+                                key={index}
+                                className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded text-[10px] border border-gray-200"
+                              >
+                                {especialidad}
+                              </span>
+                            ))}
                             {especialidadesCount > 2 && (
                               <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded text-[10px] border border-gray-200">
                                 +{especialidadesCount - 2} más
@@ -221,24 +221,52 @@ export function EstilistasList({
                       )}
                     </div>
 
-                    {/* Acción de edición */}
+                    {/* Menú de acciones */}
                     <div className="relative">
                       <button
-                        onClick={(e) => handleEdit(estilista, e)}
-                        className="p-2 rounded-md hover:bg-gray-200 active:scale-95 transition-all"
-
-                        title="Editar estilista"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleMenu(estilista.profesional_id)
+                        }}
+                        className="p-1 rounded hover:bg-gray-200 transition-colors"
                       >
-                        <Edit2 className="h-3 w-3 text-gray-500 hover:text-gray-700" />
+                        <MoreVertical className="h-3.5 w-3.5 text-gray-500" />
                       </button>
+
+                      {menuOpenId === estilista.profesional_id && (
+                        <>
+                          {/* Overlay para cerrar al hacer click fuera */}
+                          <div 
+                            className="fixed inset-0 z-10" 
+                            onClick={() => setMenuOpenId(null)}
+                          />
+                          
+                          <div className="absolute right-0 top-6 bg-white border border-gray-200 rounded shadow-lg z-20 min-w-32">
+                            <button
+                              onClick={(e) => handleEdit(estilista, e)}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 first:rounded-t last:rounded-b border-b border-gray-100"
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                              Editar
+                            </button>
+                            <button
+                              onClick={(e) => handleDelete(estilista, e)}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 first:rounded-t last:rounded-b"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Eliminar
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
-              );
+              )
             })}
           </div>
         )}
       </div>
     </div>
-  );
+  )
 }

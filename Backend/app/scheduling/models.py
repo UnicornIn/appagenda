@@ -55,21 +55,12 @@ class Bloqueo(BaseModel):
 class ServicioEnCita(BaseModel):
     servicio_id: str
     precio_personalizado: Optional[float] = None  # Puede ser None, 0, o un número positivo
-    cantidad: Optional[int] = 1
     
     @validator('precio_personalizado')
     def validar_precio(cls, v):
         # Si es 0, convertir a None (significa "usar precio de BD")
         if v is not None and v == 0:
             return None
-        return v
-
-    @validator('cantidad')
-    def validar_cantidad(cls, v):
-        if v is None:
-            return 1
-        if v < 1:
-            raise ValueError("La cantidad debe ser mayor o igual a 1")
         return v
 
 # === CITA ===
@@ -85,7 +76,6 @@ class Cita(BaseModel):
     metodo_pago_inicial: Optional[str] = "sin_pago"
     abono: Optional[float] = 0
     notas: Optional[str] = None
-    codigo_giftcard: Optional[str] = None   # ⭐ NUEVO: código si paga con giftcard
 
 class ServicioEnFicha(BaseModel):
     """Servicio dentro de una ficha técnica"""
@@ -143,5 +133,3 @@ class ProductoItem(BaseModel):
 class PagoRequest(BaseModel):
     monto: float
     metodo_pago: Optional[str] = "efectivo"
-    notas: Optional[str] = None
-    codigo_giftcard: Optional[str] = None  # ⭐ requerido si metodo_pago == "giftcard"

@@ -24,16 +24,6 @@ class UserInDB(UserBase):
     fecha_creacion: Optional[str] = None
     ultimo_acceso: Optional[str] = None
 
-class UserResponse(BaseModel):
-    id: str
-    nombre: str
-    correo_electronico: str
-    rol: str
-    sede_id: Optional[str] = None
-    franquicia_id: Optional[str] = None
-    activo: bool
-    fecha_creacion: Optional[str] = None
-    creado_por: Optional[str] = None
 
 # =========================================================
 # 🔑 TOKEN Y RESPUESTA DE LOGIN

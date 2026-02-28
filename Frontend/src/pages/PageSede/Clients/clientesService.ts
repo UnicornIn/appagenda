@@ -420,132 +420,78 @@ export const clientesService = {
         return [];
       }
 
-      const payload: any = await response.json();
-      const fichas: any[] = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.data)
-          ? payload.data
-          : Array.isArray(payload?.fichas)
-            ? payload.fichas
-            : [];
+      const fichas: any[] = await response.json();
 
       console.log(`✅ Se obtuvieron ${fichas.length} fichas para el cliente ${clienteId}`);
 
-      if (fichas.length === 0) {
-        return [];
-      }
-
-      const safeText = (value: unknown, fallback: string): string => {
-        if (typeof value === 'string') {
-          const clean = value.trim();
-          return clean || fallback;
-        }
-        if (value === null || value === undefined) {
-          return fallback;
-        }
-        const clean = String(value).trim();
-        return clean || fallback;
-      };
-
       // 🔥 TRANSFORMAR LOS DATOS PARA COMPATIBILIDAD
-      const fichasTransformadas = fichas
-        .map((ficha, index) => {
-          try {
-            if (!ficha || typeof ficha !== 'object') {
-              return null;
-            }
+      return fichas.map(ficha => {
+        // 🔥 DETERMINAR EL NOMBRE CORRECTO DEL PROFESIONAL
+        let nombreProfesionalFinal = ficha.profesional_nombre;
 
-            // 🔥 DETERMINAR EL NOMBRE CORRECTO DEL PROFESIONAL
-            let nombreProfesionalFinal = safeText((ficha as any).profesional_nombre, '');
-            const estilistaRaw = safeText((ficha as any).estilista, '');
+        if (ficha.profesional_nombre === "Estilista" && ficha.estilista && ficha.estilista !== "Estilista") {
+          nombreProfesionalFinal = ficha.estilista;
+        }
 
-            if (nombreProfesionalFinal === "Estilista" && estilistaRaw && estilistaRaw !== "Estilista") {
-              nombreProfesionalFinal = estilistaRaw;
-            }
-            if (!nombreProfesionalFinal) {
-              nombreProfesionalFinal = estilistaRaw || "Sin profesional";
-            }
+        // 🔥 FUNCIÓN PARA ARREGLAR URLs DE S3
+        const fixAllUrls = (urls: string[] | undefined): string[] => {
+          if (!urls || !Array.isArray(urls)) return [];
+          return urls.map(fixS3Url);
+        };
 
-            // 🔥 FUNCIÓN PARA ARREGLAR URLs DE S3
-            const fixAllUrls = (urls: unknown): string[] => {
-              if (!Array.isArray(urls)) return [];
-              return urls
-                .map((url) => (typeof url === 'string' ? fixS3Url(url) : ''))
-                .filter(Boolean);
-            };
+        // 🔥 EXTRAER PRIMERA IMAGEN DE "ANTES" Y "DESPUÉS" - ARREGLANDO URLs
+        const primeraImagenAntes = fixS3Url(ficha.fotos?.antes?.[0] || '');
+        const primeraImagenDespues = fixS3Url(ficha.fotos?.despues?.[0] || '');
 
-            const fotos = (ficha as any).fotos && typeof (ficha as any).fotos === 'object'
-              ? (ficha as any).fotos
-              : undefined;
+        // 🔥 ARREGLAR TODAS LAS URLs DE FOTOS
+        const fotosArregladas = ficha.fotos ? {
+          ...ficha.fotos,
+          antes: fixAllUrls(ficha.fotos.antes),
+          despues: fixAllUrls(ficha.fotos.despues),
+          antes_urls: fixAllUrls(ficha.fotos.antes_urls),
+          despues_urls: fixAllUrls(ficha.fotos.despues_urls)
+        } : undefined;
 
-            // 🔥 EXTRAER PRIMERA IMAGEN DE "ANTES" Y "DESPUÉS" - ARREGLANDO URLs
-            const primeraImagenAntes = fixS3Url((Array.isArray(fotos?.antes) ? fotos.antes[0] : '') || '');
-            const primeraImagenDespues = fixS3Url((Array.isArray(fotos?.despues) ? fotos.despues[0] : '') || '');
+        // 🔥 CREAR OBJETO TRANSFORMADO
+        const fichaTransformada: FichaCliente = {
+          ...ficha,
+          profesional_nombre: nombreProfesionalFinal,
+          estilista: nombreProfesionalFinal,
 
-            // 🔥 ARREGLAR TODAS LAS URLs DE FOTOS
-            const fotosArregladas = fotos ? {
-              ...fotos,
-              antes: fixAllUrls(fotos.antes),
-              despues: fixAllUrls(fotos.despues),
-              antes_urls: fixAllUrls(fotos.antes_urls),
-              despues_urls: fixAllUrls(fotos.despues_urls)
-            } : undefined;
+          // 🔥 AGREGAR CAMPOS DE COMPATIBILIDAD CON VALORES ASEGURADOS
+          fotos: fotosArregladas,
+          antes_url: primeraImagenAntes,
+          despues_url: primeraImagenDespues,
+          notas_cliente: ficha.notas_cliente?.trim() || 'Sin notas',
+          comentario_interno: ficha.comentario_interno?.trim() || 'Sin comentarios',
 
-            // 🔥 CREAR OBJETO TRANSFORMADO
-            const fichaTransformada: FichaCliente = {
-              ...(ficha as any),
-              _id: safeText((ficha as any)._id ?? (ficha as any).id, `${clienteId}-${index}`),
-              cliente_id: safeText((ficha as any).cliente_id, clienteId),
-              sede_id: safeText((ficha as any).sede_id, ''),
-              servicio_id: safeText((ficha as any).servicio_id, ''),
-              profesional_id: safeText((ficha as any).profesional_id, ''),
-              fecha_ficha: safeText((ficha as any).fecha_ficha, ''),
-              fecha_reserva: safeText((ficha as any).fecha_reserva, ''),
-              profesional_nombre: nombreProfesionalFinal,
-              estilista: nombreProfesionalFinal,
+          // 🔥 VALORES POR DEFECTO
+          precio: ficha.precio || '0',
+          estado: ficha.estado || 'completado',
+          estado_pago: ficha.estado_pago || 'pagado',
+          local: ficha.local || ficha.sede || '',
 
-              // 🔥 AGREGAR CAMPOS DE COMPATIBILIDAD CON VALORES ASEGURADOS
-              fotos: fotosArregladas,
-              antes_url: primeraImagenAntes,
-              despues_url: primeraImagenDespues,
-              notas_cliente: safeText((ficha as any).notas_cliente, 'Sin notas'),
-              comentario_interno: safeText((ficha as any).comentario_interno, 'Sin comentarios'),
+          // 🔥 Asegurar que los campos de nombres estén completos
+          servicio: ficha.servicio || ficha.servicio_nombre || 'Servicio sin nombre',
+          servicio_nombre: ficha.servicio_nombre || ficha.servicio || 'Servicio sin nombre',
+          sede: ficha.sede || ficha.sede_nombre || 'Sede no especificada',
+          sede_nombre: ficha.sede_nombre || ficha.sede || 'Sede no especificada',
+          sede_estilista: ficha.sede_estilista || ficha.sede || ficha.sede_nombre || 'Sede no especificada',
 
-              // 🔥 VALORES POR DEFECTO
-              precio: (ficha as any).precio || '0',
-              estado: safeText((ficha as any).estado, 'completado'),
-              estado_pago: safeText((ficha as any).estado_pago, 'pagado'),
-              local: safeText((ficha as any).local || (ficha as any).sede, ''),
+          // 🔥 Asegurar campos obligatorios
+          email: ficha.email || '',
+          apellido: ficha.apellido || '',
+          nombre: ficha.nombre || '',
+          cedula: ficha.cedula || '',
+          telefono: ficha.telefono || '',
 
-              // 🔥 Asegurar que los campos de nombres estén completos
-              servicio: safeText((ficha as any).servicio || (ficha as any).servicio_nombre, 'Servicio sin nombre'),
-              servicio_nombre: safeText((ficha as any).servicio_nombre || (ficha as any).servicio, 'Servicio sin nombre'),
-              sede: safeText((ficha as any).sede || (ficha as any).sede_nombre, 'Sede no especificada'),
-              sede_nombre: safeText((ficha as any).sede_nombre || (ficha as any).sede, 'Sede no especificada'),
-              sede_estilista: safeText((ficha as any).sede_estilista || (ficha as any).sede || (ficha as any).sede_nombre, 'Sede no especificada'),
+          // 🔥 Preservar datos específicos
+          datos_especificos: ficha.datos_especificos,
+          respuestas: ficha.respuestas || []
+        };
 
-              // 🔥 Asegurar campos obligatorios
-              email: safeText((ficha as any).email, ''),
-              apellido: safeText((ficha as any).apellido, ''),
-              nombre: safeText((ficha as any).nombre, ''),
-              cedula: safeText((ficha as any).cedula, ''),
-              telefono: safeText((ficha as any).telefono, ''),
-
-              // 🔥 Preservar datos específicos
-              datos_especificos: (ficha as any).datos_especificos,
-              respuestas: Array.isArray((ficha as any).respuestas) ? (ficha as any).respuestas : []
-            };
-
-            return fichaTransformada;
-          } catch (itemError) {
-            console.error(`❌ Error transformando ficha ${index} del cliente ${clienteId}:`, itemError);
-            return null;
-          }
-        })
-        .filter((ficha): ficha is FichaCliente => Boolean(ficha));
-
-      console.log(`✅ Fichas transformadas para UI: ${fichasTransformadas.length}`);
-      return fichasTransformadas;
+        return fichaTransformada;
+      });
 
     } catch (error) {
       console.error('❌ Error obteniendo fichas del cliente:', error);
@@ -714,24 +660,16 @@ export const clientesService = {
   },
 
   async createCliente(token: string, cliente: CreateClienteData): Promise<ClienteResponse> {
-    const nombre = cliente.nombre?.trim();
-    if (!nombre) {
-      throw new Error('El nombre del cliente es requerido');
-    }
-
-    const requestData: Record<string, string> = { nombre };
-    const addIfPresent = (key: string, value?: string) => {
-      const normalized = value?.trim();
-      if (normalized) requestData[key] = normalized;
+    const requestData = {
+      nombre: cliente.nombre.trim(),
+      correo: cliente.correo?.trim() || '',
+      telefono: cliente.telefono?.trim() || '',
+      notas: cliente.notas?.trim() || '',
+      sede_id: cliente.sede_id || '',
+      cedula: cliente.cedula?.trim() || '',
+      ciudad: cliente.ciudad?.trim() || '',
+      fecha_de_nacimiento: cliente.fecha_de_nacimiento?.trim() || ''
     };
-
-    addIfPresent('correo', cliente.correo);
-    addIfPresent('telefono', cliente.telefono);
-    addIfPresent('notas', cliente.notas);
-    addIfPresent('sede_id', cliente.sede_id);
-    addIfPresent('cedula', cliente.cedula);
-    addIfPresent('ciudad', cliente.ciudad);
-    addIfPresent('fecha_de_nacimiento', cliente.fecha_de_nacimiento);
 
     const response = await fetch(`${API_BASE_URL}clientes/`, {
       method: 'POST',

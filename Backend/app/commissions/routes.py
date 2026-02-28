@@ -291,7 +291,7 @@ async def liquidar_comision(
         update_data = {
             "estado": "liquidada",
             "liquidada_por": user.get("email"),
-            "liquidada_en": datetime.now()
+            "liquidada_en": datetime.utcnow()
         }
         
         if request.notas:
@@ -545,7 +545,7 @@ async def liquidar_multiples_comisiones(
             update_data = {
                 "estado": "liquidada",
                 "liquidada_por": user.get("email"),
-                "liquidada_en": datetime.now()
+                "liquidada_en": datetime.utcnow()
             }
             
             if notas:

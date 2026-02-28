@@ -317,23 +317,11 @@ async def crear_cita(
 
     servicios_procesados = []
     servicios_info = []  # Para email
-    servicios_ids_vistos = set()
     valor_total = 0
     duracion_total = 0
     nombres_servicios = []  # Para denormalizar
 
     for servicio_item in cita.servicios:
-        if servicio_item.servicio_id in servicios_ids_vistos:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Servicio duplicado en la cita: {servicio_item.servicio_id}"
-            )
-        servicios_ids_vistos.add(servicio_item.servicio_id)
-
-        cantidad = int(servicio_item.cantidad or 1)
-        if cantidad < 1:
-            raise HTTPException(status_code=400, detail="La cantidad debe ser mayor o igual a 1")
-
         servicio_db = await collection_servicios.find_one({"servicio_id": servicio_item.servicio_id})
         if not servicio_db:
             raise HTTPException(status_code=404, detail=f"Servicio {servicio_item.servicio_id} no encontrado")
@@ -353,27 +341,16 @@ async def crear_cita(
             es_personalizado = False
 
         # Acumular totales
-        subtotal = round(precio * cantidad, 2)
-        valor_total += subtotal
-        duracion_total += int(servicio_db.get("duracion_minutos", 0) or 0) * cantidad
-        nombre_servicio = servicio_db.get("nombre", "Servicio")
-        nombres_servicios.append(f"{nombre_servicio} x{cantidad}" if cantidad > 1 else nombre_servicio)
-        servicios_info.append({
-            "servicio_id": servicio_item.servicio_id,
-            "nombre": nombre_servicio,
-            "precio_unitario": round(precio, 2),
-            "cantidad": cantidad,
-            "subtotal": subtotal
-        })
+        valor_total += precio
+        duracion_total += servicio_db.get("duracion_minutos", 0)
+        nombres_servicios.append(servicio_db.get("nombre"))
 
         # ⭐ GUARDAR SERVICIO (estructura mejorada)
         servicio_guardado = {
             "servicio_id": servicio_item.servicio_id,
-            "nombre": nombre_servicio,  # ⭐ NUEVO
+            "nombre": servicio_db.get("nombre"),  # ⭐ NUEVO
             "precio_personalizado": es_personalizado,  # ⭐ BOOLEANO
-            "precio": round(precio, 2),  # ⭐ SIEMPRE guardar el precio unitario usado
-            "cantidad": cantidad,
-            "subtotal": subtotal
+            "precio": round(precio, 2)  # ⭐ SIEMPRE guardar el precio usado
         }
         servicios_procesados.append(servicio_guardado)
 
@@ -966,121 +943,6 @@ async def crear_cita(
     except Exception as e:
         print(f"⚠️ Error enviando email a admin sede: {e}")
 
-    # ═══════════════════════════════════════════════
-    # ⭐ INTEGRACIÓN GIFTCARD - Reservar saldo
-    # Si el método de pago inicial es giftcard, reservar saldo.
-    # ⭐ Soporta pago parcial: si la giftcard no cubre el abono
-    # completo, usa lo que tiene y el resto queda en saldo_pendiente.
-    # ═══════════════════════════════════════════════
-    codigo_giftcard = getattr(cita, 'codigo_giftcard', None)
-
-    if cita.metodo_pago_inicial == "giftcard" and codigo_giftcard and abono > 0:
-        try:
-            from app.database.mongo import collection_giftcards
-            from app.giftcards.routes_giftcards import _estado_giftcard
-
-            codigo_upper = codigo_giftcard.upper().strip()
-            gc_doc = await collection_giftcards.find_one({"codigo": codigo_upper})
-
-            if not gc_doc:
-                await collection_citas.delete_one({"_id": result.inserted_id})
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Giftcard '{codigo_upper}' no encontrada"
-                )
-
-            estado_gc = _estado_giftcard(gc_doc)
-            if estado_gc in ["cancelada", "vencida", "usada"]:
-                await collection_citas.delete_one({"_id": result.inserted_id})
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Giftcard no válida: estado '{estado_gc}'"
-                )
-
-            saldo_gc = round(float(gc_doc.get("saldo_disponible", 0)), 2)
-
-            if saldo_gc <= 0:
-                await collection_citas.delete_one({"_id": result.inserted_id})
-                raise HTTPException(
-                    status_code=400,
-                    detail="La giftcard no tiene saldo disponible"
-                )
-
-            # ⭐ Pago parcial: usar lo que alcance, el resto queda en saldo_pendiente.
-            # El cajero completará la diferencia con otro método después.
-            abono_real_gc = round(min(abono, saldo_gc), 2)
-            abono_restante = round(abono - abono_real_gc, 2)
-
-            nuevo_disponible = round(saldo_gc - abono_real_gc, 2)
-            nuevo_reservado = round(float(gc_doc.get("saldo_reservado", 0)) + abono_real_gc, 2)
-
-            movimiento_gc = {
-                "tipo": "reserva",
-                "cita_id": cita_id,
-                "concepto": "abono_inicial",
-                "monto": abono_real_gc,
-                "fecha": datetime.now(),
-                "registrado_por": current_user.get("email"),
-                "saldo_disponible_antes": saldo_gc,
-                "saldo_disponible_despues": nuevo_disponible,
-                **({"monto_restante_otro_metodo": abono_restante} if abono_restante > 0 else {})
-            }
-
-            await collection_giftcards.update_one(
-                {"codigo": codigo_upper},
-                {
-                    "$set": {
-                        "saldo_disponible": nuevo_disponible,
-                        "saldo_reservado": nuevo_reservado,
-                    },
-                    "$push": {"historial": movimiento_gc}
-                }
-            )
-
-            # Si la giftcard solo cubrió parcialmente el abono,
-            # recalcular saldo_pendiente con el abono real
-            if abono_real_gc < abono:
-                saldo_pendiente = round(valor_total - abono_real_gc, 2)
-                if saldo_pendiente <= 0:
-                    estado_pago = "pagado"
-                elif abono_real_gc > 0:
-                    estado_pago = "abonado"
-
-                # Actualizar el historial_pagos con el monto real
-                historial_pagos[0]["monto"] = abono_real_gc
-                historial_pagos[0]["saldo_despues"] = saldo_pendiente
-
-                await collection_citas.update_one(
-                    {"_id": result.inserted_id},
-                    {"$set": {
-                        "codigo_giftcard": codigo_upper,
-                        "abono": abono_real_gc,
-                        "saldo_pendiente": saldo_pendiente,
-                        "estado_pago": estado_pago,
-                        "historial_pagos": historial_pagos,
-                    }}
-                )
-                print(f"🎁 Giftcard {codigo_upper}: cubrió {abono_real_gc}, "
-                      f"restante {abono_restante} queda en saldo_pendiente")
-            else:
-                # La giftcard cubrió todo el abono, solo guardar el código
-                await collection_citas.update_one(
-                    {"_id": result.inserted_id},
-                    {"$set": {"codigo_giftcard": codigo_upper}}
-                )
-                print(f"🎁 Giftcard {codigo_upper}: reservados {abono_real_gc} {gc_doc.get('moneda')}")
-
-        except HTTPException:
-            # Re-lanzar los errores que generamos arriba
-            # (la cita ya fue eliminada dentro de cada if antes del raise)
-            raise
-        except Exception as e:
-            await collection_citas.delete_one({"_id": result.inserted_id})
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error reservando giftcard: {str(e)}"
-            )
-
     return {
         "success": True, 
         "message": "Cita creada exitosamente", 
@@ -1111,9 +973,8 @@ async def editar_cita(
 ):
     """
     Edita una cita.
-    ✅ Soporta edición de servicios, productos y horario
+    ✅ Soporta edición de servicios (nueva estructura)
     ✅ Recalcula totales automáticamente
-    ✅ Valida disponibilidad y conflictos de agenda
     """
     if current_user.get("rol") not in ["admin_sede", "super_admin"]:
         raise HTTPException(status_code=403, detail="No autorizado")
@@ -1122,358 +983,61 @@ async def editar_cita(
     if not cita_actual:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
 
-    cita_object_id = cita_actual.get("_id")
-    if not cita_object_id:
-        raise HTTPException(status_code=500, detail="La cita no tiene _id válido")
-
-    def _hora_a_minutos(hora_str: str) -> int:
-        hora_obj = time.fromisoformat(hora_str)
-        return (hora_obj.hour * 60) + hora_obj.minute
-
-    def _minutos_a_hora(total_min: int) -> str:
-        horas = total_min // 60
-        minutos = total_min % 60
-        return f"{str(horas).zfill(2)}:{str(minutos).zfill(2)}"
-
-    def _sumar_minutos_hora(hora_str: str, minutos: int) -> str:
-        inicio = _hora_a_minutos(hora_str)
-        return _minutos_a_hora(inicio + max(0, minutos))
-
-    def _normalizar_fecha(fecha_valor) -> str:
-        if isinstance(fecha_valor, datetime):
-            return fecha_valor.strftime("%Y-%m-%d")
-        fecha_texto = str(fecha_valor)
-        try:
-            return datetime.strptime(fecha_texto[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
-        except Exception:
-            raise HTTPException(status_code=400, detail="Formato de fecha inválido. Use YYYY-MM-DD")
-
-    def _total_productos_desde_lista(productos_lista: list) -> float:
-        total = 0.0
-        for p in productos_lista or []:
-            cantidad = int(p.get("cantidad", 1) or 1)
-            precio_unitario = float(p.get("precio_unitario", p.get("precio", 0)) or 0)
-            subtotal = float(p.get("subtotal", precio_unitario * cantidad) or 0)
-            total += subtotal
-        return round(total, 2)
-
-    estado_actual = str(cita_actual.get("estado", "")).strip().lower()
-    estados_no_editables = {"cancelada", "completada", "finalizada", "no asistio", "no_asistio"}
-    campos_edicion_cita = {"servicios", "productos", "fecha", "hora_inicio", "hora_fin", "profesional_id"}
-    solicita_edicion = any(campo in cambios for campo in campos_edicion_cita)
-
-    if solicita_edicion and estado_actual in estados_no_editables:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se puede editar la cita cuando está en estado '{cita_actual.get('estado')}'"
-        )
-
-    sede = await collection_locales.find_one({"sede_id": cita_actual.get("sede_id")})
-    if not sede:
-        raise HTTPException(status_code=404, detail="Sede de la cita no encontrada")
-
-    moneda_sede = sede.get("moneda", "COP")
-
     # ====================================
-    # ⭐ SERVICIOS
+    # ⭐ SI SE EDITAN SERVICIOS (nueva estructura)
     # ====================================
-    valor_servicios = round(
-        float(cita_actual.get("valor_total", 0) or 0) - _total_productos_desde_lista(cita_actual.get("productos", [])),
-        2
-    )
-    valor_servicios = max(0, valor_servicios)
-    duracion_total = int(cita_actual.get("servicio_duracion", 0) or 0)
-    if duracion_total <= 0:
-        try:
-            duracion_total = max(
-                0,
-                _hora_a_minutos(str(cita_actual.get("hora_fin", "00:00"))) -
-                _hora_a_minutos(str(cita_actual.get("hora_inicio", "00:00")))
-            )
-        except Exception:
-            duracion_total = 0
-
     if "servicios" in cambios:
-        if not isinstance(cambios["servicios"], list) or len(cambios["servicios"]) == 0:
-            raise HTTPException(status_code=400, detail="Debe enviar al menos un servicio")
-
+        sede = await collection_locales.find_one({"sede_id": cita_actual.get("sede_id")})
+        moneda_sede = sede.get("moneda", "COP")
+        
         servicios_procesados = []
-        servicios_ids_vistos = set()
-        valor_servicios = 0.0
-        duracion_total = 0
-        nombres_servicios = []
-
+        valor_total = 0
+        
         for servicio_item in cambios["servicios"]:
-            if not isinstance(servicio_item, dict):
-                raise HTTPException(status_code=400, detail="Formato inválido en servicios")
-
             servicio_id = servicio_item.get("servicio_id")
-            if not servicio_id:
-                raise HTTPException(status_code=400, detail="Cada servicio debe incluir servicio_id")
-
-            if servicio_id in servicios_ids_vistos:
-                raise HTTPException(status_code=400, detail=f"Servicio duplicado en la cita: {servicio_id}")
-            servicios_ids_vistos.add(servicio_id)
-
-            cantidad_raw = servicio_item.get("cantidad", 1)
-            try:
-                cantidad = int(cantidad_raw)
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=400, detail=f"Cantidad inválida para servicio {servicio_id}")
-
-            if cantidad < 1:
-                raise HTTPException(status_code=400, detail="La cantidad debe ser mayor o igual a 1")
-
+            precio_personalizado = servicio_item.get("precio_personalizado")
+            
+            # Buscar servicio en BD
             servicio_db = await collection_servicios.find_one({"servicio_id": servicio_id})
             if not servicio_db:
                 raise HTTPException(status_code=404, detail=f"Servicio {servicio_id} no encontrado")
-
-            precios = servicio_db.get("precios", {})
-            if moneda_sede not in precios:
-                raise HTTPException(status_code=400, detail=f"Servicio sin precio en {moneda_sede}")
-            precio_base_sede = float(precios[moneda_sede])
-
-            precio_manual = servicio_item.get("precio")
-            precio_personalizado = servicio_item.get("precio_personalizado")
-            precio = None
-
-            if precio_manual is not None:
-                try:
-                    precio_manual_float = float(precio_manual)
-                except (TypeError, ValueError):
-                    raise HTTPException(status_code=400, detail=f"Precio inválido para servicio {servicio_id}")
-                if precio_manual_float > 0:
-                    precio = precio_manual_float
-
-            if precio is None and precio_personalizado is not None:
-                try:
-                    precio_personalizado_float = float(precio_personalizado)
-                except (TypeError, ValueError):
-                    raise HTTPException(status_code=400, detail=f"Precio personalizado inválido para servicio {servicio_id}")
-                if precio_personalizado_float > 0:
-                    precio = precio_personalizado_float
-
-            if precio is None:
-                precio = precio_base_sede
-
-            es_personalizado = round(precio, 2) != round(precio_base_sede, 2)
-
-            subtotal = round(precio * cantidad, 2)
-            duracion_servicio = int(servicio_db.get("duracion_minutos", 0) or 0)
-            nombre_servicio = servicio_db.get("nombre", "Servicio")
-
-            valor_servicios += subtotal
-            duracion_total += duracion_servicio * cantidad
-            nombres_servicios.append(f"{nombre_servicio} x{cantidad}" if cantidad > 1 else nombre_servicio)
-
+            
+            # Determinar precio
+            if precio_personalizado is not None and precio_personalizado > 0:
+                precio = float(precio_personalizado)
+                es_personalizado = True
+            else:
+                precios = servicio_db.get("precios", {})
+                if moneda_sede not in precios:
+                    raise HTTPException(status_code=400, detail=f"Servicio sin precio en {moneda_sede}")
+                precio = float(precios[moneda_sede])
+                es_personalizado = False
+            
+            valor_total += precio
+            
             servicios_procesados.append({
                 "servicio_id": servicio_id,
-                "nombre": nombre_servicio,
+                "nombre": servicio_db.get("nombre"),
                 "precio_personalizado": es_personalizado,
-                "precio": round(precio, 2),
-                "cantidad": cantidad,
-                "subtotal": subtotal
+                "precio": round(precio, 2)
             })
-
+        
+        # Actualizar servicios y totales
         cambios["servicios"] = servicios_procesados
-        cambios["servicio_nombre"] = ", ".join(nombres_servicios) if nombres_servicios else "Sin servicio"
-        cambios["servicio_duracion"] = duracion_total
-        valor_servicios = round(valor_servicios, 2)
-
-    # ====================================
-    # ⭐ PRODUCTOS
-    # ====================================
-    productos_finales = cita_actual.get("productos", [])
-    total_productos = _total_productos_desde_lista(productos_finales)
-
-    if "productos" in cambios:
-        if not isinstance(cambios["productos"], list):
-            raise HTTPException(status_code=400, detail="Formato inválido en productos")
-
-        productos_procesados = []
-        productos_ids_vistos = set()
-        total_productos = 0.0
-        profesional_para_producto = cambios.get("profesional_id", cita_actual.get("profesional_id"))
-
-        for producto_item in cambios["productos"]:
-            if not isinstance(producto_item, dict):
-                raise HTTPException(status_code=400, detail="Formato inválido en productos")
-
-            producto_id = str(producto_item.get("producto_id", "")).strip()
-            if not producto_id:
-                raise HTTPException(status_code=400, detail="Cada producto debe incluir producto_id")
-
-            if producto_id in productos_ids_vistos:
-                raise HTTPException(status_code=400, detail=f"Producto duplicado en la cita: {producto_id}")
-            productos_ids_vistos.add(producto_id)
-
-            cantidad_raw = producto_item.get("cantidad", 1)
-            try:
-                cantidad = int(cantidad_raw)
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=400, detail=f"Cantidad inválida para producto {producto_id}")
-
-            if cantidad < 1:
-                raise HTTPException(status_code=400, detail="La cantidad de producto debe ser mayor o igual a 1")
-
-            producto_db = await collection_products.find_one({"id": producto_id})
-            if not producto_db:
-                try:
-                    producto_db = await collection_products.find_one({"_id": ObjectId(producto_id)})
-                except Exception:
-                    producto_db = None
-            if not producto_db:
-                raise HTTPException(status_code=404, detail=f"Producto {producto_id} no encontrado")
-
-            precio_manual = producto_item.get("precio", producto_item.get("precio_unitario"))
-            precio_unitario = None
-
-            if precio_manual is not None:
-                try:
-                    precio_manual_float = float(precio_manual)
-                except (TypeError, ValueError):
-                    raise HTTPException(status_code=400, detail=f"Precio inválido para producto {producto_id}")
-                if precio_manual_float > 0:
-                    precio_unitario = precio_manual_float
-
-            if precio_unitario is None:
-                precios_producto = producto_db.get("precios", {})
-                if moneda_sede not in precios_producto:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"El producto '{producto_db.get('nombre', producto_id)}' no tiene precio en {moneda_sede}"
-                    )
-                precio_unitario = float(precios_producto[moneda_sede])
-
-            subtotal = round(precio_unitario * cantidad, 2)
-            comision_porcentaje = float(producto_db.get("comision", 0) or 0)
-            comision_valor = round((subtotal * comision_porcentaje) / 100, 2)
-
-            productos_procesados.append({
-                "producto_id": producto_id,
-                "nombre": producto_db.get("nombre", "Producto"),
-                "cantidad": cantidad,
-                "precio_unitario": round(precio_unitario, 2),
-                "subtotal": subtotal,
-                "moneda": moneda_sede,
-                "comision_porcentaje": comision_porcentaje,
-                "comision_valor": comision_valor,
-                "agregado_por_email": current_user.get("email"),
-                "agregado_por_rol": current_user.get("rol"),
-                "fecha_agregado": datetime.now(),
-                "profesional_id": profesional_para_producto
-            })
-
-            total_productos += subtotal
-
-        total_productos = round(total_productos, 2)
-        productos_finales = productos_procesados
-        cambios["productos"] = productos_procesados
-
-    # ====================================
-    # ⭐ FECHA/HORA/PROFESIONAL
-    # ====================================
-    fecha_final = _normalizar_fecha(cambios.get("fecha", cita_actual.get("fecha")))
-    hora_inicio_final = str(cambios.get("hora_inicio", cita_actual.get("hora_inicio")))
-    profesional_id_final = str(cambios.get("profesional_id", cita_actual.get("profesional_id")))
-    hora_fin_final = str(cambios.get("hora_fin", cita_actual.get("hora_fin")))
-
-    if "servicios" in cambios or "hora_inicio" in cambios:
-        hora_fin_final = _sumar_minutos_hora(hora_inicio_final, duracion_total)
-        cambios["hora_fin"] = hora_fin_final
-
-    if "fecha" in cambios:
-        cambios["fecha"] = fecha_final
-    if "hora_inicio" in cambios:
-        cambios["hora_inicio"] = hora_inicio_final
-    if "profesional_id" in cambios:
-        cambios["profesional_id"] = profesional_id_final
-
-    if "profesional_id" in cambios:
-        profesional_db = await collection_estilista.find_one({"profesional_id": profesional_id_final})
-        if not profesional_db:
-            raise HTTPException(status_code=404, detail="Profesional no encontrado")
-        cambios["profesional_nombre"] = profesional_db.get("nombre")
-
-    # Validar disponibilidad y conflictos si cambia agenda
-    if any(campo in cambios for campo in {"fecha", "hora_inicio", "hora_fin", "profesional_id", "servicios"}):
-        try:
-            fecha_dt = datetime.strptime(fecha_final, "%Y-%m-%d")
-            hora_inicio_obj = time.fromisoformat(hora_inicio_final)
-            hora_fin_obj = time.fromisoformat(hora_fin_final)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Fecha u hora inválida")
-
-        if not hora_inicio_obj < hora_fin_obj:
-            raise HTTPException(status_code=400, detail="La hora de fin debe ser mayor a la hora de inicio")
-
-        dia_semana = fecha_dt.isoweekday()
-        horario = await collection_horarios.find_one({"profesional_id": profesional_id_final})
-        if not horario:
-            raise HTTPException(status_code=400, detail="El profesional no tiene horario configurado")
-
-        dia_info = next(
-            (
-                d for d in horario.get("disponibilidad", [])
-                if int(d.get("dia_semana", 0)) == dia_semana and d.get("activo", True) is True
-            ),
-            None
-        )
-        if not dia_info:
-            raise HTTPException(status_code=400, detail="El profesional no tiene disponibilidad para esa fecha")
-
-        hora_inicio_horario = time.fromisoformat(dia_info.get("hora_inicio"))
-        hora_fin_horario = time.fromisoformat(dia_info.get("hora_fin"))
-
-        if not (
-            hora_inicio_horario <= hora_inicio_obj < hora_fin_horario and
-            hora_inicio_horario < hora_fin_obj <= hora_fin_horario
-        ):
-            raise HTTPException(status_code=400, detail="La cita está fuera del horario laboral del profesional")
-
-        bloqueo = await collection_block.find_one({
-            "profesional_id": profesional_id_final,
-            "fecha": fecha_final,
-            "hora_inicio": {"$lt": hora_fin_final},
-            "hora_fin": {"$gt": hora_inicio_final}
-        })
-        if bloqueo:
-            raise HTTPException(
-                status_code=400,
-                detail=f"El profesional tiene un bloqueo en ese horario (Motivo: {bloqueo.get('motivo', 'No especificado')})"
-            )
-
-        solape = await collection_citas.find_one({
-            "_id": {"$ne": cita_object_id},
-            "profesional_id": profesional_id_final,
-            "fecha": fecha_final,
-            "hora_inicio": {"$lt": hora_fin_final},
-            "hora_fin": {"$gt": hora_inicio_final},
-            "estado": {"$nin": ["cancelada", "no asistio", "no_asistio"]}
-        })
-        if solape:
-            cliente_solape = solape.get("cliente_nombre", "otro cliente")
-            raise HTTPException(
-                status_code=400,
-                detail=f"El profesional ya tiene una cita con {cliente_solape} en ese horario"
-            )
-
-    # ====================================
-    # ⭐ RECÁLCULO DE TOTALES
-    # ====================================
-    nuevo_valor_total = round(valor_servicios + total_productos, 2)
-    cambios["valor_total"] = nuevo_valor_total
-
-    abono_actual = float(cambios.get("abono", cita_actual.get("abono", 0)) or 0)
-    nuevo_saldo = round(nuevo_valor_total - abono_actual, 2)
-    cambios["saldo_pendiente"] = nuevo_saldo
-
-    if nuevo_saldo <= 0:
-        cambios["estado_pago"] = "pagado"
-    elif abono_actual > 0:
-        cambios["estado_pago"] = "abonado"
-    else:
-        cambios["estado_pago"] = "pendiente"
+        cambios["valor_total"] = round(valor_total, 2)
+        
+        # Recalcular saldo
+        abono_actual = cita_actual.get("abono", 0)
+        nuevo_saldo = round(valor_total - abono_actual, 2)
+        cambios["saldo_pendiente"] = nuevo_saldo
+        
+        # Recalcular estado de pago
+        if nuevo_saldo <= 0:
+            cambios["estado_pago"] = "pagado"
+        elif abono_actual > 0:
+            cambios["estado_pago"] = "abonado"
+        else:
+            cambios["estado_pago"] = "pendiente"
 
     # ====================================
     # ⭐ Actualizar timestamp
@@ -1484,7 +1048,7 @@ async def editar_cita(
     # Ejecutar actualización
     # ====================================
     result = await collection_citas.update_one(
-        {"_id": cita_object_id},
+        {"_id": ObjectId(cita_id)},
         {"$set": cambios}
     )
 
@@ -1492,7 +1056,7 @@ async def editar_cita(
         raise HTTPException(status_code=404, detail="Cita no encontrada")
 
     # Obtener cita actualizada
-    cita_actualizada = await collection_citas.find_one({"_id": cita_object_id})
+    cita_actualizada = await collection_citas.find_one({"_id": ObjectId(cita_id)})
     normalize_cita_doc(cita_actualizada)
     
     return {"success": True, "cita": cita_actualizada}
@@ -1516,50 +1080,6 @@ async def cancelar_cita(cita_id: str, current_user: dict = Depends(get_current_u
         "cancelada_por": current_user.get("email")
     }})
 
-    # ═══════════════════════════════════════════════
-    # ⭐ INTEGRACIÓN GIFTCARD - Liberar saldo reservado
-    # ═══════════════════════════════════════════════
-    codigo_giftcard = cita.get("codigo_giftcard")
-    if codigo_giftcard:
-        try:
-            from app.database.mongo import collection_giftcards
-            
-            gc_doc = await collection_giftcards.find_one({"codigo": codigo_giftcard})
-            if gc_doc:
-                historial = gc_doc.get("historial", [])
-                reserva = next(
-                    (m for m in historial
-                     if m.get("cita_id") == str(cita["_id"]) and m.get("tipo") == "reserva"),
-                    None
-                )
-                if reserva:
-                    monto_liberar = round(float(reserva.get("monto", 0)), 2)
-                    nuevo_disponible = round(float(gc_doc.get("saldo_disponible", 0)) + monto_liberar, 2)
-                    nuevo_reservado = max(0.0, round(float(gc_doc.get("saldo_reservado", 0)) - monto_liberar, 2))
-                    
-                    movimiento_liberacion = {
-                        "tipo": "liberacion",
-                        "cita_id": str(cita["_id"]),
-                        "monto": monto_liberar,
-                        "fecha": datetime.now(),
-                        "registrado_por": current_user.get("email"),
-                        "motivo": "cita_cancelada"
-                    }
-                    
-                    await collection_giftcards.update_one(
-                        {"codigo": codigo_giftcard},
-                        {
-                            "$set": {
-                                "saldo_disponible": nuevo_disponible,
-                                "saldo_reservado": nuevo_reservado,
-                            },
-                            "$push": {"historial": movimiento_liberacion}
-                        }
-                    )
-                    print(f"🎁 Giftcard {codigo_giftcard}: liberados {monto_liberar}")
-        except Exception as e:
-            print(f"⚠️ Error liberando giftcard al cancelar: {e}")
-
     return {"success": True, "mensaje": "Cita cancelada", "cita_id": cita_id}
 
 # =============================================================
@@ -1579,22 +1099,6 @@ async def confirmar_cita(cita_id: str, current_user: dict = Depends(get_current_
 
     return {"success": True, "mensaje": "Cita confirmada", "cita_id": cita_id}
 
-SIMBOLOS_MONEDA = {
-    "COP": "$",
-    "USD": "USD ",
-    "MXN": "MXN ",
-}
-
-def fmt(valor: float, moneda: str = "") -> str:
-    """3800.0 → '3800', 38600.5 → '38600.5', con símbolo si se pasa moneda."""
-    n = int(valor) if valor == int(valor) else valor
-    simbolo = SIMBOLOS_MONEDA.get(moneda, "")
-    return f"{simbolo}{n}"
-
-def num(valor: float) -> int | float:
-    """Devuelve int si es entero, float si tiene decimales reales."""
-    return int(valor) if valor == int(valor) else valor
-
 # =============================================================
 # 🔹 ACTUALIZAR PAGO DE LA CITA
 # =============================================================
@@ -1611,135 +1115,66 @@ async def registrar_pago(
     if cita.get("estado_factura") == "facturado":
         raise HTTPException(status_code=400, detail="La cita ya fue facturada")
 
-    moneda = cita.get("moneda", "COP")
-
-    # Fuente de verdad: saldo_pendiente
-    saldo_pendiente_actual = round(float(cita.get("saldo_pendiente", 0)), 2)
-
-    if saldo_pendiente_actual <= 0:
-        raise HTTPException(status_code=400, detail="La cita no tiene saldo pendiente")
-
-    monto_solicitado = round(float(data.monto), 2)
-    if monto_solicitado <= 0:
+    monto = data.monto
+    if monto <= 0:
         raise HTTPException(status_code=400, detail="Monto inválido")
 
-    if monto_solicitado > saldo_pendiente_actual:
+    abono_actual = cita.get("abono", 0) or 0
+    valor_total = cita["valor_total"]
+
+    nuevo_abono = round(abono_actual + monto, 2)
+
+    if nuevo_abono > valor_total:
         raise HTTPException(
             status_code=400,
-            detail=f"El monto ({fmt(monto_solicitado, moneda)}) excede el saldo pendiente ({fmt(saldo_pendiente_actual, moneda)})"
+            detail="El monto excede el valor total del servicio"
         )
 
-    # ═══════════════════════════════════════════════════════════════
-    # ⭐ INTEGRACIÓN GIFTCARD — va PRIMERO para saber el monto real
-    # ═══════════════════════════════════════════════════════════════
-    monto_real = monto_solicitado
-    codigo_giftcard_usado = None
+    if nuevo_abono >= valor_total:
+        estado_pago = "pagado"
+    elif nuevo_abono > 0:
+        estado_pago = "abonado"
+    else:
+        estado_pago = "pendiente"
 
-    if data.metodo_pago == "giftcard":
-        if not data.codigo_giftcard:
-            raise HTTPException(
-                status_code=400,
-                detail="Debe enviar codigo_giftcard cuando el método de pago es 'giftcard'"
-            )
-
-        from app.database.mongo import collection_giftcards
-        from app.giftcards.routes_giftcards import _estado_giftcard
-
-        codigo_gc = data.codigo_giftcard.upper().strip()
-        gc_doc = await collection_giftcards.find_one({"codigo": codigo_gc})
-
-        if not gc_doc:
-            raise HTTPException(status_code=404, detail=f"Giftcard '{codigo_gc}' no encontrada")
-
-        estado_gc = _estado_giftcard(gc_doc)
-        if estado_gc in ["cancelada", "vencida", "usada"]:
-            raise HTTPException(status_code=400, detail=f"Giftcard no válida: estado '{estado_gc}'")
-
-        saldo_gc = round(float(gc_doc.get("saldo_disponible", 0)), 2)
-        if saldo_gc <= 0:
-            raise HTTPException(status_code=400, detail="La giftcard no tiene saldo disponible")
-
-        monto_real = round(min(monto_solicitado, saldo_gc), 2)
-
-        nuevo_disponible_gc = round(saldo_gc - monto_real, 2)
-        nuevo_reservado_gc = round(float(gc_doc.get("saldo_reservado", 0)) + monto_real, 2)
-
-        movimiento_gc = {
-            "tipo": "reserva",
-            "cita_id": cita_id,
-            "concepto": "pago_adicional",
-            "monto": num(monto_real),
-            "fecha": datetime.now(),
-            "registrado_por": current_user.get("email"),
-            "saldo_disponible_antes": num(saldo_gc),
-            "saldo_disponible_despues": num(nuevo_disponible_gc),
-        }
-
-        await collection_giftcards.update_one(
-            {"codigo": codigo_gc},
-            {
-                "$set": {
-                    "saldo_disponible": num(nuevo_disponible_gc),
-                    "saldo_reservado": num(nuevo_reservado_gc),
-                },
-                "$push": {"historial": movimiento_gc}
-            }
-        )
-
-        codigo_giftcard_usado = codigo_gc
-        print(f"🎁 Giftcard {codigo_gc}: reservados {fmt(monto_real, moneda)}")
-    # ══ fin giftcard ══
-
-    nuevo_saldo_pendiente = round(saldo_pendiente_actual - monto_real, 2)
-    nuevo_abono = round(float(cita.get("abono", 0) or 0) + monto_real, 2)
-    estado_pago = "pagado" if nuevo_saldo_pendiente <= 0 else "abonado"
-
+    saldo_pendiente = round(valor_total - nuevo_abono, 2)
+    
+    # ⭐ NUEVO: Crear registro en historial
     nuevo_pago = {
         "fecha": datetime.now(),
-        "monto": num(monto_real),
+        "monto": float(monto),
         "metodo": data.metodo_pago,
         "tipo": "pago_adicional",
         "registrado_por": current_user.get("email"),
-        "saldo_despues": num(nuevo_saldo_pendiente),
-        "notas": data.notas,
-        **({"codigo_giftcard": codigo_giftcard_usado} if codigo_giftcard_usado else {})
+        "saldo_despues": float(saldo_pendiente),
+        "notas": data.notas if hasattr(data, 'notas') else None
     }
 
-    update_set = {
-        "abono": num(nuevo_abono),
-        "saldo_pendiente": num(nuevo_saldo_pendiente),
-        "estado_pago": estado_pago,
-        "metodo_pago_actual": data.metodo_pago,
-        "ultima_actualizacion": datetime.now()
-    }
-    if codigo_giftcard_usado and not cita.get("codigo_giftcard"):
-        update_set["codigo_giftcard"] = codigo_giftcard_usado
-
+    # ⭐ ACTUALIZAR: Con historial y métodos de pago
     await collection_citas.update_one(
         {"_id": ObjectId(cita_id)},
-        {"$set": update_set, "$push": {"historial_pagos": nuevo_pago}}
+        {
+            "$set": {
+                "abono": nuevo_abono,
+                "saldo_pendiente": saldo_pendiente,
+                "estado_pago": estado_pago,
+                "metodo_pago_actual": data.metodo_pago,  # ⭐ NUEVO: Último método usado
+                "ultima_actualizacion": datetime.now()
+            },
+            "$push": {
+                "historial_pagos": nuevo_pago  # ⭐ NUEVO: Agregar al historial
+            }
+        }
     )
 
-    respuesta = {
+    return {
         "success": True,
-        "abono": num(nuevo_abono),
-        "saldo_pendiente": num(nuevo_saldo_pendiente),
+        "abono": nuevo_abono,
+        "saldo_pendiente": saldo_pendiente,
         "estado_pago": estado_pago,
         "metodo_pago_usado": data.metodo_pago,
-        "moneda": moneda,
-        "giftcard_reservada": bool(codigo_giftcard_usado),
-        "mensaje": f"Pago de {fmt(monto_real, moneda)} registrado vía {data.metodo_pago}"
+        "mensaje": f"Pago de {monto} registrado exitosamente vía {data.metodo_pago}"
     }
-
-    if codigo_giftcard_usado and monto_real < monto_solicitado:
-        faltante = round(monto_solicitado - monto_real, 2)
-        respuesta["giftcard_info"] = {
-            "monto_cubierto": num(monto_real),
-            "monto_pendiente": num(faltante),
-            "aviso": f"La giftcard cubrió {fmt(monto_real, moneda)}. Quedan {fmt(faltante, moneda)} en saldo pendiente."
-        }
-
-    return respuesta
 
 # =============================================================
 # 🔹 MOSTRAR PAGO ACTUALIZADO
@@ -1866,7 +1301,7 @@ async def obtener_fichas_por_cliente(
     # 🔹 PRIORIDAD 3: Filtrar por hoy
     elif solo_hoy:
         from datetime import datetime
-        hoy = datetime.now().strftime("%Y-%m-%d")
+        hoy = datetime.utcnow().strftime("%Y-%m-%d")
         filtro["fecha_reserva"] = hoy
         print(f"🔍 Buscando fichas de hoy: {hoy}")
     
@@ -2340,7 +1775,7 @@ async def crear_ficha(
         "profesional_nombre": data.profesional_nombre or profesional.get("nombre"),
         "sede_nombre": sede.get("nombre"),
 
-        "fecha_ficha": data.fecha_ficha or datetime.now().isoformat(),
+        "fecha_ficha": data.fecha_ficha or datetime.utcnow().isoformat(),
         "fecha_reserva": data.fecha_reserva,
 
         "correo": data.email or cliente.get("correo"),
@@ -2369,7 +1804,7 @@ async def crear_ficha(
         "autorizacion_publicacion": data.autorizacion_publicacion,
         "comentario_interno": data.comentario_interno,
 
-        "created_at": datetime.now(),
+        "created_at": datetime.utcnow(),
         "created_by": current_user.get("email"),
         "user_id": current_user.get("user_id"),
 
@@ -2524,7 +1959,7 @@ async def agregar_productos_a_cita(
             "comision_valor": comision_producto,
             "agregado_por_email": email_usuario,
             "agregado_por_rol": rol_usuario,
-            "fecha_agregado": datetime.now(),
+            "fecha_agregado": datetime.utcnow(),
         }
         
         # Si es estilista, guardar su profesional_id para comisiones
@@ -2665,7 +2100,7 @@ async def eliminar_producto_de_cita(
                 "valor_total": nuevo_total,
                 "saldo_pendiente": nuevo_saldo,
                 "estado_pago": nuevo_estado_pago,
-                "ultima_actualizacion": datetime.now()
+                "ultima_actualizacion": datetime.utcnow()
             }
         }
     )
@@ -2743,7 +2178,7 @@ async def eliminar_todos_productos_de_cita(
                 "valor_total": nuevo_total,
                 "saldo_pendiente": nuevo_saldo,
                 "estado_pago": nuevo_estado_pago,
-                "ultima_actualizacion": datetime.now()
+                "ultima_actualizacion": datetime.utcnow()
             }
         }
     )
@@ -2805,7 +2240,7 @@ async def finalizar_servicio_con_pdf(
     # Actualizar estado de la cita
     update_data = {
         "estado": "finalizado",
-        "fecha_finalizacion": datetime.now(),
+        "fecha_finalizacion": datetime.utcnow(),
         "finalizado_por": current_user.get("email"),
     }
 
@@ -2834,7 +2269,7 @@ async def finalizar_servicio_con_pdf(
         cita_data_for_pdf = {
             "cita_id": cita_id,
             "estado": cita_actualizada.get("estado", "finalizado"),
-            "fecha_finalizacion": cita_actualizada.get("fecha_finalizacion", datetime.now()),
+            "fecha_finalizacion": cita_actualizada.get("fecha_finalizacion", datetime.utcnow()),
             "finalizado_por": cita_actualizada.get("finalizado_por", current_user.get("email")),
             # Datos financieros COMPLETOS
             "valor_total": cita_actualizada.get("valor_total", 0),
@@ -2866,7 +2301,7 @@ async def finalizar_servicio_con_pdf(
             html_correo = crear_html_correo_ficha(
                 cliente_nombre=ficha.get("nombre", "Cliente"),
                 servicio_nombre=ficha.get("servicio_nombre", "Servicio"),
-                fecha=datetime.now().strftime("%d/%m/%Y %H:%M")
+                fecha=datetime.utcnow().strftime("%d/%m/%Y %H:%M")
             )
             
             # Crear nombre del archivo PDF
@@ -2896,7 +2331,7 @@ async def finalizar_servicio_con_pdf(
             {"_id": ObjectId(cita_id)},
             {"$set": {
                 "pdf_generado": True,
-                "pdf_fecha_generacion": datetime.now(),
+                "pdf_fecha_generacion": datetime.utcnow(),
                 "pdf_enviado": bool(cliente_email)
             }}
         )

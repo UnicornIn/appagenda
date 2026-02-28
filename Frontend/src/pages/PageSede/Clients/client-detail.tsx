@@ -299,17 +299,6 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
     }
   }
 
-  const fichasRaw = (client as any)?.fichas
-  const fichasCliente: FichaExtendida[] = Array.isArray(fichasRaw)
-    ? (fichasRaw as FichaExtendida[])
-    : Array.isArray(fichasRaw?.data)
-      ? (fichasRaw.data as FichaExtendida[])
-      : Array.isArray(fichasRaw?.fichas)
-        ? (fichasRaw.fichas as FichaExtendida[])
-        : []
-  const fichasCargando = fichasRaw === undefined
-  const totalFichas = fichasCliente.length
-
   return (
     <div className="flex h-full flex-col bg-white">
       {/* MODAL DE EDICIÓN DE CLIENTE */}
@@ -546,18 +535,13 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-medium text-gray-900">Fichas</h2>
               <div className="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded">
-                {fichasCargando ? 'Cargando...' : `${totalFichas} servicios`}
+                {client.fichas ? `${client.fichas.length} servicios` : '...'}
               </div>
             </div>
 
-            {fichasCargando ? (
-              <div className="rounded-lg border border-dashed border-gray-200 p-8 text-center">
-                <FileText className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-                <p className="text-sm text-gray-500">Cargando servicios...</p>
-              </div>
-            ) : totalFichas > 0 ? (
+            {client.fichas && client.fichas.length > 0 ? (
               <div className="space-y-3">
-                {fichasCliente.map((ficha) => {
+                {(client.fichas as FichaExtendida[]).map((ficha) => {
                   const servicioNombre = ficha.servicio_nombre || ficha.servicio || 'Servicio'
                   const profesionalNombre = ficha.profesional_nombre || 'Sin profesional'
                   const sedeNombre = formatSedeNombre(ficha.sede_nombre || ficha.sede || ficha.local, 'Sin sede')

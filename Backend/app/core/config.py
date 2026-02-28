@@ -11,7 +11,6 @@ from app.scheduling.routes import app_router as scheduling_router
 from app.admin.routes_locales import router as admin_locales_router
 from app.admin.routes_servicios import router as admin_servicios_router
 from app.admin.routes_profesionales import router as admin_profesionales_router
-from app.admin.routes_system_users import router as admin_system_users_router
 from app.analytics.routes_churn import router as churn_router
 from app.analytics.routes_analytics import router as analytics_router
 from app.analytics.routes_dashboard import router as dashboard_router
@@ -22,7 +21,6 @@ from app.analytics.sales_dashboard import router as sales_dashboard_router
 from app.clients_service.generate_pdf import router as generate_pdf_router
 from app.sales.routes import router as sales_router
 from app.cash.routes_cash import router as cash_router
-from app.giftcards.routes_giftcards import router as giftcards_router
 # from app.database.indexes import create_indexes
 from app.database.mongo import db  
 # from app.database.indexes import create_indexes  
@@ -35,9 +33,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
         "https://agenda.rizosfelices.co",
         "https://staging-agenda.rizosfelices.co",
         "https://preview.agenda.rizosfelices.co",
@@ -77,7 +72,6 @@ app.include_router(scheduling_router, prefix="/scheduling")
 app.include_router(admin_locales_router)
 app.include_router(admin_servicios_router)
 app.include_router(admin_profesionales_router)
-app.include_router(admin_system_users_router)
 app.include_router(inventary_router, prefix="/inventary")
 app.include_router(routes_clientes.router, prefix="/clientes", tags=["Clientes"])
 app.include_router(churn_router)
@@ -89,5 +83,3 @@ app.include_router(sales_dashboard_router, prefix="/api/sales-dashboard")
 app.include_router(generate_pdf_router, prefix="/api/pdf", tags=["Generación de PDF"])
 app.include_router(sales_router)
 app.include_router(cash_router)
-app.include_router(giftcards_router, prefix="/api/giftcards",tags=["Giftcards"]
-)

@@ -65,13 +65,13 @@ export default function VistaEstilistaPage() {
            '';
   };
 
-  // useEffect(() => {
-  //   // 🔥 AUTO-SELECCIONAR FECHA DE LA PRIMERA CITA (solo para desarrollo)
-  //   if (citas.length > 0 && !fechaFiltro) {
-  //     const primeraFecha = citas[0].fecha.split('T')[0];
-  //     setFechaFiltro(primeraFecha);
-  //   }
-  // }, [citas]);
+  useEffect(() => {
+    // 🔥 AUTO-SELECCIONAR FECHA DE LA PRIMERA CITA (solo para desarrollo)
+    if (citas.length > 0 && !fechaFiltro) {
+      const primeraFecha = citas[0].fecha.split('T')[0];
+      setFechaFiltro(primeraFecha);
+    }
+  }, [citas]);
 
   // Obtener ID del profesional desde las citas
   useEffect(() => {

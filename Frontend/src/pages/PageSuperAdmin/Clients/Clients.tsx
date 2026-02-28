@@ -96,7 +96,7 @@ export default function ClientsPage() {
     setIsModalOpen(true)
   }
 
-  const handleSaveClient = async () => {
+  const handleSaveClient = async (clienteData: any) => {
     if (!user?.access_token) {
       setError('No hay token de autenticación disponible')
       return
@@ -105,6 +105,19 @@ export default function ClientsPage() {
     try {
       setIsSaving(true)
       setError(null)
+
+      // Si hay una sede seleccionada (no "all"), usarla
+      const sedeId = selectedSede !== "all" ? selectedSede : undefined
+
+      console.log('📤 Creando cliente con sede:', sedeId)
+
+      await clientesService.createCliente(user.access_token, {
+        nombre: clienteData.nombre,
+        correo: clienteData.email || '',
+        telefono: clienteData.telefono || '',
+        notas: clienteData.nota || '',
+        sede_id: sedeId
+      })
 
       // Recargar la lista manteniendo el filtro actual
       await loadClientes(selectedSede !== "all" ? selectedSede : undefined)
