@@ -41,7 +41,39 @@ class Cliente(BaseModel):
     notas: Optional[str] = None
     fecha_creacion: Optional[datetime] = None
 
+    @field_validator("nombre", mode="before")
+    @classmethod
+    def validar_nombre(cls, v):
+        if v is None:
+            raise ValueError("El nombre es obligatorio")
+        if isinstance(v, str):
+            nombre_limpio = v.strip()
+            if not nombre_limpio:
+                raise ValueError("El nombre es obligatorio")
+            return nombre_limpio
+        return v
+
+    @field_validator(
+        "correo",
+        "telefono",
+        "cedula",
+        "ciudad",
+        "fecha_de_nacimiento",
+        "sede_id",
+        "notas",
+        mode="before",
+    )
+    @classmethod
+    def normalizar_opcionales(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
+
     @field_validator("fecha_de_nacimiento")
+    @classmethod
     def validar_fecha(cls, v):
         if v is None:
             return v

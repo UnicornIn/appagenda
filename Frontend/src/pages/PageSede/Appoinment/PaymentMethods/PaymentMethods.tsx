@@ -73,14 +73,22 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     const [userCurrency, setUserCurrency] = useState<string>("USD");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const isCopCurrency = userCurrency.toUpperCase() === "COP";
 
     // 🔥 MÉTODOS DE PAGO COMPLETOS
     const paymentMethods = [
         { id: "link_pago", name: "Pago con link", icon: <LinkIcon className="w-4 h-4" /> },
-        { id: "tarjeta", name: "Tarjeta", icon: <CreditCard className="w-4 h-4" /> },
+        { id: "tarjeta_credito", name: "Tarjeta Crédito", icon: <CreditCard className="w-4 h-4" /> },
+        { id: "tarjeta_debito", name: "Tarjeta Débito", icon: <CreditCard className="w-4 h-4" /> },
+        ...(isCopCurrency ? [{ id: "addi", name: "Addi", icon: <Wallet className="w-4 h-4" /> }] : []),
         { id: "efectivo", name: "Efectivo", icon: <DollarSign className="w-4 h-4" /> },
         { id: "transferencia", name: "Transferencia", icon: <Wallet className="w-4 h-4" /> },
     ];
+
+    const sanitizePaymentMethod = (method: string): string => {
+        if (!isCopCurrency && method === "addi") return "efectivo";
+        return method;
+    };
 
     // 🔥 EFECTO PARA OBTENER MONEDA
     useEffect(() => {
@@ -108,6 +116,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             setSelectedPaymentMethod("efectivo");
         }
     }, [selectedProcessType]);
+
+    useEffect(() => {
+        if (!isCopCurrency && selectedPaymentMethod === "addi") {
+            setSelectedPaymentMethod(selectedProcessType === "reserva" ? "sin_pago" : "efectivo");
+        }
+    }, [isCopCurrency, selectedPaymentMethod, selectedProcessType]);
 
     // 🔥 CALCULOS
     const FIXED_DEPOSIT = getFixedDepositByCurrency(userCurrency);
@@ -201,13 +215,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 hora_fin: citaData.hora_fin,
                 estado: "confirmada",
                 abono: abonoMonto,
-                metodo_pago: selectedPaymentMethod,
                 valor_total: citaData.monto_total,
                 saldo_pendiente: saldoPendiente,
                 estado_pago: estadoPago,
                 moneda: userCurrency,
                 notas: citaData.notas || "",
                 cliente_nombre: citaData.cliente,
+                metodo_pago: sanitizePaymentMethod(selectedPaymentMethod),
             };
 
             console.log('📤 Creando cita:', citaParaCrear);
@@ -568,6 +582,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                         <span>Método:</span>
                                         <span className="font-medium text-gray-900">
                                             {selectedPaymentMethod === "link_pago" ? "Pago con link" :
+                                             selectedPaymentMethod === "tarjeta_credito" ? "Tarjeta de Crédito" :
+                                             selectedPaymentMethod === "tarjeta_debito" ? "Tarjeta de Débito" :
+                                             selectedPaymentMethod === "addi" ? "Addi" :
                                              selectedPaymentMethod === "tarjeta" ? "Tarjeta" :
                                              selectedPaymentMethod === "efectivo" ? "Efectivo" :
                                              selectedPaymentMethod === "transferencia" ? "Transferencia" :

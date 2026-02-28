@@ -64,12 +64,57 @@ const request = async <T>(
   return (text ? JSON.parse(text) : {}) as T;
 };
 
+const extractFilename = (contentDisposition: string | null): string | null => {
+  if (!contentDisposition) return null;
+
+  const encodedMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1].replace(/["']/g, ""));
+    } catch {
+      return encodedMatch[1].replace(/["']/g, "");
+    }
+  }
+
+  const plainMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+  return plainMatch?.[1] ?? null;
+};
+
+const requestBlob = async (
+  path: string,
+  params?: Record<string, any>
+): Promise<{ blob: Blob; filename: string | null }> => {
+  const url = buildUrl(path, params);
+  const response = await fetch(url, {
+    method: "GET",
+    headers: getHeaders(),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      errorText || `Error ${response.status}: ${response.statusText}`
+    );
+  }
+
+  const blob = await response.blob();
+  const filename = extractFilename(response.headers.get("content-disposition"));
+
+  return { blob, filename };
+};
+
 export const cashService = {
   getEfectivoDia: (params?: Record<string, any>) =>
     request<any>("GET", "/efectivo-dia", params),
 
+  getIngresos: (params?: Record<string, any>) =>
+    request<any>("GET", "/ingresos", params),
+
   getEgresos: (params?: Record<string, any>) =>
     request<any>("GET", "/egresos", params),
+
+  createIngreso: (body: Record<string, any>) =>
+    request<any>("POST", "/ingreso", undefined, body),
 
   createEgreso: (body: Record<string, any>) =>
     request<any>("POST", "/egreso", undefined, body),
@@ -91,4 +136,7 @@ export const cashService = {
 
   getReportePeriodo: (params?: Record<string, any>) =>
     request<any>("GET", "/reporte-periodo", params),
+
+  getReporteExcel: (params?: Record<string, any>) =>
+    requestBlob("/reporte-excel", params),
 };

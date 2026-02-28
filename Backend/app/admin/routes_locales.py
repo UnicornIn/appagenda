@@ -55,7 +55,7 @@ async def crear_local(
     sede_id = f"SD-{random_number}"
 
     # ⏳ Fecha actual
-    fecha_actual = datetime.utcnow()
+    fecha_actual = datetime.now()
 
     # 📦 Construir documento a insertar
     data = {

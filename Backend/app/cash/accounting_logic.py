@@ -12,7 +12,7 @@
 # ============================================================
 
 from datetime import datetime
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 from app.database.mongo import (
     collection_citas as appointments,
     collection_sales as sales,
@@ -22,6 +22,7 @@ from app.database.mongo import (
 
 cash_expenses = db["cash_expenses"]
 cash_closures = db["cash_closures"]
+cash_incomes = db["cash_ingresos"]
 
 # ============================================================
 # MAPEO DE MÉTODOS DE PAGO
@@ -60,6 +61,46 @@ def _normalizar_metodo(metodo_raw: str) -> str:
         return "otros"
     key = metodo_raw.lower().strip()
     return MAPEO_METODOS_PAGO.get(key, "otros")
+
+
+def _metodos_pago_base() -> Dict[str, float]:
+    return {
+        "efectivo": 0,
+        "tarjeta_credito": 0,
+        "tarjeta_debito": 0,
+        "pos": 0,
+        "transferencia": 0,
+        "link_de_pago": 0,
+        "giftcard": 0,
+        "addi": 0,
+        "abonos": 0,
+        "otros": 0,
+    }
+
+
+def _parse_fecha_any(valor: Any, fecha_fallback: Optional[str] = None) -> Optional[datetime]:
+    if isinstance(valor, datetime):
+        return valor
+    if not valor and fecha_fallback:
+        valor = fecha_fallback
+    if not valor:
+        return None
+
+    valor_str = str(valor).strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(valor_str, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _fecha_para_manual(doc: dict, fecha_fallback: Optional[str] = None) -> Optional[datetime]:
+    return (
+        _parse_fecha_any(doc.get("creado_en"))
+        or _parse_fecha_any(doc.get("fecha"), fecha_fallback)
+        or _parse_fecha_any(fecha_fallback)
+    )
 
 
 
@@ -163,6 +204,56 @@ async def _tiene_data_migrada(sede_id: str, fecha: str) -> bool:
     return doc is not None
 
 
+async def _ingresos_manuales_docs(sede_id: str, fecha: str) -> List[Dict]:
+    return await cash_incomes.find({
+        "sede_id": sede_id,
+        "fecha": _fecha_query(fecha)
+    }).sort("creado_en", 1).to_list(None)
+
+
+async def _ingresos_manuales_por_metodo(sede_id: str, fecha: str) -> Dict[str, float]:
+    metodos = _metodos_pago_base()
+    docs = await _ingresos_manuales_docs(sede_id, fecha)
+
+    for ingreso in docs:
+        metodo_norm = _normalizar_metodo(ingreso.get("metodo_pago", ""))
+        monto = float(ingreso.get("monto", 0) or 0)
+        if metodo_norm not in metodos:
+            metodos[metodo_norm] = 0
+        metodos[metodo_norm] += monto
+
+    metodos["total_general"] = sum(
+        monto for key, monto in metodos.items() if key != "total_general"
+    )
+    return metodos
+
+
+def _formatear_ingresos_manuales_para_flujo(
+    docs: List[Dict],
+    fecha_fallback: Optional[str] = None
+) -> List[Dict]:
+    ingresos_formateados: List[Dict] = []
+
+    for ingreso in docs:
+        fecha_dt = _fecha_para_manual(ingreso, fecha_fallback)
+        ingresos_formateados.append({
+            "fecha": fecha_dt,
+            "nombre_cliente": "N/A",
+            "cedula_cliente": "",
+            "email_cliente": "",
+            "telefono_cliente": "",
+            "medio_pago": _normalizar_metodo(ingreso.get("metodo_pago", "")).replace("_", " ").title(),
+            "tipo_movimiento": "Ingreso Manual",
+            "id_movimiento": ingreso.get("ingreso_id", ""),
+            "nro_comprobante": ingreso.get("comprobante_numero", ""),
+            "flujo_periodo": float(ingreso.get("monto", 0) or 0),
+            "usuario_modificacion": ingreso.get("registrado_por_nombre") or ingreso.get("registrado_por"),
+            "notas": ingreso.get("motivo", ""),
+        })
+
+    return ingresos_formateados
+
+
 # ============================================================
 # ── RAMA MIGRADA: leer desde cash_expenses / cash_closures ──
 # ============================================================
@@ -199,18 +290,7 @@ async def _ingresos_por_metodo_migrado(sede_id: str, fecha: str) -> Dict:
     Calcula ingresos discriminados por método desde cash_expenses (migrado).
     Solo considera categoria=INGRESO.
     """
-    metodos = {
-        "efectivo"       : 0,
-        "tarjeta_credito": 0,
-        "tarjeta_debito" : 0,
-        "pos"            : 0,
-        "transferencia"  : 0,
-        "link_de_pago"   : 0,
-        "giftcard"       : 0,
-        "addi"           : 0,
-        "abonos"         : 0,
-        "otros"          : 0,
-    }
+    metodos = _metodos_pago_base()
 
     docs = await cash_expenses.find({
         "sede_id"   : sede_id,
@@ -225,7 +305,9 @@ async def _ingresos_por_metodo_migrado(sede_id: str, fecha: str) -> Dict:
             metodos[metodo_norm] = 0
         metodos[metodo_norm] += d.get("monto", 0) or 0
 
-    metodos["total_general"] = sum(metodos.values())
+    metodos["total_general"] = sum(
+        monto for key, monto in metodos.items() if key != "total_general"
+    )
     return metodos
 
 
@@ -372,7 +454,27 @@ async def _movimientos_efectivo_migrado(sede_id: str, fecha: str) -> Dict:
             "saldo"      : 0,
         })
 
+    ingresos_manuales = await _ingresos_manuales_docs(sede_id, fecha)
+    for ingreso in ingresos_manuales:
+        if _normalizar_metodo(ingreso.get("metodo_pago", "")) != "efectivo":
+            continue
+
+        monto = float(ingreso.get("monto", 0) or 0)
+        if monto <= 0:
+            continue
+
+        movimientos.append({
+            "fecha": _fecha_para_manual(ingreso, fecha),
+            "tipo": "INGRESO",
+            "descripcion": f"Ingreso manual - {ingreso.get('motivo', '')}".strip(" -"),
+            "comprobante": ingreso.get("comprobante_numero", ""),
+            "ingreso": monto,
+            "egreso": 0,
+            "saldo": 0,
+        })
+
     # Calcular saldo corrido
+    movimientos.sort(key=lambda x: x["fecha"] if x["fecha"] else datetime.min)
     saldo = saldo_inicial
     for mov in movimientos:
         saldo      += mov["ingreso"]
@@ -497,18 +599,7 @@ async def calcular_ingresos_por_metodo_pago(
     fecha_inicio = fecha_dt.replace(hour=0,  minute=0,  second=0,  microsecond=0)
     fecha_fin    = fecha_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-    metodos = {
-        "efectivo"       : 0,
-        "tarjeta_credito": 0,
-        "tarjeta_debito" : 0,
-        "pos"            : 0,
-        "transferencia"  : 0,
-        "link_de_pago"   : 0,
-        "giftcard"       : 0,
-        "addi"           : 0,
-        "abonos"         : 0,
-        "otros"          : 0,
-    }
+    metodos = _metodos_pago_base()
 
     # 1. Appointments NO facturadas
     pipeline_appointments = [
@@ -577,7 +668,9 @@ async def calcular_ingresos_por_metodo_pago(
                 metodos[metodo_norm] = 0
             metodos[metodo_norm] += monto
 
-    metodos["total_general"] = sum(metodos.values())
+    metodos["total_general"] = sum(
+        monto for key, monto in metodos.items() if key != "total_general"
+    )
     return metodos
 
 
@@ -749,6 +842,25 @@ async def _obtener_movimientos_efectivo_dia_sistema(
                     "saldo"      : 0
                 })
 
+    ingresos_manuales = await _ingresos_manuales_docs(sede_id, fecha)
+    for ingreso in ingresos_manuales:
+        if _normalizar_metodo(ingreso.get("metodo_pago", "")) != "efectivo":
+            continue
+
+        monto = float(ingreso.get("monto", 0) or 0)
+        if monto <= 0:
+            continue
+
+        movimientos.append({
+            "fecha": _fecha_para_manual(ingreso, fecha),
+            "tipo": "INGRESO",
+            "descripcion": f"Ingreso manual - {ingreso.get('motivo', '')}".strip(" -"),
+            "comprobante": ingreso.get("comprobante_numero", ""),
+            "ingreso": monto,
+            "egreso": 0,
+            "saldo": 0,
+        })
+
     for e in await cash_expenses.find({
         "sede_id": sede_id,
         "fecha"  : fecha,
@@ -836,6 +948,24 @@ async def calcular_resumen_dia(
             "fuente"                    : "sistema"
         }
 
+    ingresos_manuales = await _ingresos_manuales_por_metodo(sede_id, fecha)
+    total_manual = float(ingresos_manuales.get("total_general", 0) or 0)
+    total_manual_efectivo = float(ingresos_manuales.get("efectivo", 0) or 0)
+
+    for metodo, monto in ingresos_manuales.items():
+        if metodo == "total_general":
+            continue
+        ingresos_discriminados[metodo] = float(ingresos_discriminados.get(metodo, 0) or 0) + float(monto or 0)
+
+    ingresos_discriminados["total_general"] = float(
+        ingresos_discriminados.get("total_general", 0) or 0
+    ) + total_manual
+
+    total_ingresos_efectivo += total_manual_efectivo
+    ingresos_info["manuales"] = total_manual
+    ingresos_info["manuales_efectivo"] = total_manual_efectivo
+    ingresos_info["total"] = total_ingresos_efectivo
+
     efectivo_esperado = efectivo_inicial + total_ingresos_efectivo - egresos["total"]
 
     return {
@@ -879,8 +1009,14 @@ async def obtener_ventas_dia(
     Si no → usa sales.
     """
     if await _tiene_data_migrada(sede_id, fecha):
-        return await _ventas_dia_migrado(sede_id, fecha)
-    return await _obtener_ventas_dia_sistema(sede_id, fecha)
+        ventas = await _ventas_dia_migrado(sede_id, fecha)
+    else:
+        ventas = await _obtener_ventas_dia_sistema(sede_id, fecha)
+
+    ingresos_manuales = await _ingresos_manuales_docs(sede_id, fecha)
+    ventas.extend(_formatear_ingresos_manuales_para_flujo(ingresos_manuales, fecha))
+    ventas.sort(key=lambda item: item.get("fecha") or datetime.min)
+    return ventas
 
 
 async def obtener_egresos_dia(

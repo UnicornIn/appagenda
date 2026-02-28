@@ -35,6 +35,9 @@ const BeauxLogin: React.FC = () => {
           case "super_admin":
             navigate("/superadmin/dashboard");
             break;
+          case "superadmin":
+            navigate("/superadmin/system-users");
+            break;
           case "admin_sede":
             navigate("/sede/dashboard");
             break;

@@ -77,7 +77,8 @@ async def ejecutar_cierre_automatico_sede(sede_id: str, sede_nombre: str):
             
             # Efectivo
             "efectivo_inicial": resumen["efectivo_inicial"],
-            "total_ingresos": resumen["ingresos_efectivo"]["total"],
+            "total_ingresos": resumen["total_vendido"],
+            "total_ingresos_efectivo": resumen["ingresos_efectivo"]["total"],
             "total_egresos": resumen["egresos"]["total"],
             "efectivo_esperado": resumen["efectivo_esperado"],
             "efectivo_contado": resumen["efectivo_esperado"],  # Estimado automático

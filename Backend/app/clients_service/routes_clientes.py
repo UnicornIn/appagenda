@@ -62,19 +62,26 @@ async def crear_cliente(
         if rol not in ["admin_sede", "admin_franquicia", "super_admin"]:
             raise HTTPException(403, "No autorizado")
 
-        sede_autenticada = current_user.get("sede_id", "000")
+        sede_autenticada = current_user.get("sede_id")
+        sede_objetivo = sede_autenticada or cliente.sede_id
+
+        if not sede_objetivo:
+            raise HTTPException(
+                status_code=400,
+                detail="Debes seleccionar una sede para crear el cliente"
+            )
         
         # ✅ Consultar información de la sede
-        sede_info = await collection_locales.find_one({"sede_id": sede_autenticada})
+        sede_info = await collection_locales.find_one({"sede_id": sede_objetivo})
         
         if not sede_info:
-            raise HTTPException(400, "Sede no encontrada")
+            raise HTTPException(400, f"Sede no encontrada: {sede_objetivo}")
         
         # ✅ Verificar si la sede maneja clientes globales
         es_global = sede_info.get("es_global", False)
         
         # ✅ Generar ID del cliente
-        cliente_id = await generar_id("cliente", sede_autenticada)
+        cliente_id = await generar_id("cliente", sede_objetivo)
 
         data = cliente.dict(exclude_none=True)
         data["cliente_id"] = cliente_id
@@ -82,7 +89,7 @@ async def crear_cliente(
         data["creado_por"] = current_user.get("email", "unknown")
         
         # ⭐ Si es sede global, no asignar sede_id específica
-        data["sede_id"] = None if es_global else sede_autenticada
+        data["sede_id"] = None if es_global else sede_objetivo
         
         data["pais"] = sede_info.get("pais", "")
         data["notas_historial"] = []
@@ -92,6 +99,8 @@ async def crear_cliente(
 
         return {"success": True, "cliente": data}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error al crear cliente: {e}", exc_info=True)
         raise HTTPException(500, "Error al crear cliente")

@@ -14,6 +14,16 @@ export type CashEgreso = {
   creado_en?: string;
 };
 
+export type CashIngreso = {
+  id: string;
+  sede_id?: string;
+  monto: number;
+  motivo: string;
+  metodo_pago?: string;
+  fecha: string;
+  creado_en?: string;
+};
+
 export type CashCierre = {
   id: string;
   sede_id?: string;

@@ -566,7 +566,7 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
             >
               <option value="">Seleccionar</option>
               <option value="ALTA">Alta</option>
-              <option value="MEDIA">Media</option>
+              <option value="MEDIA">Medio</option>
               <option value="BAJA">Baja</option>
               <option value="MUY BAJA">Muy Baja</option>
             </select>

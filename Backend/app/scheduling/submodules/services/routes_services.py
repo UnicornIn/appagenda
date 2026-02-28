@@ -55,7 +55,7 @@ async def crear_servicio(
     data["requiere_producto"] = data.get("requiere_producto", False)
     data["activo"] = True
 
-    ahora = datetime.utcnow()
+    ahora = datetime.now()
 
     data["creado_por"] = current_user["email"]
     data["created_at"] = ahora

@@ -1,6 +1,13 @@
 import { API_BASE_URL } from "../../../types/config";
 
-export type PaymentMethod = "efectivo" | "tarjeta" | "transferencia" | string;
+export type PaymentMethod =
+  | "efectivo"
+  | "transferencia"
+  | "tarjeta"
+  | "tarjeta_credito"
+  | "tarjeta_debito"
+  | "addi"
+  | string;
 
 interface ApiErrorBody {
   detail?: string | Array<{ msg?: string }>;
@@ -47,7 +54,6 @@ export interface DirectSaleLineItem {
 export interface CreateDirectSaleInput {
   token: string;
   sedeId: string;
-  clienteId?: string;
   total: number;
   paymentMethod: PaymentMethod;
   items: DirectSaleLineItem[];
@@ -223,8 +229,6 @@ function buildCreateSalePayload(
   input: CreateDirectSaleInput,
   includeModernFields: boolean
 ): Record<string, unknown> {
-  const clientId = input.clienteId?.trim();
-
   const payload: Record<string, unknown> = {
     sede_id: input.sedeId,
     productos: input.items.map((item) => ({
@@ -237,12 +241,6 @@ function buildCreateSalePayload(
 
   if (input.notes && input.notes.trim().length > 0) {
     payload.notas = input.notes.trim();
-  }
-
-  if (clientId) {
-    payload.cliente_id = clientId;
-  } else if (!includeModernFields) {
-    payload.cliente_id = "";
   }
 
   if (includeModernFields) {

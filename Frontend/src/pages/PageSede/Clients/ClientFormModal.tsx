@@ -9,15 +9,7 @@ import { useAuth } from "../../../components/Auth/AuthContext"
 interface ClientFormModalProps {
   isOpen: boolean
   onClose: () => void
-  onSuccess: (clienteData: {
-    nombre: string
-    email?: string
-    telefono?: string
-    nota?: string
-    cedula?: string
-    ciudad?: string
-    fecha_de_nacimiento?: string
-  }) => Promise<void>  // ← Acepta parámetro y devuelve Promise
+  onSuccess: () => Promise<void>
   isSaving?: boolean
   sedeId: string
 }
@@ -79,16 +71,15 @@ export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, 
         throw new Error('No hay sesión activa')
       }
 
-      // Preparar datos para enviar - EXACTAMENTE como en ClientSearch
       const clienteData = {
         nombre: formData.nombre.trim(),
-        correo: formData.correo?.trim() || '',
-        telefono: formData.telefono?.trim() || '',
-        cedula: formData.cedula?.trim() || '',
-        ciudad: formData.ciudad?.trim() || '',
-        fecha_de_nacimiento: formData.fecha_de_nacimiento?.trim() || '',
-        sede_id: sedeId,
-        notas: formData.notas?.trim() || ''
+        ...(formData.correo?.trim() ? { correo: formData.correo.trim() } : {}),
+        ...(formData.telefono?.trim() ? { telefono: formData.telefono.trim() } : {}),
+        ...(formData.cedula?.trim() ? { cedula: formData.cedula.trim() } : {}),
+        ...(formData.ciudad?.trim() ? { ciudad: formData.ciudad.trim() } : {}),
+        ...(formData.fecha_de_nacimiento?.trim() ? { fecha_de_nacimiento: formData.fecha_de_nacimiento.trim() } : {}),
+        ...(sedeId?.trim() ? { sede_id: sedeId.trim() } : {}),
+        ...(formData.notas?.trim() ? { notas: formData.notas.trim() } : {})
       }
 
       console.log('📤 Creando cliente:', clienteData)
@@ -98,13 +89,10 @@ export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, 
 
       if (result.success) {
         setSuccess(true)
-        // Esperar un momento y luego cerrar y refrescar
-        setTimeout(() => {
-          onSuccess(clienteData)
-          onClose()
-        }, 1500)
+        await onSuccess()
+        onClose()
       } else {
-        throw new Error('Error al crear el cliente')
+        throw new Error('No se pudo crear el cliente')
       }
 
     } catch (err: any) {

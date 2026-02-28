@@ -8,6 +8,9 @@ export interface CreateClienteData {
   telefono?: string;
   notas?: string;
   sede_id?: string;
+  cedula?: string;
+  ciudad?: string;
+  fecha_de_nacimiento?: string;
 }
 
 export interface UpdateClienteData {
@@ -429,13 +432,24 @@ ${datos.observaciones_generales || 'Ninguna'}`;
   },
 
   async createCliente(token: string, cliente: CreateClienteData): Promise<ClienteResponse> {
-    const requestData = {
-      nombre: cliente.nombre.trim(),
-      correo: cliente.correo?.trim() || '',
-      telefono: cliente.telefono?.trim() || '',
-      notas: cliente.notas?.trim() || '',
-      sede_id: cliente.sede_id || ''
+    const nombre = cliente.nombre?.trim();
+    if (!nombre) {
+      throw new Error('El nombre del cliente es requerido');
+    }
+
+    const requestData: Record<string, string> = { nombre };
+    const addIfPresent = (key: string, value?: string) => {
+      const normalized = value?.trim();
+      if (normalized) requestData[key] = normalized;
     };
+
+    addIfPresent('correo', cliente.correo);
+    addIfPresent('telefono', cliente.telefono);
+    addIfPresent('notas', cliente.notas);
+    addIfPresent('sede_id', cliente.sede_id);
+    addIfPresent('cedula', cliente.cedula);
+    addIfPresent('ciudad', cliente.ciudad);
+    addIfPresent('fecha_de_nacimiento', cliente.fecha_de_nacimiento);
 
     console.log('📤 Creando cliente con datos:', requestData);
 

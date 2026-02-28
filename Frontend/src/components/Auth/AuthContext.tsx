@@ -66,10 +66,10 @@ export const useAuth = () => {
   return context;
 };
 
-// Función para obtener información del local por email del usuario
-const fetchLocalByEmail = async (email: string, token: string): Promise<LocalData | null> => {
+// Función para obtener información del local por sede_id
+const fetchLocalBySedeId = async (sedeId: string, token: string): Promise<LocalData | null> => {
   try {
-    const response = await fetch(`${API_BASE_URL}admin/locales/?activa=true`, {
+    const response = await fetch(`${API_BASE_URL}admin/locales/${sedeId}`, {
       method: "GET",
       headers: {
         "accept": "application/json",
@@ -81,22 +81,7 @@ const fetchLocalByEmail = async (email: string, token: string): Promise<LocalDat
       throw new Error(`Error obteniendo locales: ${response.status}`);
     }
 
-    const locales: LocalData[] = await response.json();
-    
-    // Buscar el local que coincida con el email del usuario
-    // Primero buscar coincidencia exacta
-    let local = locales.find(l => 
-      l.email.toLowerCase() === email.toLowerCase()
-    );
-    
-    // Si no encuentra exacto, buscar por coincidencia parcial (dominio o nombre)
-    if (!local) {
-      local = locales.find(l => 
-        l.email.toLowerCase().includes(email.split('@')[0].toLowerCase()) ||
-        email.toLowerCase().includes(l.email.split('@')[0].toLowerCase())
-      );
-    }
-    
+    const local: LocalData = await response.json();
     return local || null;
   } catch (error) {
     console.error("Error obteniendo información del local:", error);
@@ -249,15 +234,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const userData: User = {
           id: loginData.email || email,
           name: loginData.nombre || loginData.name || email.split('@')[0],
-          email: email,
+          email: loginData.email || email,
           role: loginData.rol || "user",
           token: loginData.access_token,
           access_token: loginData.access_token,
+          sede_id: loginData.sede_id || undefined,
         };
 
-        // 3. Buscar información del local usando el endpoint que lista todos
-        if (loginData.access_token) {
-          const localInfo = await fetchLocalByEmail(email, loginData.access_token);
+        // 3. Buscar información del local por sede_id real del usuario
+        if (loginData.access_token && loginData.sede_id) {
+          const localInfo = await fetchLocalBySedeId(loginData.sede_id, loginData.access_token);
           
           if (localInfo) {
             // Enriquecer userData con TODOS los datos del local
@@ -272,7 +258,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             userData.reglas_comision = localInfo.reglas_comision;
             // Puedes agregar más campos si los necesitas
           } else {
-            console.warn("No se encontró información de sede para el email:", email);
+            console.warn("No se encontró información de sede para sede_id:", loginData.sede_id);
           }
         }
 

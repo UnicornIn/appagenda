@@ -29,6 +29,15 @@ def generar_egreso_id() -> str:
     random = secrets.token_hex(3).upper()
     return f"EG-{timestamp}-{random}"
 
+def generar_ingreso_id() -> str:
+    """
+    Genera ID único para ingreso manual
+    Formato: IN-TIMESTAMP-RANDOM
+    """
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    random = secrets.token_hex(3).upper()
+    return f"IN-{timestamp}-{random}"
+
 def generar_apertura_id(sede_id: str, fecha: str) -> str:
     """
     Genera ID único para apertura de caja

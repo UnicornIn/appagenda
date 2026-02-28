@@ -47,5 +47,8 @@ export interface Factura {
     total: number;
     tarjeta?: number;
     transferencia?: number;
+    tarjeta_credito?: number;
+    tarjeta_debito?: number;
+    addi?: number;
   };
 }

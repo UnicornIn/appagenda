@@ -17,6 +17,18 @@ class TipoEgreso(str, Enum):
     RETIRO_CAJA = "retiro_caja"
     OTRO = "otro"
 
+class MetodoPagoIngreso(str, Enum):
+    EFECTIVO = "efectivo"
+    TARJETA_CREDITO = "tarjeta_credito"
+    TARJETA_DEBITO = "tarjeta_debito"
+    POS = "pos"
+    TRANSFERENCIA = "transferencia"
+    LINK_DE_PAGO = "link_de_pago"
+    GIFTCARD = "giftcard"
+    ADDI = "addi"
+    ABONOS = "abonos"
+    OTROS = "otros"
+
 class EstadoCierre(str, Enum):
     ABIERTO = "abierto"
     CERRADO = "cerrado"
@@ -59,6 +71,25 @@ class RegistroEgresoRequest(BaseModel):
     comprobante_numero: Optional[str] = None
     comprobante_tipo: Optional[str] = None
     categoria: Optional[str] = None
+
+class RegistroIngresoRequest(BaseModel):
+    sede_id: str = Field(..., description="ID de la sede")
+    monto: float = Field(..., gt=0, description="Monto del ingreso")
+    metodo_pago: MetodoPagoIngreso = Field(..., description="Método de pago del ingreso")
+    motivo: str = Field(..., min_length=3, max_length=200, description="Motivo del ingreso")
+    fecha: Optional[str] = Field(None, description="Fecha del ingreso (default: hoy)")
+    moneda: Moneda = Field(default=Moneda.COP)
+    registrado_por: Optional[str] = Field(None, description="Usuario que registra (opcional)")
+
+    @validator('fecha')
+    def validar_fecha_ingreso(cls, v):
+        if v is None:
+            return v
+        try:
+            datetime.strptime(v, "%Y-%m-%d")
+            return v
+        except ValueError:
+            raise ValueError("Formato de fecha inválido. Use YYYY-MM-DD")
 
 class DesgloseFisicoItem(BaseModel):
     denominacion: str = Field(..., description="Ej: 'billete_100', 'moneda_0.25'")
@@ -132,6 +163,19 @@ class EgresoResponse(BaseModel):
     registrado_por: str
     registrado_por_nombre: Optional[str]
     comprobante_numero: Optional[str]
+    creado_en: datetime
+
+class IngresoResponse(BaseModel):
+    ingreso_id: str
+    sede_id: str
+    sede_nombre: Optional[str] = None
+    monto: float
+    metodo_pago: str
+    motivo: str
+    moneda: str
+    fecha: str
+    registrado_por: str
+    registrado_por_nombre: Optional[str]
     creado_en: datetime
 
 class CierreResponse(BaseModel):

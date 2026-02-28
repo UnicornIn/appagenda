@@ -55,6 +55,9 @@ export interface DesglosePagos {
   total: number;
   tarjeta?: number;
   transferencia?: number;
+  tarjeta_credito?: number;
+  tarjeta_debito?: number;
+  addi?: number;
 }
 
 export interface FacturaResponse {
@@ -271,7 +274,10 @@ export class FacturaService {
     // Crear array de métodos con sus montos
     const metodos = [
       { metodo: 'efectivo', monto: desglose.efectivo || 0 },
-      { metodo: 'tarjeta', monto: desglose.tarjeta || 0 },
+      { metodo: 'tarjeta_credito', monto: desglose.tarjeta_credito || 0 },
+      { metodo: 'tarjeta_debito', monto: desglose.tarjeta_debito || 0 },
+      { metodo: 'addi', monto: desglose.addi || 0 },
+      { metodo: 'tarjeta', monto: desglose.tarjeta || 0 }, // compatibilidad con histórico
       { metodo: 'transferencia', monto: desglose.transferencia || 0 }
     ];
     

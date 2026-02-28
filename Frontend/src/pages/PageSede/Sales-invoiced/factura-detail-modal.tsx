@@ -330,6 +330,30 @@ export function FacturaDetailModal({ factura, open, onOpenChange }: FacturaDetai
                               </span>
                             </div>
                           )}
+                          {factura.desglose_pagos.tarjeta_credito !== undefined && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Tarjeta crédito:</span>
+                              <span className="font-semibold text-gray-900">
+                                {formatCurrency(factura.desglose_pagos.tarjeta_credito, factura.moneda)}
+                              </span>
+                            </div>
+                          )}
+                          {factura.desglose_pagos.tarjeta_debito !== undefined && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Tarjeta débito:</span>
+                              <span className="font-semibold text-gray-900">
+                                {formatCurrency(factura.desglose_pagos.tarjeta_debito, factura.moneda)}
+                              </span>
+                            </div>
+                          )}
+                          {factura.desglose_pagos.addi !== undefined && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">Addi:</span>
+                              <span className="font-semibold text-gray-900">
+                                {formatCurrency(factura.desglose_pagos.addi, factura.moneda)}
+                              </span>
+                            </div>
+                          )}
                           {factura.desglose_pagos.transferencia !== undefined && (
                             <div className="flex justify-between">
                               <span className="text-gray-600">Transferencia:</span>

@@ -13,9 +13,22 @@ import { Loader } from "lucide-react"
 
 const SEARCH_DEBOUNCE_MS = 500
 
+const normalizarFichas = (raw: any): any[] | undefined => {
+  if (Array.isArray(raw)) return raw
+  if (Array.isArray(raw?.data)) return raw.data
+  if (Array.isArray(raw?.fichas)) return raw.fichas
+  if (Array.isArray(raw?.items)) return raw.items
+  return undefined
+}
+
 // Función para asegurar que un objeto cumpla con la interfaz Cliente
 const asegurarClienteCompleto = (clienteData: any): Cliente => {
+  const fichasNormalizadas =
+    normalizarFichas(clienteData?.fichas) ??
+    normalizarFichas(clienteData?.data?.fichas)
+
   return {
+    ...clienteData,
     id: clienteData.id || clienteData._id || clienteData.cliente_id || "",
     nombre: clienteData.nombre || "",
     email: clienteData.email || clienteData.correo || "No disponible",
@@ -23,15 +36,16 @@ const asegurarClienteCompleto = (clienteData: any): Cliente => {
     cedula: clienteData.cedula || "",
     ciudad: clienteData.ciudad || "",
     sede_id: clienteData.sede_id || "",
-    diasSinVenir: clienteData.diasSinVenir || clienteData.dias_sin_visitar || 0,
-    diasSinComprar: clienteData.diasSinComprar || 0,
-    ltv: clienteData.ltv || clienteData.total_gastado || 0,
-    ticketPromedio: clienteData.ticketPromedio || clienteData.ticket_promedio || 0,
+    diasSinVenir: clienteData.diasSinVenir ?? clienteData.dias_sin_visitar ?? 0,
+    diasSinComprar: clienteData.diasSinComprar ?? 0,
+    ltv: clienteData.ltv ?? clienteData.total_gastado ?? 0,
+    ticketPromedio: clienteData.ticketPromedio ?? clienteData.ticket_promedio ?? 0,
     rizotipo: clienteData.rizotipo || "",
     nota: clienteData.nota || clienteData.notas || "",
-    historialCitas: clienteData.historialCitas || [],
-    historialCabello: clienteData.historialCabello || [],
-    historialProductos: clienteData.historialProductos || []
+    historialCitas: Array.isArray(clienteData.historialCitas) ? clienteData.historialCitas : [],
+    historialCabello: Array.isArray(clienteData.historialCabello) ? clienteData.historialCabello : [],
+    historialProductos: Array.isArray(clienteData.historialProductos) ? clienteData.historialProductos : [],
+    fichas: fichasNormalizadas
   }
 }
 
@@ -126,33 +140,11 @@ export default function ClientsPage() {
 
   const handleAddClient = () => setIsModalOpen(true)
 
-  const handleSaveClient = async (clienteData: any) => {
+  const handleSaveClient = async () => {
     if (!user?.access_token) return
     try {
       setIsSaving(true)
       setError(null)
-
-      let sedeIdToUse = clienteData.sede_id
-      if (!sedeIdToUse && sedes.length > 0) {
-        sedeIdToUse = sedes[0].id || sedes[0]._id
-      }
-
-      if (!sedeIdToUse) {
-        throw new Error("No hay sedes disponibles")
-      }
-
-      const createData = {
-        nombre: clienteData.nombre,
-        correo: clienteData.email || "",
-        telefono: clienteData.telefono || "",
-        notas: clienteData.nota || "",
-        sede_id: sedeIdToUse,
-        cedula: clienteData.cedula || "",
-        ciudad: clienteData.ciudad || "",
-        fecha_de_nacimiento: clienteData.fecha_de_nacimiento || ""
-      }
-
-      await (clientesService.createCliente as any)(user.access_token, createData)
       await loadClientes(1, searchTerm)
       setIsModalOpen(false)
 

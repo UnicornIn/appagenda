@@ -30,7 +30,7 @@ export interface CrearClienteRequest {
   cedula?: string;
   ciudad?: string;
   fecha_de_nacimiento?: string;
-  sede_id: string;
+  sede_id?: string;
   notas?: string;
 }
 
@@ -42,6 +42,35 @@ const normalize = (value?: string) =>
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+
+const withOptionalField = (
+  payload: Record<string, string>,
+  key: string,
+  value?: string
+) => {
+  const normalized = value?.trim();
+  if (normalized) {
+    payload[key] = normalized;
+  }
+};
+
+const buildCrearClientePayload = (clienteData: CrearClienteRequest): Record<string, string> => {
+  const nombre = clienteData.nombre?.trim();
+  if (!nombre) {
+    throw new Error("El nombre del cliente es requerido");
+  }
+
+  const payload: Record<string, string> = { nombre };
+  withOptionalField(payload, "correo", clienteData.correo);
+  withOptionalField(payload, "telefono", clienteData.telefono);
+  withOptionalField(payload, "cedula", clienteData.cedula);
+  withOptionalField(payload, "ciudad", clienteData.ciudad);
+  withOptionalField(payload, "fecha_de_nacimiento", clienteData.fecha_de_nacimiento);
+  withOptionalField(payload, "sede_id", clienteData.sede_id);
+  withOptionalField(payload, "notas", clienteData.notas);
+
+  return payload;
+};
 
 const normalizarCliente = (c: any): Cliente => ({
   _id: c._id,
@@ -246,7 +275,8 @@ export async function buscarClientesConDebounce(
 // 🔥 CREAR NUEVO CLIENTE
 export async function crearCliente(token: string, clienteData: CrearClienteRequest): Promise<{success: boolean; cliente: Cliente}> {
   try {
-    console.log('🔄 Creando nuevo cliente:', clienteData);
+    const payload = buildCrearClientePayload(clienteData);
+    console.log('🔄 Creando nuevo cliente:', payload);
     const res = await fetch(`${API_BASE_URL}clientes/`, {
       method: 'POST',
       headers: {
@@ -254,12 +284,23 @@ export async function crearCliente(token: string, clienteData: CrearClienteReque
         Authorization: `Bearer ${token}`,
       },
       credentials: "include",
-      body: JSON.stringify(clienteData),
+      body: JSON.stringify(payload),
     });
     
     if (!res.ok) {
-      const errorData = await res.json().catch(() => ({ detail: 'Error desconocido' }));
-      throw new Error(errorData.detail || `Error ${res.status} al crear cliente`);
+      const raw = await res.text().catch(() => "");
+      let message = `Error ${res.status} al crear cliente`;
+
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          message = parsed?.detail || parsed?.message || raw;
+        } catch {
+          message = raw;
+        }
+      }
+
+      throw new Error(message);
     }
     
     const data = await res.json();

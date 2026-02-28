@@ -6,7 +6,7 @@ import {
   Users,
   Package,
   CreditCard,
-  // Wallet,
+  Wallet,
   Home,
   Menu,
   X,
@@ -21,6 +21,7 @@ interface NavItem {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   roles?: string[];
+  currencies?: string[];
 }
 
 const navItems: NavItem[] = [
@@ -31,8 +32,10 @@ const navItems: NavItem[] = [
   { title: 'Comisiones', href: '/superadmin/commissions', icon: CreditCard, roles: ['super_admin'] },
   { title: 'Sedes', href: '/superadmin/sedes', icon: Home, roles: ['super_admin'] },
   { title: 'Estilistas', href: '/superadmin/stylists', icon: Users, roles: ['super_admin'] },
+  { title: 'Usuarios Sistema', href: '/superadmin/system-users', icon: Users, roles: ['super_admin', 'superadmin'] },
   { title: 'Servicios', href: '/superadmin/services', icon: Package, roles: ['super_admin'] },
   { title: 'Ventas Facturadas', href: '/superadmin/sales-invoices', icon: CreditCard, roles: ['super_admin'] },
+  { title: 'Cierre de Caja', href: '/superadmin/cierre-caja', icon: Wallet, roles: ['super_admin'], currencies: ['COP'] },
 
   { title: 'Dashboard', href: '/sede/dashboard', icon: LayoutDashboard, roles: ['admin_sede'] },
   { title: 'Agenda', href: '/sede/appointments', icon: Users, roles: ['admin_sede'] },
@@ -42,7 +45,7 @@ const navItems: NavItem[] = [
   { title: 'Estilistas', href: '/sede/stylists', icon: Users, roles: ['admin_sede'] },
   { title: 'Comisiones', href: '/sede/commissions', icon: CreditCard, roles: ['admin_sede'] },
   { title: 'Ventas Facturadas', href: '/sede/sales-invoiced', icon: CreditCard, roles: ['admin_sede'] },
-  // { title: 'Cierre de Caja', href: '/sede/cierre-caja', icon: Wallet, roles: ['admin_sede'] },
+  { title: 'Cierre de Caja', href: '/sede/cierre-caja', icon: Wallet, roles: ['admin_sede'], currencies: ['COP'] },
 
   { title: 'Agenda', href: '/stylist/appointments', icon: Users, roles: ['estilista'] },
   { title: 'Comisiones', href: '/stylist/commissions', icon: CreditCard, roles: ['estilista'] },
@@ -57,10 +60,21 @@ export function Sidebar() {
 
   const getStoredRole = (): string | null => {
     return (
+      localStorage.getItem('beaux-role') ||
+      sessionStorage.getItem('beaux-role') ||
       localStorage.getItem('beaux-rol') ||
       sessionStorage.getItem('beaux-rol') ||
       (user ? user.role : null)
     );
+  };
+
+  const getStoredCurrency = (): string => {
+    return String(
+      sessionStorage.getItem('beaux-moneda') ||
+      localStorage.getItem('beaux-moneda') ||
+      user?.moneda ||
+      ''
+    ).toUpperCase();
   };
 
   const handleNavigation = (item: NavItem) => {
@@ -75,9 +89,13 @@ export function Sidebar() {
     navigate('/login');
   };
 
-  const visibleItems = navItems.filter((item) =>
-    item.roles?.includes(getStoredRole() || '')
-  );
+  const visibleItems = navItems.filter((item) => {
+    const role = getStoredRole() || '';
+    const currency = getStoredCurrency();
+    const roleAllowed = item.roles?.includes(role) ?? false;
+    const currencyAllowed = item.currencies ? item.currencies.includes(currency) : true;
+    return roleAllowed && currencyAllowed;
+  });
 
   return (
     <>
