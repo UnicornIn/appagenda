@@ -46,24 +46,8 @@ class Profesional(BaseModel):
     especialidades: bool = Field(default=True)
     servicios_no_presta: Optional[List[str]] = Field(default=[])
     activo: bool = True
-    comisiones_por_categoria: Optional[Dict[str, float]] = Field(
-        default=None,
-        description="Mapa de comisiones por categoría. Ej: {'Peluquería': 35, 'Color': 45}"
-    )
+    comision: Optional[float] = None
     password: str
-
-    @validator('comisiones_por_categoria')
-    def validar_comisiones_por_categoria(cls, v):
-        if v is None:
-            return v
-
-        for categoria, porcentaje in v.items():
-            if not isinstance(categoria, str) or not categoria.strip():
-                raise ValueError('Cada categoría debe ser un texto no vacío')
-            if porcentaje < 0 or porcentaje > 100:
-                raise ValueError(f'Comisión de "{categoria}" debe estar entre 0 y 100')
-
-        return v
 
 
 # ============================================

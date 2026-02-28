@@ -23,7 +23,6 @@ from app.clients_service.generate_pdf import router as generate_pdf_router
 from app.sales.routes import router as sales_router
 from app.cash.routes_cash import router as cash_router
 from app.giftcards.routes_giftcards import router as giftcards_router
-from app.scheduling.submodules.fichas.routes_fichas import router as routes_fichas_router
 # from app.database.indexes import create_indexes
 from app.database.mongo import db  
 # from app.database.indexes import create_indexes  
@@ -75,7 +74,6 @@ async def lifespan(app: FastAPI):
 # Incluir todos los routers
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(scheduling_router, prefix="/scheduling")
-app.include_router(routes_fichas_router, tags=["Fichas"])
 app.include_router(admin_locales_router)
 app.include_router(admin_servicios_router)
 app.include_router(admin_profesionales_router)
@@ -91,4 +89,5 @@ app.include_router(sales_dashboard_router, prefix="/api/sales-dashboard")
 app.include_router(generate_pdf_router, prefix="/api/pdf", tags=["Generación de PDF"])
 app.include_router(sales_router)
 app.include_router(cash_router)
-app.include_router(giftcards_router, prefix="/api/giftcards",tags=["Giftcards"])
+app.include_router(giftcards_router, prefix="/api/giftcards",tags=["Giftcards"]
+)
