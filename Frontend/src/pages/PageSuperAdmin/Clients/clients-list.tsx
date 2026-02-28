@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useMemo } from "react"
+import { memo, useCallback, useMemo } from "react"
 import {
   Search,
   Plus,
@@ -45,6 +45,75 @@ interface ClientsListProps {
   isFetching?: boolean
 }
 
+interface TableColumn {
+  key: string
+  label: string
+  className: string
+}
+
+interface ClientRowProps {
+  cliente: Cliente
+  onSelectClient: (client: Cliente) => void
+  sedeNombre: string
+}
+
+const formatCedula = (cedula?: string) => {
+  const value = cedula?.trim()
+  return value ? value : "—"
+}
+
+const getDiasSinVenirBadgeClass = (diasSinVenir: number) => {
+  if (diasSinVenir > 30) return "bg-red-100 text-red-800"
+  if (diasSinVenir > 15) return "bg-yellow-100 text-yellow-800"
+  return "bg-green-100 text-green-800"
+}
+
+const ClientRow = memo(function ClientRow({
+  cliente,
+  onSelectClient,
+  sedeNombre,
+}: ClientRowProps) {
+  const handleSelect = useCallback(() => {
+    onSelectClient(cliente)
+  }, [onSelectClient, cliente])
+
+  return (
+    <tr
+      onClick={handleSelect}
+      className="hover:bg-gray-50 active:bg-gray-100 cursor-pointer transition-colors"
+    >
+      <td className="px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-gray-700 font-medium">
+            {cliente.nombre.charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <div className="font-medium text-gray-900">{cliente.nombre}</div>
+            <div className="text-sm text-gray-500">{cliente.email}</div>
+          </div>
+        </div>
+      </td>
+      <td className="px-6 py-4">
+        <div className="text-gray-900">{cliente.telefono}</div>
+        <div className="text-sm text-gray-500">{cliente.email}</div>
+      </td>
+      <td className="px-6 py-4 text-gray-700">{formatCedula(cliente.cedula)}</td>
+      <td className="px-6 py-4">
+        <span
+          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getDiasSinVenirBadgeClass(
+            cliente.diasSinVenir
+          )}`}
+        >
+          {cliente.diasSinVenir} días
+        </span>
+      </td>
+      <td className="px-6 py-4">
+        <div className="text-gray-900">{sedeNombre}</div>
+      </td>
+    </tr>
+  )
+})
+
 function ClientsListComponent({
   onSelectClient,
   onAddClient,
@@ -70,6 +139,45 @@ function ClientsListComponent({
   const rangoFin = metadata?.rango_fin ?? ((currentPage - 1) * itemsPerPage + clientes.length)
   const tieneAnterior = metadata?.tiene_anterior ?? currentPage > 1
   const tieneSiguiente = metadata?.tiene_siguiente ?? currentPage < totalPages
+
+  const tableColumns = useMemo<TableColumn[]>(
+    () => [
+      {
+        key: "cliente",
+        label: "Cliente",
+        className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
+      },
+      {
+        key: "contacto",
+        label: "Contacto",
+        className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
+      },
+      {
+        key: "cedula",
+        label: "Cédula",
+        className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
+      },
+      {
+        key: "dias_sin_venir",
+        label: "Días sin venir",
+        className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
+      },
+      {
+        key: "sede",
+        label: "Sede",
+        className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
+      },
+    ],
+    []
+  )
+
+  const sedeNombresById = useMemo(() => {
+    const byId = new Map<string, string>()
+    for (const sede of sedes) {
+      byId.set(sede.sede_id, formatSedeNombre(sede.nombre))
+    }
+    return byId
+  }, [sedes])
 
   const pageNumbers = useMemo(() => {
     if (totalPages <= 1) return [1]
@@ -100,11 +208,40 @@ function ClientsListComponent({
     return rangeWithDots
   }, [currentPage, totalPages])
 
-  const handlePageChange = (page: number) => {
+  const handlePageChange = useCallback((page: number) => {
     if (!onPageChange) return
     const nextPage = Math.max(1, Math.min(page, totalPages))
     onPageChange(nextPage, searchValue)
-  }
+  }, [onPageChange, searchValue, totalPages])
+
+  const handleSearchChange = useCallback((value: string) => {
+    onSearch?.(value)
+  }, [onSearch])
+
+  const handleSedeChange = useCallback((value: string) => {
+    onSedeChange?.(value)
+  }, [onSedeChange])
+
+  const handleItemsPerPageChange = useCallback((value: string) => {
+    onItemsPerPageChange?.(Number(value))
+  }, [onItemsPerPageChange])
+
+  const clientRows = useMemo(() => {
+    return clientes.map((cliente) => {
+      const sedeNombre = cliente.sede_id
+        ? (sedeNombresById.get(cliente.sede_id) ?? "Sede asignada")
+        : "Sin sede asignada"
+
+      return (
+        <ClientRow
+          key={cliente.id}
+          cliente={cliente}
+          onSelectClient={onSelectClient}
+          sedeNombre={sedeNombre}
+        />
+      )
+    })
+  }, [clientes, onSelectClient, sedeNombresById])
 
   if (error && clientes.length === 0) {
     return (
@@ -171,13 +308,13 @@ function ClientsListComponent({
             <Input
               placeholder="Buscar por nombre, email, teléfono o cédula..."
               value={searchValue}
-              onChange={(e) => onSearch?.(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="pl-10 h-10 bg-white"
             />
           </div>
 
           <div className="w-full sm:w-[220px]">
-            <Select value={selectedSede} onValueChange={onSedeChange}>
+            <Select value={selectedSede} onValueChange={handleSedeChange}>
               <SelectTrigger className="w-full h-10 bg-white border border-gray-300 hover:border-gray-400 text-gray-900">
                 <SelectValue placeholder="Todas las sedes" className="text-gray-900" />
               </SelectTrigger>
@@ -237,69 +374,14 @@ function ClientsListComponent({
                 <table className="w-full min-w-[960px]">
                   <thead>
                     <tr className="border-b border-gray-200 bg-gray-50">
-                      <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                        Cliente
-                      </th>
-                      <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                        Contacto
-                      </th>
-                      <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                        Cédula
-                      </th>
-                      <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                        Días sin venir
-                      </th>
-                      <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                        Sede
-                      </th>
+                      {tableColumns.map((column) => (
+                        <th key={column.key} className={column.className}>
+                          {column.label}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {clientes.map((cliente) => (
-                      <tr
-                        key={cliente.id}
-                        onClick={() => onSelectClient(cliente)}
-                        className="hover:bg-gray-50 active:bg-gray-100 cursor-pointer transition-colors"
-                      >
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-gray-700 font-medium">
-                              {cliente.nombre.charAt(0).toUpperCase()}
-                            </div>
-                            <div>
-                              <div className="font-medium text-gray-900">{cliente.nombre}</div>
-                              <div className="text-sm text-gray-500">{cliente.email}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="text-gray-900">{cliente.telefono}</div>
-                          <div className="text-sm text-gray-500">{cliente.email}</div>
-                        </td>
-                        <td className="px-6 py-4 text-gray-700">
-                          {cliente.cedula || "—"}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            cliente.diasSinVenir > 30
-                              ? 'bg-red-100 text-red-800'
-                              : cliente.diasSinVenir > 15
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-green-100 text-green-800'
-                          }`}>
-                            {cliente.diasSinVenir} días
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="text-gray-900">
-                            {cliente.sede_id
-                              ? formatSedeNombre(sedes.find(s => s.sede_id === cliente.sede_id)?.nombre, 'Sede asignada')
-                              : 'Sin sede asignada'}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
+                  <tbody className="divide-y divide-gray-100">{clientRows}</tbody>
                 </table>
               </div>
             </div>
@@ -384,7 +466,7 @@ function ClientsListComponent({
                   <span className="text-sm text-gray-700">Mostrar:</span>
                   <Select
                     value={String(itemsPerPage)}
-                    onValueChange={(value) => onItemsPerPageChange?.(Number(value))}
+                    onValueChange={handleItemsPerPageChange}
                   >
                     <SelectTrigger className="h-8 w-20 bg-white border border-gray-300 hover:border-gray-400 text-gray-900">
                       <SelectValue placeholder={String(itemsPerPage)} />
@@ -407,4 +489,3 @@ function ClientsListComponent({
 }
 
 export const ClientsList = memo(ClientsListComponent)
-

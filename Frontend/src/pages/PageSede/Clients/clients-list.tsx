@@ -1,6 +1,6 @@
 // components/ClientsList.tsx
 "use client"
-import { memo } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import { 
   Search, 
   Plus, 
@@ -34,6 +34,54 @@ interface ClientsListProps {
   searchValue: string
 }
 
+interface TableColumn {
+  key: string
+  label: string
+  className: string
+}
+
+interface ClientRowProps {
+  cliente: Cliente
+  onSelectClient: (client: Cliente) => void
+}
+
+const formatTableValue = (value?: string) => {
+  if (!value || value === "No disponible") return "—"
+  return value
+}
+
+const formatCedula = (cedula?: string) => {
+  const value = cedula?.trim()
+  return value ? value : "—"
+}
+
+const ClientRow = memo(function ClientRow({ cliente, onSelectClient }: ClientRowProps) {
+  const handleSelect = useCallback(() => {
+    onSelectClient(cliente)
+  }, [cliente, onSelectClient])
+
+  return (
+    <tr
+      onClick={handleSelect}
+      className="border-b border-gray-50 last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors"
+    >
+      <td className="px-3 py-2">
+        <div className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-full bg-blue-100 flex items-center justify-center text-xs font-medium text-blue-600">
+            {cliente.nombre.charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <div className="font-medium text-gray-900">{cliente.nombre}</div>
+          </div>
+        </div>
+      </td>
+      <td className="px-3 py-2 text-gray-600">{formatTableValue(cliente.telefono)}</td>
+      <td className="px-3 py-2 text-gray-600">{formatTableValue(cliente.email)}</td>
+      <td className="px-3 py-2 text-gray-600">{formatCedula(cliente.cedula)}</td>
+    </tr>
+  )
+})
+
 function ClientsListComponent({ 
   onSelectClient, 
   onAddClient, 
@@ -45,36 +93,100 @@ function ClientsListComponent({
   onSearch,
   searchValue
 }: ClientsListProps) {
+  const totalPages = metadata?.total_paginas ?? 1
+  const currentPage = metadata?.pagina ?? 1
 
-  const clearSearch = () => {
+  const tableColumns = useMemo<TableColumn[]>(
+    () => [
+      {
+        key: "nombre",
+        label: "Nombre",
+        className: "px-3 py-2 text-left font-medium text-gray-700 text-xs",
+      },
+      {
+        key: "telefono",
+        label: "Teléfono",
+        className: "px-3 py-2 text-left font-medium text-gray-700 text-xs",
+      },
+      {
+        key: "email",
+        label: "Email",
+        className: "px-3 py-2 text-left font-medium text-gray-700 text-xs",
+      },
+      {
+        key: "cedula",
+        label: "Cédula",
+        className: "px-3 py-2 text-left font-medium text-gray-700 text-xs",
+      },
+    ],
+    []
+  )
+
+  const pageNumbers = useMemo(() => {
+    const maxVisiblePages = Math.min(5, totalPages)
+    return Array.from({ length: maxVisiblePages }, (_, i) => {
+      if (totalPages <= 5) {
+        return i + 1
+      }
+      if (currentPage <= 3) {
+        return i + 1
+      }
+      if (currentPage >= totalPages - 2) {
+        return totalPages - 4 + i
+      }
+      return currentPage - 2 + i
+    })
+  }, [currentPage, totalPages])
+
+  const shouldShowLastPageShortcut =
+    totalPages > 5 && currentPage < totalPages - 2
+
+  const clearSearch = useCallback(() => {
     onSearch?.("")
-  }
+  }, [onSearch])
+
+  const handleSearchChange = useCallback((value: string) => {
+    onSearch?.(value)
+  }, [onSearch])
+
+  const handleRetry = useCallback(() => {
+    onPageChange?.(1, searchValue)
+  }, [onPageChange, searchValue])
 
   // Manejar cambio de página
-  const handlePageChange = (page: number) => {
-    if (onPageChange) {
-      onPageChange(page, searchValue
-)
-    }
-  }
+  const handlePageChange = useCallback((page: number) => {
+    if (!onPageChange) return
+    const nextPage = Math.max(1, Math.min(page, totalPages))
+    onPageChange(nextPage, searchValue)
+  }, [onPageChange, searchValue, totalPages])
 
-  const goToPreviousPage = () => {
-    if (metadata?.tiene_anterior && metadata.pagina > 1) {
-      handlePageChange(metadata.pagina - 1)
+  const goToPreviousPage = useCallback(() => {
+    if (metadata?.tiene_anterior && currentPage > 1) {
+      handlePageChange(currentPage - 1)
     }
-  }
+  }, [metadata?.tiene_anterior, currentPage, handlePageChange])
 
-  const goToNextPage = () => {
-    if (metadata?.tiene_siguiente && metadata.pagina < (metadata.total_paginas || 1)) {
-      handlePageChange(metadata.pagina + 1)
+  const goToNextPage = useCallback(() => {
+    if (metadata?.tiene_siguiente && currentPage < totalPages) {
+      handlePageChange(currentPage + 1)
     }
-  }
+  }, [metadata?.tiene_siguiente, currentPage, totalPages, handlePageChange])
 
-  const goToPage = (page: number) => {
-    if (page >= 1 && page <= (metadata?.total_paginas || 1)) {
+  const goToPage = useCallback((page: number) => {
+    if (page >= 1 && page <= totalPages) {
       handlePageChange(page)
     }
-  }
+  }, [handlePageChange, totalPages])
+
+  const clientRows = useMemo(() => {
+    return clientes.map((cliente) => (
+      <ClientRow
+        key={cliente.id}
+        cliente={cliente}
+        onSelectClient={onSelectClient}
+      />
+    ))
+  }, [clientes, onSelectClient])
 
   if (error && clientes.length === 0) {
     return (
@@ -84,7 +196,7 @@ function ClientsListComponent({
           <p className="text-xs text-gray-500 mb-3">{error}</p>
           {onPageChange && (
             <Button 
-              onClick={() => onPageChange(1, searchValue)}
+              onClick={handleRetry}
               variant="outline"
               className="text-xs border-gray-300 text-gray-700 hover:bg-gray-50"
             >
@@ -126,7 +238,7 @@ function ClientsListComponent({
             <Input
               placeholder="Buscar por nombre, email, teléfono o cédula..."
               value={searchValue}
-              onChange={(e) => onSearch?.(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="pl-9 h-8 text-sm border-gray-300"
             />
             {searchValue && (
@@ -202,60 +314,14 @@ function ClientsListComponent({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50">
-                    <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">Nombre</th>
-                    <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">Teléfono</th>
-                    <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">Email</th>
-                    <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">Cédula</th>
+                    {tableColumns.map((column) => (
+                      <th key={column.key} className={column.className}>
+                        {column.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
-                <tbody>
-                  {clientes.map((cliente) => (
-                    <tr
-                      key={cliente.id}
-                      onClick={() => onSelectClient(cliente)}
-                      className="border-b border-gray-50 last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors"
-                    >
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-2">
-                          <div className="h-7 w-7 rounded-full bg-blue-100 flex items-center justify-center text-xs font-medium text-blue-600">
-                            {cliente.nombre.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="font-medium text-gray-900">{cliente.nombre}</div>
-                            {/* {cliente.diasSinVenir !== undefined && (
-                              <div className={`text-xs ${
-                                cliente.diasSinVenir > 60 
-                                  ? 'text-red-600' 
-                                  : cliente.diasSinVenir > 30 
-                                  ? 'text-yellow-600'
-                                  : 'text-green-600'
-                              }`}>
-                                {cliente.diasSinVenir} días sin venir
-                              </div>
-                            )} */}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-gray-600">
-                        {cliente.telefono !== 'No disponible' && cliente.telefono ? (
-                          <span>{cliente.telefono}</span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-gray-600">
-                        {cliente.email !== 'No disponible' && cliente.email ? (
-                          <span>{cliente.email}</span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-gray-600">
-                        {cliente.cedula || '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
+                <tbody>{clientRows}</tbody>
               </table>
             </div>
 
@@ -263,7 +329,7 @@ function ClientsListComponent({
             {metadata && metadata.total_paginas > 1 && (
               <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-1 py-2">
                 <div className="text-xs text-gray-600">
-                  <span className="font-medium">Página {metadata.pagina}</span> de {metadata.total_paginas} • 
+                  <span className="font-medium">Página {currentPage}</span> de {totalPages} • 
                   Total: {metadata.total} clientes
                 </div>
                 
@@ -281,47 +347,34 @@ function ClientsListComponent({
                   
                   <div className="flex items-center gap-1">
                     {/* Mostrar números de página */}
-                    {Array.from({ length: Math.min(5, metadata.total_paginas) }, (_, i) => {
-                      let pageNumber
-                      if (metadata.total_paginas <= 5) {
-                        pageNumber = i + 1
-                      } else if (metadata.pagina <= 3) {
-                        pageNumber = i + 1
-                      } else if (metadata.pagina >= metadata.total_paginas - 2) {
-                        pageNumber = metadata.total_paginas - 4 + i
-                      } else {
-                        pageNumber = metadata.pagina - 2 + i
-                      }
-                      
-                      return (
-                        <Button
-                          key={pageNumber}
-                          variant={pageNumber === metadata.pagina ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => goToPage(pageNumber)}
-                          disabled={isFetching}
-                          className={`h-8 w-8 text-sm ${
-                            pageNumber === metadata.pagina 
-                              ? "bg-blue-600 text-white hover:bg-blue-700" 
-                              : "border-gray-300 text-gray-700 hover:bg-gray-50"
-                          }`}
-                        >
-                          {pageNumber}
-                        </Button>
-                      )
-                    })}
+                    {pageNumbers.map((pageNumber) => (
+                      <Button
+                        key={pageNumber}
+                        variant={pageNumber === currentPage ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => goToPage(pageNumber)}
+                        disabled={isFetching}
+                        className={`h-8 w-8 text-sm ${
+                          pageNumber === currentPage
+                            ? "bg-blue-600 text-white hover:bg-blue-700"
+                            : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                        }`}
+                      >
+                        {pageNumber}
+                      </Button>
+                    ))}
                     
-                    {metadata.total_paginas > 5 && metadata.pagina < metadata.total_paginas - 2 && (
+                    {shouldShowLastPageShortcut && (
                       <>
                         <span className="text-gray-400">...</span>
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => goToPage(metadata.total_paginas)}
+                          onClick={() => goToPage(totalPages)}
                           disabled={isFetching}
                           className="h-8 w-8 text-sm border-gray-300 text-gray-700 hover:bg-gray-50"
                         >
-                          {metadata.total_paginas}
+                          {totalPages}
                         </Button>
                       </>
                     )}

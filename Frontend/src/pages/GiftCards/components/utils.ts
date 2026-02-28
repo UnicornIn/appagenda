@@ -1,6 +1,8 @@
 import { formatDateDMY } from "../../../lib/dateFormat";
 import type { GiftCardStatus } from "../types";
 
+export const NEVER_EXPIRES_LABEL = "Nunca se vence";
+
 export function formatMoney(value: number, currency: string): string {
   const normalizedCurrency = (currency || "COP").toUpperCase();
   const locale = normalizedCurrency === "USD" ? "en-US" : normalizedCurrency === "MXN" ? "es-MX" : "es-CO";
@@ -21,6 +23,34 @@ export function formatGiftCardDate(value?: string | null): string {
   return formatDateDMY(value, value);
 }
 
+export function resolveGiftCardSedeName({
+  sedeId,
+  sedeNombre,
+  sedeNamesById,
+  fallbackSedeName,
+}: {
+  sedeId?: string | null;
+  sedeNombre?: string | null;
+  sedeNamesById?: Record<string, string>;
+  fallbackSedeName?: string;
+}): string {
+  const directName = String(sedeNombre || "").trim();
+  if (directName) {
+    return directName;
+  }
+
+  const normalizedSedeId = String(sedeId || "").trim();
+  if (normalizedSedeId) {
+    const fromMap = String(sedeNamesById?.[normalizedSedeId] || "").trim();
+    if (fromMap) {
+      return fromMap;
+    }
+  }
+
+  const fallbackName = String(fallbackSedeName || "").trim();
+  return fallbackName || "—";
+}
+
 export function getStatusLabel(status: GiftCardStatus): string {
   switch (status) {
     case "activa":
@@ -30,7 +60,7 @@ export function getStatusLabel(status: GiftCardStatus): string {
     case "cancelada":
       return "Cancelada";
     case "vencida":
-      return "Vencida";
+      return "Activa";
     case "parcialmente_usada":
       return "Parcial";
     default:
@@ -47,7 +77,7 @@ export function getStatusClasses(status: GiftCardStatus): string {
     case "cancelada":
       return "bg-red-100 text-red-700 border-red-200";
     case "vencida":
-      return "bg-amber-100 text-amber-700 border-amber-200";
+      return "bg-emerald-100 text-emerald-700 border-emerald-200";
     case "parcialmente_usada":
       return "bg-blue-100 text-blue-700 border-blue-200";
     default:

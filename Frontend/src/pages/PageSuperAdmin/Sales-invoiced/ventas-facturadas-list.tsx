@@ -1,7 +1,16 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Search, Download, Loader2, Building } from "lucide-react"
+import {
+  Search,
+  Download,
+  Loader2,
+  Building,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from "lucide-react"
 import { FacturaDetailModal } from "./factura-detail-modal"
 import type { Factura } from "../../../types/factura"
 import { facturaService } from "./facturas"
@@ -9,6 +18,8 @@ import { sedeService } from "../Sedes/sedeService"
 import type { Sede } from "../../../types/sede"
 import { formatSedeNombre } from "../../../lib/sede"
 import { formatDateDMY } from "../../../lib/dateFormat"
+
+const ALL_SEDES_VALUE = "__all_sedes__"
 
 export function VentasFacturadasList() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -22,20 +33,39 @@ export function VentasFacturadasList() {
   const [error, setError] = useState<string | null>(null)
   const [sedes, setSedes] = useState<Sede[]>([])
   const [sedeIdMap, setSedeIdMap] = useState<Record<string, string>>({}) // Mapa de _id a sede_id
+  const [pagination, setPagination] = useState<any>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [limit] = useState(50)
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
+  const [allSedesFacturas, setAllSedesFacturas] = useState<Factura[]>([])
 
   // Cargar sedes disponibles
   useEffect(() => {
     cargarSedes()
   }, [])
 
-  // Cargar facturas cuando se selecciona una sede
+  // Aplicar debounce al término de búsqueda para no disparar requests por tecla
   useEffect(() => {
-    if (selectedSede && sedeIdMap[selectedSede]) {
-      cargarFacturas()
+    const timeout = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim())
+    }, 300)
+    return () => clearTimeout(timeout)
+  }, [searchTerm])
+
+  // Cargar facturas cuando se selecciona una sede o cambia la búsqueda
+  useEffect(() => {
+    const hasSedes = Object.keys(sedeIdMap).length > 0
+
+    if (selectedSede === ALL_SEDES_VALUE && hasSedes) {
+      cargarFacturas(1, true)
+    } else if (selectedSede && sedeIdMap[selectedSede]) {
+      cargarFacturas(1, true)
     } else {
       setFacturas([])
+      setPagination(null)
+      setAllSedesFacturas([])
     }
-  }, [selectedSede, sedeIdMap])
+  }, [selectedSede, sedeIdMap, debouncedSearchTerm])
 
   const cargarSedes = async () => {
     try {
@@ -57,9 +87,15 @@ export function VentasFacturadasList() {
       })
       setSedeIdMap(idMap)
       
-      // Si solo hay una sede, seleccionarla automáticamente
-      if (sedesData.length === 1) {
-        setSelectedSede(sedesData[0]._id)
+      // Seleccionar una sede por defecto al entrar para cargar facturas automáticamente
+      if (sedesData.length > 0) {
+        setSelectedSede((actual) => {
+          if (actual === ALL_SEDES_VALUE) return actual
+          if (actual && idMap[actual]) return actual
+          return ALL_SEDES_VALUE
+        })
+      } else {
+        setSelectedSede("")
       }
     } catch (err) {
       console.error("Error cargando sedes:", err)
@@ -69,11 +105,65 @@ export function VentasFacturadasList() {
     }
   }
 
-  const cargarFacturas = async () => {
+  const sortFacturasByFechaDesc = (list: Factura[]) =>
+    [...list].sort((a, b) => {
+      const dateA = new Date(a.fecha_pago || "").getTime()
+      const dateB = new Date(b.fecha_pago || "").getTime()
+      return dateB - dateA
+    })
+
+  const applyLocalPagination = (source: Factura[], page: number) => {
+    const total = source.length
+    const totalPages = Math.max(1, Math.ceil(total / limit))
+    const safePage = Math.min(Math.max(page, 1), totalPages)
+    const from = total === 0 ? 0 : (safePage - 1) * limit + 1
+    const to = total === 0 ? 0 : Math.min(safePage * limit, total)
+    const paginatedItems = source.slice(from > 0 ? from - 1 : 0, to)
+
+    setFacturas(paginatedItems)
+    setPagination({
+      page: safePage,
+      limit,
+      total,
+      total_pages: totalPages,
+      has_next: safePage < totalPages,
+      has_prev: safePage > 1,
+      showing: paginatedItems.length,
+      from,
+      to,
+    })
+    setCurrentPage(safePage)
+  }
+
+  const cargarFacturas = async (page: number = 1, forceReload: boolean = false) => {
     try {
       setIsLoading(true)
       setError(null)
-      
+
+      if (selectedSede === ALL_SEDES_VALUE) {
+        if (!forceReload && allSedesFacturas.length > 0) {
+          applyLocalPagination(allSedesFacturas, page)
+          return
+        }
+
+        const allSedeIds = Object.values(sedeIdMap).filter(Boolean)
+        const facturasPorSede = await Promise.all(
+          allSedeIds.map((sedeId) =>
+            facturaService.getTodasVentasBySede(sedeId, {
+              search: debouncedSearchTerm || undefined,
+            })
+          )
+        )
+
+        const combinedFacturas = sortFacturasByFechaDesc(
+          facturasPorSede.flat() as Factura[]
+        )
+
+        setAllSedesFacturas(combinedFacturas)
+        applyLocalPagination(combinedFacturas, page)
+        return
+      }
+
       // Usar el sede_id correcto (SD-XXXXX)
       const sedeId = sedeIdMap[selectedSede]
       if (!sedeId) {
@@ -82,18 +172,26 @@ export function VentasFacturadasList() {
       
       console.log("Cargando facturas para sede:", sedeId)
       
-      // Usar el servicio existente que obtiene ventas por sede
-      const ventas = await facturaService.getVentasBySede(sedeId)
+      // Usar el servicio existente con paginación backend
+      const result = await facturaService.getVentasBySedePaginadas(sedeId, {
+        page,
+        limit,
+        search: debouncedSearchTerm || undefined,
+      })
       
-      console.log("Facturas cargadas:", ventas.length)
+      console.log("Facturas cargadas:", result.facturas.length)
       
       // Actualizar el estado con las facturas
-      setFacturas(ventas as Factura[])
+      setAllSedesFacturas([])
+      setFacturas(result.facturas as Factura[])
+      setPagination(result.pagination || null)
+      setCurrentPage(page)
       
     } catch (err: any) {
       console.error("Error cargando facturas:", err)
       setError(err.message || "Error al cargar las facturas. Por favor, intenta nuevamente.")
       setFacturas([])
+      setPagination(null)
     } finally {
       setIsLoading(false)
     }
@@ -101,17 +199,6 @@ export function VentasFacturadasList() {
 
   // Filtrar facturas basado en los criterios
   const facturasFiltradas = facturas.filter(factura => {
-    // Filtro por término de búsqueda
-    if (searchTerm) {
-      const termino = searchTerm.toLowerCase()
-      const cumpleBusqueda = 
-        factura.identificador?.toLowerCase().includes(termino) ||
-        factura.nombre_cliente?.toLowerCase().includes(termino) ||
-        factura.numero_comprobante?.toLowerCase().includes(termino)
-      
-      if (!cumpleBusqueda) return false
-    }
-    
     // Filtro por estado
     if (selectedEstado !== "all" && factura.estado !== selectedEstado) {
       return false
@@ -119,6 +206,33 @@ export function VentasFacturadasList() {
     
     return true
   })
+
+  const irAPagina = (pagina: number) => {
+    if (selectedSede === ALL_SEDES_VALUE) {
+      applyLocalPagination(allSedesFacturas, pagina)
+      return
+    }
+
+    if (pagina >= 1 && pagina <= (pagination?.total_pages || 1)) {
+      cargarFacturas(pagina)
+    }
+  }
+
+  const irPrimeraPagina = () => {
+    irAPagina(1)
+  }
+
+  const irUltimaPagina = () => {
+    irAPagina(pagination?.total_pages || 1)
+  }
+
+  const irPaginaAnterior = () => {
+    irAPagina(currentPage - 1)
+  }
+
+  const irPaginaSiguiente = () => {
+    irAPagina(currentPage + 1)
+  }
 
   const handleRowClick = (factura: Factura) => {
     setSelectedFactura(factura)
@@ -140,8 +254,10 @@ export function VentasFacturadasList() {
   }
 
   const selectedSedeNombre = formatSedeNombre(
-    sedes.find(s => s._id === selectedSede)?.nombre,
-    "Sede seleccionada"
+    selectedSede === ALL_SEDES_VALUE
+      ? "Todas las sedes"
+      : sedes.find(s => s._id === selectedSede)?.nombre,
+    selectedSede === ALL_SEDES_VALUE ? "Todas las sedes" : "Sede seleccionada"
   )
 
   const handleExportCSV = () => {
@@ -177,10 +293,12 @@ export function VentasFacturadasList() {
       ].join("\n")
       
       // Obtener nombre de la sede seleccionada
-      const sedeNombre = formatSedeNombre(
-        sedes.find(s => s._id === selectedSede)?.nombre,
-        "sede"
-      )
+      const sedeNombre = selectedSede === ALL_SEDES_VALUE
+        ? "todas-las-sedes"
+        : formatSedeNombre(
+            sedes.find(s => s._id === selectedSede)?.nombre,
+            "sede"
+          )
       
       // Crear y descargar archivo
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
@@ -246,6 +364,7 @@ export function VentasFacturadasList() {
               className="w-full px-3 py-1.5 text-sm border focus:outline-none focus:border-gray-400"
               disabled={isLoadingSedes}
             >
+              <option value={ALL_SEDES_VALUE}>Todas las sedes</option>
               <option value="">-- Seleccionar sede --</option>
               {sedes.map((sede) => (
                 <option key={sede._id} value={sede._id}>
@@ -296,7 +415,7 @@ export function VentasFacturadasList() {
               <div className="p-3 border border-red-300 bg-red-50">
                 <p className="text-sm text-red-800">{error}</p>
                 <button 
-                  onClick={cargarFacturas}
+                  onClick={() => cargarFacturas(selectedSede === ALL_SEDES_VALUE ? 1 : currentPage, true)}
                   className="mt-2 text-sm underline"
                 >
                   Reintentar
@@ -324,9 +443,11 @@ export function VentasFacturadasList() {
                       {facturasFiltradas.length === 0 ? (
                         <tr>
                           <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                            {searchTerm || selectedEstado !== "all"
+                            {debouncedSearchTerm || selectedEstado !== "all"
                               ? "No se encontraron facturas con los filtros aplicados"
-                              : "No hay facturas registradas en esta sede"}
+                              : selectedSede === ALL_SEDES_VALUE
+                                ? "No hay facturas registradas en las sedes disponibles"
+                                : "No hay facturas registradas en esta sede"}
                           </td>
                         </tr>
                       ) : (
@@ -365,7 +486,50 @@ export function VentasFacturadasList() {
             {/* Resumen */}
             {!isLoading && !error && facturasFiltradas.length > 0 && (
               <div className="text-sm text-gray-600">
-                Mostrando {facturasFiltradas.length} de {facturas.length} facturas
+                {pagination
+                  ? `Mostrando ${pagination.from} a ${pagination.to} de ${pagination.total} facturas`
+                  : `Mostrando ${facturasFiltradas.length} de ${facturas.length} facturas`}
+              </div>
+            )}
+
+            {/* Controles de paginación */}
+            {!isLoading && !error && pagination && pagination.total_pages > 1 && (
+              <div className="flex flex-wrap items-center justify-end gap-1 pt-2">
+                <button
+                  onClick={irPrimeraPagina}
+                  disabled={currentPage === 1 || isLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center border disabled:opacity-50"
+                  aria-label="Primera página"
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={irPaginaAnterior}
+                  disabled={!pagination.has_prev || isLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center border disabled:opacity-50"
+                  aria-label="Página anterior"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="px-2 text-sm text-gray-600">
+                  Página {currentPage} de {pagination.total_pages}
+                </span>
+                <button
+                  onClick={irPaginaSiguiente}
+                  disabled={!pagination.has_next || isLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center border disabled:opacity-50"
+                  aria-label="Página siguiente"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={irUltimaPagina}
+                  disabled={currentPage === pagination.total_pages || isLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center border disabled:opacity-50"
+                  aria-label="Última página"
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </button>
               </div>
             )}
           </>

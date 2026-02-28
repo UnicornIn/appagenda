@@ -23,11 +23,12 @@ import { CreateGiftCardModal, type CreateGiftCardSubmission } from "./components
 import { GiftCardConfirmationModal } from "./components/GiftCardConfirmationModal";
 import { GiftCardsSummaryCards } from "./components/GiftCardsSummaryCards";
 import { GiftCardsTable } from "./components/GiftCardsTable";
+import { resolveGiftCardSedeName } from "./components/utils";
 
 const PAGE_SIZE = 15;
 const SUPER_ADMIN_ROLES = new Set(["super_admin", "superadmin"]);
 
-type StatusFilter = "all" | "activa" | "usada" | "cancelada" | "vencida" | "parcialmente_usada";
+type StatusFilter = "all" | "activa" | "usada" | "cancelada" | "parcialmente_usada";
 
 const STATUS_OPTIONS: Array<{ label: string; value: StatusFilter }> = [
   { label: "Todos", value: "all" },
@@ -35,7 +36,6 @@ const STATUS_OPTIONS: Array<{ label: string; value: StatusFilter }> = [
   { label: "Parcialmente usada", value: "parcialmente_usada" },
   { label: "Usada", value: "usada" },
   { label: "Cancelada", value: "cancelada" },
-  { label: "Vencida", value: "vencida" },
 ];
 
 export default function GiftCardsPage() {
@@ -70,10 +70,31 @@ export default function GiftCardsPage() {
   const latestRequestIdRef = useRef(0);
 
   const selectedSedeName = useMemo(() => {
-    if (!selectedSedeId) return "";
+    if (!selectedSedeId) return "—";
     const found = sedes.find((sede) => sede.sede_id === selectedSedeId);
-    return found?.nombre || selectedSedeId;
-  }, [sedes, selectedSedeId]);
+    if (found?.nombre?.trim()) return found.nombre.trim();
+
+    const localName = String(user?.nombre_local || sessionStorage.getItem("beaux-nombre_local") || "").trim();
+    return localName || "—";
+  }, [sedes, selectedSedeId, user?.nombre_local]);
+
+  const sedeNamesById = useMemo(() => {
+    const map: Record<string, string> = {};
+
+    for (const sede of sedes) {
+      const sedeId = String(sede.sede_id || "").trim();
+      const sedeNombre = String(sede.nombre || "").trim();
+      if (!sedeId || !sedeNombre) continue;
+      map[sedeId] = sedeNombre;
+    }
+
+    const normalizedSelectedSedeId = String(selectedSedeId || "").trim();
+    if (normalizedSelectedSedeId && selectedSedeName !== "—" && !map[normalizedSelectedSedeId]) {
+      map[normalizedSelectedSedeId] = selectedSedeName;
+    }
+
+    return map;
+  }, [sedes, selectedSedeId, selectedSedeName]);
 
   const displayCurrency = useMemo(() => {
     const fromCards = giftCards.find((item) => item.moneda)?.moneda;
@@ -86,21 +107,28 @@ export default function GiftCardsPage() {
     if (!term) return giftCards;
 
     return giftCards.filter((giftCard) => {
+      const resolvedSedeName = resolveGiftCardSedeName({
+        sedeId: giftCard.sede_id,
+        sedeNombre: giftCard.sede_nombre,
+        sedeNamesById,
+        fallbackSedeName: selectedSedeName,
+      });
+
       const searchable = [
         giftCard.codigo,
         giftCard.comprador_nombre,
         giftCard.beneficiario_nombre,
-        giftCard.sede_nombre,
+        resolvedSedeName,
       ]
         .map((value) => String(value || "").toLowerCase())
         .join(" ");
 
       return searchable.includes(term);
     });
-  }, [giftCards, searchTerm]);
+  }, [giftCards, searchTerm, sedeNamesById, selectedSedeName]);
 
   const summaryMetrics = useMemo(() => {
-    const activeStatuses = new Set<GiftCardStatus>(["activa", "parcialmente_usada"]);
+    const activeStatuses = new Set<GiftCardStatus>(["activa", "parcialmente_usada", "vencida"]);
 
     const activeCount = filteredGiftCards.filter((giftCard) => activeStatuses.has(giftCard.estado)).length;
     const totalIssued = filteredGiftCards.reduce((total, giftCard) => total + Number(giftCard.valor || 0), 0);
@@ -306,7 +334,7 @@ export default function GiftCardsPage() {
                 </div>
 
                 <Button
-                  className="h-10 bg-indigo-600 text-white hover:bg-indigo-500"
+                  className="h-10 bg-black text-white hover:bg-zinc-800"
                   onClick={() => setCreateModalOpen(true)}
                   disabled={!selectedSedeId}
                 >
@@ -346,7 +374,7 @@ export default function GiftCardsPage() {
                 ) : (
                   <div className="lg:col-span-3">
                     <label className="mb-1 block text-xs font-medium text-gray-600">Sede</label>
-                    <Input value={selectedSedeName || selectedSedeId || "Sin sede"} readOnly className="bg-gray-50" />
+                    <Input value={selectedSedeName} readOnly className="bg-gray-50" />
                   </div>
                 )}
 
@@ -412,7 +440,13 @@ export default function GiftCardsPage() {
                 Cargando Gift Cards...
               </div>
             ) : (
-              <GiftCardsTable giftCards={filteredGiftCards} currency={displayCurrency} isFetching={isFetching} />
+              <GiftCardsTable
+                giftCards={filteredGiftCards}
+                currency={displayCurrency}
+                isFetching={isFetching}
+                sedeNamesById={sedeNamesById}
+                fallbackSedeName={selectedSedeName}
+              />
             )}
 
             {totalPages > 1 ? (
@@ -492,6 +526,8 @@ export default function GiftCardsPage() {
         giftCard={latestCreatedGiftCard}
         fallbackCurrency={displayCurrency}
         beneficiaryEmail={latestCreatedEmail}
+        sedeNamesById={sedeNamesById}
+        fallbackSedeName={selectedSedeName}
       />
 
       <Toaster />

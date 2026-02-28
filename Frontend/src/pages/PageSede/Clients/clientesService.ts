@@ -178,12 +178,35 @@ const fixS3Url = (url: string): string => {
   return url;
 };
 
+const firstNonEmptyString = (...values: unknown[]): string => {
+  for (const value of values) {
+    if (typeof value === "string" || typeof value === "number") {
+      const normalized = String(value).trim()
+      if (normalized) {
+        return normalized
+      }
+    }
+  }
+  return ""
+}
+
+const extractCedula = (cliente: any): string =>
+  firstNonEmptyString(
+    cliente?.cedula,
+    cliente?.numero_cedula,
+    cliente?.numeroDocumento,
+    cliente?.numero_documento,
+    cliente?.documento,
+    cliente?.identificacion,
+    cliente?.dni
+  )
+
 const mapCliente = (cliente: any): Cliente => ({
   id: cliente.cliente_id || cliente.id || cliente._id || '',
   nombre: cliente.nombre || '',
   telefono: cliente.telefono || 'No disponible',
   email: cliente.correo || cliente.email || 'No disponible',
-  cedula: cliente.cedula || '',
+  cedula: extractCedula(cliente),
   ciudad: cliente.ciudad || '',
   diasSinVenir: calcularDiasSinVenir(cliente),
   diasSinComprar: cliente.dias_sin_visitar || 0,
@@ -355,6 +378,27 @@ export const clientesService = {
     }
   },
 
+  async getClienteCedula(token: string, clienteId: string): Promise<string> {
+    try {
+      const response = await fetch(`${API_BASE_URL}clientes/${clienteId}`, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (!response.ok) {
+        return ''
+      }
+
+      const cliente = await response.json()
+      return extractCedula(cliente)
+    } catch {
+      return ''
+    }
+  },
+
 
   async getClienteById(token: string, clienteId: string): Promise<Cliente> {
     const response = await fetch(`${API_BASE_URL}clientes/${clienteId}`, {
@@ -383,7 +427,7 @@ export const clientesService = {
       nombre: cliente.nombre,
       telefono: cliente.telefono || 'No disponible',
       email: cliente.correo || 'No disponible',
-      cedula: cliente.cedula || '',
+      cedula: extractCedula(cliente),
       ciudad: cliente.ciudad || '',
       diasSinVenir: calcularDiasSinVenir(cliente),
       diasSinComprar: cliente.dias_sin_visitar || 0,

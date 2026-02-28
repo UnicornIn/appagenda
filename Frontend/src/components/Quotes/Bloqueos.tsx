@@ -4,6 +4,8 @@ import { useAuth } from "../../components/Auth/AuthContext";
 import { getSedes, type Sede } from "../Branch/sedesApi";
 import { getEstilistas, type Estilista } from "../Professionales/estilistasApi";
 import { formatSedeNombre } from "../../lib/sede";
+import TimeInputWithPicker from "../ui/time-input-with-picker";
+import { formatAgendaTime, normalizeAgendaTimeValue } from "../../lib/agenda";
 
 interface CitaHorario {
   cita_id?: string;
@@ -78,8 +80,8 @@ const Bloqueos: React.FC<BloqueosProps> = ({
     profesional_id: editingBloqueo?.profesional_id || estilistaId || "",
     sede_id: editingBloqueo?.sede_id || user?.sede_id || "",
     fecha: normalizeFecha(editingBloqueo?.fecha) || fecha || "",
-    hora_inicio: editingBloqueo?.hora_inicio || horaInicio || "09:00",
-    hora_fin: editingBloqueo?.hora_fin || "10:00",
+    hora_inicio: normalizeAgendaTimeValue(editingBloqueo?.hora_inicio || horaInicio || "09:00") || "09:00",
+    hora_fin: normalizeAgendaTimeValue(editingBloqueo?.hora_fin || "10:00") || "10:00",
     motivo: editingBloqueo?.motivo || "",
   });
   
@@ -261,8 +263,8 @@ const Bloqueos: React.FC<BloqueosProps> = ({
         profesional_id: editingBloqueo.profesional_id || prev.profesional_id,
         sede_id: editingBloqueo.sede_id || prev.sede_id,
         fecha: normalizeFecha(editingBloqueo.fecha) || prev.fecha,
-        hora_inicio: editingBloqueo.hora_inicio || prev.hora_inicio,
-        hora_fin: editingBloqueo.hora_fin || prev.hora_fin,
+        hora_inicio: normalizeAgendaTimeValue(editingBloqueo.hora_inicio) || prev.hora_inicio,
+        hora_fin: normalizeAgendaTimeValue(editingBloqueo.hora_fin) || prev.hora_fin,
         motivo: editingBloqueo.motivo || "",
       }));
       setIsRecurrent(false);
@@ -776,28 +778,31 @@ const Bloqueos: React.FC<BloqueosProps> = ({
             <label className={fieldLabelClass}>
               Hora inicio
             </label>
-            <input
-              type="time"
+            <TimeInputWithPicker
               value={formData.hora_inicio}
               onChange={(e) => handleInputChange('hora_inicio', e.target.value)}
               required
-              className={controlClass}
+              inputClassName={controlClass}
+              buttonClassName={useCompactView ? "h-5 w-5" : ""}
             />
           </div>
           <div>
             <label className={fieldLabelClass}>
               Hora fin
             </label>
-            <input
-              type="time"
+            <TimeInputWithPicker
               value={formData.hora_fin}
               onChange={(e) => handleInputChange('hora_fin', e.target.value)}
               required
               min={minHoraFin}
-              className={controlClass}
+              inputClassName={controlClass}
+              buttonClassName={useCompactView ? "h-5 w-5" : ""}
             />
           </div>
         </div>
+        <p className={`${useCompactView ? "text-[11px]" : "text-xs"} text-gray-500`}>
+          Horario: {formatAgendaTime(formData.hora_inicio)} - {formatAgendaTime(formData.hora_fin)}
+        </p>
 
         {/* Mensaje */}
         {mensaje && (

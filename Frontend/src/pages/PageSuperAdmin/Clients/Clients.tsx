@@ -29,6 +29,8 @@ export default function ClientsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const hasLoadedInitialRef = useRef(false)
   const latestRequestIdRef = useRef(0)
+  const latestCedulaHydrationRef = useRef(0)
+  const cedulaCacheRef = useRef<Map<string, string | null>>(new Map())
 
   const { user, isLoading: authLoading } = useAuth()
 
@@ -45,10 +47,20 @@ export default function ClientsPage() {
   }, [user?.access_token])
 
   // Cargar clientes desde la API
+  const applyCedulaCache = useCallback((listado: Cliente[]): Cliente[] => {
+    return listado.map((cliente) => {
+      const cachedCedula = cedulaCacheRef.current.get(cliente.id)
+      if (!cachedCedula || cliente.cedula?.trim()) {
+        return cliente
+      }
+      return { ...cliente, cedula: cachedCedula }
+    })
+  }, [])
+
   const loadClientes = useCallback(async (
     pagina: number = 1,
-    filtro: string = searchTerm,
-    sedeId: string = selectedSede,
+    filtro: string = "",
+    sedeId: string = "all",
     options: { initial?: boolean } = {}
   ) => {
     const isInitialRequest = options.initial ?? false
@@ -79,7 +91,7 @@ export default function ClientsPage() {
 
       if (requestId !== latestRequestIdRef.current) return
 
-      setClientes(result.clientes)
+      setClientes(applyCedulaCache(result.clientes))
       setMetadata(result.metadata)
     } catch (err) {
       if (requestId !== latestRequestIdRef.current) return
@@ -94,7 +106,7 @@ export default function ClientsPage() {
         setIsFetching(false)
       }
     }
-  }, [user?.access_token, itemsPorPagina, searchTerm, selectedSede])
+  }, [user?.access_token, itemsPorPagina, applyCedulaCache])
 
   useEffect(() => {
     if (!authLoading && user) {
@@ -124,13 +136,68 @@ export default function ClientsPage() {
     }
   }, [authLoading, user])
 
+  useEffect(() => {
+    if (!user?.access_token || clientes.length === 0) return
+
+    const idsSinCedula = clientes
+      .filter((cliente) => !cliente.cedula?.trim() && !cedulaCacheRef.current.has(cliente.id))
+      .map((cliente) => cliente.id)
+
+    if (idsSinCedula.length === 0) return
+
+    let cancelled = false
+    const hydrationRequestId = ++latestCedulaHydrationRef.current
+
+    const hydrateCedulas = async () => {
+      const updates = new Map<string, string>()
+
+      const results = await Promise.allSettled(
+        idsSinCedula.map(async (clienteId) => {
+          const cedula = await clientesService.getClienteCedula(user.access_token, clienteId)
+          return { clienteId, cedula: cedula.trim() }
+        })
+      )
+
+      if (cancelled || hydrationRequestId !== latestCedulaHydrationRef.current) {
+        return
+      }
+
+      for (const result of results) {
+        if (result.status !== "fulfilled") continue
+        const { clienteId, cedula } = result.value
+        cedulaCacheRef.current.set(clienteId, cedula || null)
+        if (cedula) {
+          updates.set(clienteId, cedula)
+        }
+      }
+
+      if (updates.size === 0) return
+
+      setClientes((prev) =>
+        prev.map((cliente) => {
+          const updatedCedula = updates.get(cliente.id)
+          if (!updatedCedula || cliente.cedula?.trim() === updatedCedula) {
+            return cliente
+          }
+          return { ...cliente, cedula: updatedCedula }
+        })
+      )
+    }
+
+    void hydrateCedulas()
+
+    return () => {
+      cancelled = true
+    }
+  }, [clientes, user?.access_token])
+
   const handleSedeChange = useCallback((sedeId: string) => {
     setSelectedSede(sedeId)
   }, [])
 
-  const handlePageChange = useCallback((pagina: number, filtro: string = searchTerm) => {
+  const handlePageChange = useCallback((pagina: number, filtro: string = "") => {
     loadClientes(pagina, filtro, selectedSede)
-  }, [loadClientes, searchTerm, selectedSede])
+  }, [loadClientes, selectedSede])
 
   const handleSearch = useCallback((value: string) => {
     setSearchTerm(value)
@@ -139,6 +206,10 @@ export default function ClientsPage() {
   const handleItemsPerPageChange = useCallback((value: number) => {
     setItemsPorPagina(value)
   }, [])
+
+  const handleRetry = useCallback(() => {
+    loadClientes(1, searchTerm, selectedSede)
+  }, [loadClientes, searchTerm, selectedSede])
 
   const handleSelectClient = useCallback(async (client: Cliente) => {
     if (!user?.access_token) {
@@ -157,6 +228,10 @@ export default function ClientsPage() {
 
   const handleAddClient = useCallback(() => {
     setIsModalOpen(true)
+  }, [])
+
+  const handleCloseModal = useCallback(() => {
+    setIsModalOpen(false)
   }, [])
 
   const handleSaveClient = useCallback(async () => {
@@ -184,6 +259,18 @@ export default function ClientsPage() {
   const handleBack = useCallback(() => {
     setSelectedClient(null)
   }, [])
+
+  const handleClientUpdated = useCallback(async () => {
+    if (!user?.access_token || !selectedClient) return
+
+    try {
+      const clienteActualizado = await clientesService.getClienteById(user.access_token, selectedClient.id)
+      setSelectedClient(clienteActualizado)
+      await loadClientes(metadata?.pagina ?? 1, searchTerm, selectedSede)
+    } catch (err) {
+      console.error('Error refrescando cliente actualizado:', err)
+    }
+  }, [user?.access_token, selectedClient, loadClientes, metadata?.pagina, searchTerm, selectedSede])
 
   // Mostrar loading mientras se verifica la autenticación
   if (authLoading || (Boolean(user) && isInitialLoading)) {
@@ -218,6 +305,7 @@ export default function ClientsPage() {
           <ClientDetail
             client={selectedClient}
             onBack={handleBack}
+            onClientUpdated={handleClientUpdated}
           />
         ) : (
           <ClientsList
@@ -226,7 +314,7 @@ export default function ClientsPage() {
             clientes={clientes}
             metadata={metadata || undefined}
             error={error}
-            onRetry={() => loadClientes(1, searchTerm, selectedSede)}
+            onRetry={handleRetry}
             onPageChange={handlePageChange}
             onSearch={handleSearch}
             searchValue={searchTerm}
@@ -242,7 +330,7 @@ export default function ClientsPage() {
 
       <ClientFormModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={handleCloseModal}
         onSuccess={handleSaveClient} // ✅ Usa onSuccess
         isSaving={isSaving}
         sedeId={selectedSede !== "all" ? selectedSede : ""}

@@ -12,6 +12,7 @@ import { useAuth } from '../../../components/Auth/AuthContext';
 import { getBloqueosMultiplesProfesionales, type Bloqueo } from '../../../components/Quotes/bloqueosApi';
 import { formatSedeNombre } from "../../../lib/sede";
 import { formatDateDMY } from "../../../lib/dateFormat";
+import { extractAgendaAdditionalNotes } from "../../../lib/agenda";
 
 interface Appointment {
   id: string;
@@ -28,6 +29,7 @@ interface Appointment {
   estilista_nombre: string;
   estado: string;
   profesional_id?: string;
+  notas_adicionales?: string;
   rawData?: any;
 }
 
@@ -506,6 +508,7 @@ const CalendarScheduler: React.FC = () => {
         estilista_nombre: cita.profesional_nombre,
         estado: cita.estado || 'pendiente',
         profesional_id: cita.profesional_id,
+        notas_adicionales: extractAgendaAdditionalNotes(cita),
         rawData: cita
       };
     });
@@ -1389,6 +1392,17 @@ const CalendarScheduler: React.FC = () => {
                 <strong>Estilista:</strong> {citaTooltip.cita.estilista_nombre}
               </span>
             </div>
+
+            {citaTooltip.cita.notas_adicionales && (
+              <div className="flex items-start gap-2 text-xs">
+                <svg className="w-3 h-3 text-gray-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span className="text-gray-700 break-words">
+                  <strong>Notas:</strong> {citaTooltip.cita.notas_adicionales}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="mt-2 pt-2 border-t border-gray-100">

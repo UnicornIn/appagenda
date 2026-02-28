@@ -58,6 +58,24 @@ export interface DesglosePagos {
 export interface FacturaResponse {
   success: boolean;
   total: number;
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+    showing: number;
+    from: number;
+    to: number;
+  };
+  filters_applied?: {
+    sede_id: string;
+    fecha_desde: string | null;
+    fecha_hasta: string | null;
+    profesional_id: string | null;
+    search: string | null;
+  };
   ventas: FacturaAPI[];
 }
 
@@ -88,11 +106,39 @@ export interface FacturaConverted {
 }
 
 export class FacturaService {
+  private static readonly DEFAULT_FULL_FROM = "1900-01-01";
+  private static readonly DEFAULT_FULL_TO = "2999-12-31";
+
   private getAuthToken(): string | null {
     return (
       sessionStorage.getItem("access_token") ||
       localStorage.getItem("access_token")
     );
+  }
+
+  private normalizeDateRange(
+    fecha_desde?: string,
+    fecha_hasta?: string
+  ): { fecha_desde: string; fecha_hasta: string } {
+    const desde = String(fecha_desde || "").trim();
+    const hasta = String(fecha_hasta || "").trim();
+
+    if (desde && hasta) {
+      return { fecha_desde: desde, fecha_hasta: hasta };
+    }
+
+    if (desde && !hasta) {
+      return { fecha_desde: desde, fecha_hasta: FacturaService.DEFAULT_FULL_TO };
+    }
+
+    if (!desde && hasta) {
+      return { fecha_desde: FacturaService.DEFAULT_FULL_FROM, fecha_hasta: hasta };
+    }
+
+    return {
+      fecha_desde: FacturaService.DEFAULT_FULL_FROM,
+      fecha_hasta: FacturaService.DEFAULT_FULL_TO,
+    };
   }
 
   private getHeaders() {
@@ -121,16 +167,33 @@ export class FacturaService {
       search?: string;
     }
   ): Promise<FacturaConverted[]> {
+    const result = await this.getVentasBySedePaginadas(sede_id, params);
+    return result.facturas;
+  }
+
+  async getVentasBySedePaginadas(
+    sede_id: string,
+    params?: {
+      page?: number;
+      limit?: number;
+      fecha_desde?: string;
+      fecha_hasta?: string;
+      profesional_id?: string;
+      search?: string;
+    }
+  ): Promise<{ facturas: FacturaConverted[]; pagination?: FacturaResponse["pagination"]; filters_applied?: FacturaResponse["filters_applied"] }> {
     try {
       const queryParams = new URLSearchParams();
+      const normalizedRange = this.normalizeDateRange(params?.fecha_desde, params?.fecha_hasta);
       
       // Agregar parámetros básicos con valores por defecto
       queryParams.append('page', (params?.page || 1).toString());
       queryParams.append('limit', (params?.limit || 100).toString());
       queryParams.append('sort_order', 'desc');
       
-      if (params?.fecha_desde) queryParams.append('fecha_desde', params.fecha_desde);
-      if (params?.fecha_hasta) queryParams.append('fecha_hasta', params.fecha_hasta);
+      // Forzar rango explícito para evitar filtros implícitos del backend.
+      queryParams.append('fecha_desde', normalizedRange.fecha_desde);
+      queryParams.append('fecha_hasta', normalizedRange.fecha_hasta);
       if (params?.profesional_id) queryParams.append('profesional_id', params.profesional_id);
       if (params?.search) queryParams.append('search', params.search);
 
@@ -163,12 +226,59 @@ export class FacturaService {
       console.log(`✅ Facturas obtenidas: ${data.ventas.length} registros`);
       
       // Convertir los datos de la API al formato que usa nuestra aplicación
-      return data.ventas.map(factura => this.convertToAppFormat(factura));
+      return {
+        facturas: data.ventas.map(factura => this.convertToAppFormat(factura)),
+        pagination: data.pagination,
+        filters_applied: data.filters_applied,
+      };
       
     } catch (error) {
       console.error("Error obteniendo ventas de la sede:", error);
       throw error;
     }
+  }
+
+  async getTodasVentasBySede(
+    sede_id: string,
+    params?: {
+      fecha_desde?: string;
+      fecha_hasta?: string;
+      profesional_id?: string;
+      search?: string;
+      pageSize?: number;
+      maxPages?: number;
+    }
+  ): Promise<FacturaConverted[]> {
+    const pageSize = Math.max(1, params?.pageSize || 200);
+    const maxPages = Math.max(1, params?.maxPages || 500);
+    const allFacturas: FacturaConverted[] = [];
+
+    let page = 1;
+    let hasNext = true;
+    let pagesLoaded = 0;
+
+    while (hasNext && pagesLoaded < maxPages) {
+      const result = await this.getVentasBySedePaginadas(sede_id, {
+        page,
+        limit: pageSize,
+        fecha_desde: params?.fecha_desde,
+        fecha_hasta: params?.fecha_hasta,
+        profesional_id: params?.profesional_id,
+        search: params?.search,
+      });
+
+      allFacturas.push(...result.facturas);
+      pagesLoaded += 1;
+
+      if (!result.pagination) {
+        break;
+      }
+
+      hasNext = Boolean(result.pagination.has_next);
+      page += 1;
+    }
+
+    return allFacturas;
   }
 
   // Obtener detalle de una venta específica

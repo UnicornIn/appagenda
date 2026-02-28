@@ -17,14 +17,33 @@ export async function getCitas(params?: { sede_id?: string; profesional_id?: str
   }
 
   console.log('🔍 Fetching citas con query:', query.toString());
+  const queryString = query.toString();
+  const endpoints = [
+    `${API_BASE_URL}scheduling/quotes/citas/?${queryString}`,
+    `${API_BASE_URL}scheduling/quotes/?${queryString}`,
+  ];
 
-  const res = await fetch(`${API_BASE_URL}scheduling/quotes/?${query.toString()}`, {
-    headers,
-    credentials: "include",
-  });
+  let lastError: Error | null = null;
 
-  if (!res.ok) throw new Error("Error al cargar citas");
-  return res.json();
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint, {
+        headers,
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        lastError = new Error(`Error al cargar citas (${res.status})`);
+        continue;
+      }
+
+      return res.json();
+    } catch (error: any) {
+      lastError = error instanceof Error ? error : new Error("Error al cargar citas");
+    }
+  }
+
+  throw lastError || new Error("Error al cargar citas");
 }
 
 export async function crearCita(data: any, token: string) {

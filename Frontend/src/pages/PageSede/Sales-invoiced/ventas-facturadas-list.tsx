@@ -9,6 +9,18 @@ import type { Factura } from "../../../types/factura"
 import { facturaService } from "./facturas"
 import { formatDateDMY } from "../../../lib/dateFormat"
 
+type FacturaFilters = {
+  searchTerm: string
+  fecha_desde: string
+  fecha_hasta: string
+}
+
+const EMPTY_FACTURA_FILTERS: FacturaFilters = {
+  searchTerm: "",
+  fecha_desde: "",
+  fecha_hasta: "",
+}
+
 export function VentasFacturadasList() {
   const [searchTerm, setSearchTerm] = useState("")
   const [fechaDesde, setFechaDesde] = useState("")
@@ -21,6 +33,7 @@ export function VentasFacturadasList() {
   const [pagination, setPagination] = useState<any>(null)
   const [filtersApplied, setFiltersApplied] = useState<any>(null)
   const [currentPage, setCurrentPage] = useState(1)
+  const [appliedFilters, setAppliedFilters] = useState<FacturaFilters>(EMPTY_FACTURA_FILTERS)
   const [limit, ] = useState(50)
 
   // Obtener datos de la sede desde sessionStorage
@@ -28,7 +41,7 @@ export function VentasFacturadasList() {
 
   // Cargar facturas al montar el componente
   useEffect(() => {
-    cargarFacturas(false)
+    cargarFacturas(1, EMPTY_FACTURA_FILTERS)
   }, [])
 
   // Formatear fecha actual para usar como valor por defecto
@@ -44,27 +57,16 @@ export function VentasFacturadasList() {
     return date.toISOString().split('T')[0]
   }
 
-  const cargarFacturas = async (useFilters: boolean = false, page: number = 1) => {
+  const cargarFacturas = async (page: number = 1, filtros: FacturaFilters = appliedFilters) => {
     try {
       setIsLoading(true)
       setError(null)
-      
-      let fechaDesdeParam = fechaDesde
-      let fechaHastaParam = fechaHasta
-      let searchParam = searchTerm
-      
-      // Si no estamos usando filtros específicos, limpiar los parámetros
-      if (!useFilters) {
-        fechaDesdeParam = ""
-        fechaHastaParam = ""
-        searchParam = ""
-      }
-      
+
       // Obtener ventas con filtros
       const result = await facturaService.buscarFacturas({
-        searchTerm: searchParam,
-        fecha_desde: fechaDesdeParam,
-        fecha_hasta: fechaHastaParam,
+        searchTerm: filtros.searchTerm,
+        fecha_desde: filtros.fecha_desde,
+        fecha_hasta: filtros.fecha_hasta,
         page: page,
         limit: limit
       })
@@ -72,7 +74,12 @@ export function VentasFacturadasList() {
       // Actualizar el estado con las facturas
       setFacturas(result.facturas as Factura[])
       setPagination(result.pagination)
-      setFiltersApplied(result.filters_applied)
+      setFiltersApplied({
+        ...(result.filters_applied || {}),
+        fecha_desde: filtros.fecha_desde || null,
+        fecha_hasta: filtros.fecha_hasta || null,
+        search: filtros.searchTerm || null,
+      })
       setCurrentPage(page)
       
     } catch (err) {
@@ -87,7 +94,13 @@ export function VentasFacturadasList() {
 
   // Función para aplicar filtros
   const aplicarFiltros = async () => {
-    await cargarFacturas(true, 1) // Siempre volver a la primera página
+    const filtros = {
+      searchTerm: searchTerm.trim(),
+      fecha_desde: fechaDesde,
+      fecha_hasta: fechaHasta,
+    }
+    setAppliedFilters(filtros)
+    await cargarFacturas(1, filtros)
   }
 
   // Función para limpiar filtros
@@ -95,7 +108,8 @@ export function VentasFacturadasList() {
     setSearchTerm("")
     setFechaDesde("")
     setFechaHasta("")
-    cargarFacturas(false, 1)
+    setAppliedFilters(EMPTY_FACTURA_FILTERS)
+    cargarFacturas(1, EMPTY_FACTURA_FILTERS)
   }
 
   // Función para aplicar filtro del último mes
@@ -116,7 +130,7 @@ export function VentasFacturadasList() {
   // Navegación de páginas
   const irAPagina = (pagina: number) => {
     if (pagina >= 1 && pagina <= (pagination?.total_pages || 1)) {
-      cargarFacturas(true, pagina)
+      cargarFacturas(pagina, appliedFilters)
     }
   }
 
@@ -345,7 +359,7 @@ export function VentasFacturadasList() {
               variant="outline" 
               size="sm" 
               className="mt-2"
-              onClick={() => cargarFacturas(false, 1)}
+              onClick={() => cargarFacturas(currentPage, appliedFilters)}
             >
               Reintentar
             </Button>
@@ -497,10 +511,10 @@ export function VentasFacturadasList() {
             </div>
             
             {/* Información de fechas del rango */}
-            {(fechaDesde || fechaHasta) && (
+            {(appliedFilters.fecha_desde || appliedFilters.fecha_hasta) && (
               <div className="text-sm text-gray-500">
-                {fechaDesde && `Desde: ${formatDate(fechaDesde)} `}
-                {fechaHasta && `Hasta: ${formatDate(fechaHasta)}`}
+                {appliedFilters.fecha_desde && `Desde: ${formatDate(appliedFilters.fecha_desde)} `}
+                {appliedFilters.fecha_hasta && `Hasta: ${formatDate(appliedFilters.fecha_hasta)}`}
               </div>
             )}
           </div>

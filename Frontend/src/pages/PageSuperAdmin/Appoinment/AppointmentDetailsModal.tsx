@@ -5,7 +5,7 @@ import {
   Loader2, CheckCircle, Plus, Package,
   CreditCard,
   CreditCard as CardIcon, Wallet, CalendarDays,
-  Tag, Users, X, Bug, Landmark,
+  Tag, Users, X, Bug, Landmark, Wand2,
   Phone, Mail, DollarSign, AlertCircle,
   ShoppingBag, Trash2, Gift
 } from 'lucide-react';
@@ -16,6 +16,8 @@ import { formatDateDMY } from '../../../lib/dateFormat';
 import { getServicios, type Servicio as ServicioCatalogo } from '../../../components/Quotes/serviciosApi';
 import { getEstilistas, type Estilista } from '../../../components/Professionales/estilistasApi';
 import { API_BASE_URL } from '../../../types/config';
+import TimeInputWithPicker from '../../../components/ui/time-input-with-picker';
+import { extractAgendaAdditionalNotes, formatAgendaTime, normalizeAgendaTimeValue } from '../../../lib/agenda';
 
 interface AppointmentDetailsModalProps {
   open: boolean;
@@ -283,8 +285,10 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       setProductosOriginales(productosIniciales);
 
       const fechaInicial = String(rawData.fecha || '').slice(0, 10);
-      const horaInicioInicial = String(rawData.hora_inicio || appointment.start || '');
-      const horaFinInicial = String(rawData.hora_fin || appointment.end || '');
+      const horaInicioInicial = normalizeAgendaTimeValue(String(rawData.hora_inicio || appointment.start || ''))
+        || String(rawData.hora_inicio || appointment.start || '');
+      const horaFinInicial = normalizeAgendaTimeValue(String(rawData.hora_fin || appointment.end || ''))
+        || String(rawData.hora_fin || appointment.end || '');
       const profesionalInicial = String(rawData.profesional_id || appointment.profesional_id || '');
       setFechaEditada(fechaInicial);
       setHoraInicioEditada(horaInicioInicial);
@@ -306,6 +310,55 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       setServiciosOriginales(serviciosIniciales);
     }
   }, [open, appointment]);
+
+  useEffect(() => {
+    if (!open || !user?.access_token || !appointment) return;
+
+    const citaId = String(appointment.id || appointment.rawData?._id || appointment.rawData?.cita_id || '').trim();
+    if (!citaId) return;
+
+    let isCancelled = false;
+    const cargarDetalleCita = async () => {
+      const endpoints = [
+        `${API_BASE_URL}scheduling/quotes/citas/${citaId}`,
+        `${API_BASE_URL}scheduling/quotes/${citaId}`
+      ];
+
+      for (const endpoint of endpoints) {
+        try {
+          const response = await fetch(endpoint, {
+            headers: {
+              Authorization: `Bearer ${user.access_token}`,
+              Accept: 'application/json'
+            }
+          });
+
+          if (!response.ok) continue;
+
+          const data = await response.json();
+          const detalle = (data?.cita && typeof data.cita === 'object') ? data.cita : data;
+          if (!detalle || typeof detalle !== 'object' || isCancelled) return;
+
+          setAppointmentDetails((prev: any) => ({
+            ...prev,
+            ...detalle,
+            rawData: {
+              ...(prev?.rawData || {}),
+              ...detalle
+            }
+          }));
+          return;
+        } catch {
+          // Continuar con el siguiente endpoint de detalle disponible.
+        }
+      }
+    };
+
+    void cargarDetalleCita();
+    return () => {
+      isCancelled = true;
+    };
+  }, [open, appointment, user?.access_token]);
 
   useEffect(() => {
     if (!isCopCurrency && pagoModal.metodoPago === 'addi') {
@@ -518,6 +571,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   const hasUnsavedChanges = hasUnsavedServiceChanges || hasUnsavedProductChanges || hasUnsavedScheduleChanges;
 
   const isServiceActionsDisabled = updating || savingServicios || isEstadoNoEditableServicios;
+  const notasAdicionales = extractAgendaAdditionalNotes(appointmentDetails);
+  const tieneNotasAdicionales = notasAdicionales.length > 0;
 
   useEffect(() => {
     if (!open || !user?.access_token || isServiceActionsDisabled) return;
@@ -972,6 +1027,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         precio: producto.precio_unitario,
         cantidad: producto.cantidad
       }));
+      const notasActuales = extractAgendaAdditionalNotes(appointmentDetails);
 
       const response = await updateCita(
         appointmentDetails.id,
@@ -981,7 +1037,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           hora_fin: horaFinEditada,
           profesional_id: profesionalEditadoId,
           servicios: serviciosPayload,
-          productos: productosPayload
+          productos: productosPayload,
+          notas: notasActuales
         },
         user.access_token
       );
@@ -996,8 +1053,10 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       setProductosOriginales(productosActualizados);
 
       const fechaNueva = String(citaActualizada.fecha || fechaEditada).slice(0, 10);
-      const horaInicioNueva = String(citaActualizada.hora_inicio || horaInicioEditada);
-      const horaFinNueva = String(citaActualizada.hora_fin || horaFinEditada);
+      const horaInicioNueva = normalizeAgendaTimeValue(String(citaActualizada.hora_inicio || horaInicioEditada))
+        || horaInicioEditada;
+      const horaFinNueva = normalizeAgendaTimeValue(String(citaActualizada.hora_fin || horaFinEditada))
+        || horaFinEditada;
       const profesionalNuevo = String(citaActualizada.profesional_id || profesionalEditadoId);
       setFechaEditada(fechaNueva);
       setHoraInicioEditada(horaInicioNueva);
@@ -1776,14 +1835,14 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="text-xs text-gray-500 font-medium mb-0.5 block">Hora inicio</label>
-                        <input
-                          type="time"
+                        <TimeInputWithPicker
                           value={horaInicioEditada}
                           onChange={(e) => {
                             setHoraInicioEditada(e.target.value);
                           }}
                           disabled={isServiceActionsDisabled}
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
+                          inputClassName="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
+                          buttonClassName="h-5 w-5"
                         />
                       </div>
 
@@ -1803,20 +1862,21 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                               setHoraFinManual(false);
                             }}
                             disabled={isServiceActionsDisabled || !horaInicioEditada}
-                            className="text-[10px] text-gray-600 hover:text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-1 rounded border border-gray-300 bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-200 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40"
                           >
+                            <Wand2 className="h-3 w-3" />
                             Auto
                           </button>
                         </div>
-                        <input
-                          type="time"
+                        <TimeInputWithPicker
                           value={horaFinEditada}
                           onChange={(e) => {
                             setHoraFinEditada(e.target.value);
                             setHoraFinManual(true);
                           }}
                           disabled={isServiceActionsDisabled}
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
+                          inputClassName="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
+                          buttonClassName="h-5 w-5"
                         />
                       </div>
                     </div>
@@ -1825,7 +1885,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                       Duración total estimada: <span className="font-semibold">{duracionTotalServicios} min</span>
                     </div>
                     <div className="text-[10px] text-gray-500">
-                      Hora fin actual: {horaFinManual ? 'manual' : 'automática'}
+                      Horario actual: {formatAgendaTime(horaInicioEditada)} - {formatAgendaTime(horaFinEditada)} ({horaFinManual ? 'manual' : 'automática'})
                     </div>
                     <div className="text-[10px] text-gray-500">
                       Fecha actual guardada: {formatFechaSegura(appointmentDetails.rawData?.fecha) || 'No definida'}
@@ -1990,10 +2050,16 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                     <h3 className="text-sm font-bold text-gray-900 truncate">Notas adicionales</h3>
                   </div>
 
-                  <div className="text-center py-2 text-gray-400 text-xs">
-                    <AlertCircle className="w-4 h-4 mx-auto mb-1 text-gray-300" />
-                    <p>No hay notas adicionales</p>
-                  </div>
+                  {tieneNotasAdicionales ? (
+                    <div className="py-1 px-0.5 text-xs text-gray-700 whitespace-pre-wrap break-words">
+                      {notasAdicionales}
+                    </div>
+                  ) : (
+                    <div className="text-center py-2 text-gray-400 text-xs">
+                      <AlertCircle className="w-4 h-4 mx-auto mb-1 text-gray-300" />
+                      <p>No hay notas adicionales</p>
+                    </div>
+                  )}
                 </div>
               </div>
 

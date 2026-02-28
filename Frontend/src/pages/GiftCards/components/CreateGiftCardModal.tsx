@@ -12,12 +12,11 @@ import {
 import { Input } from "../../../components/ui/input";
 import { giftcardsService } from "../giftcardsService";
 import type { GiftCardClientOption, GiftCardCreatePayload } from "../types";
-import { formatMoney, toPositiveNumber } from "./utils";
+import { formatMoney, NEVER_EXPIRES_LABEL, toPositiveNumber } from "./utils";
 
 const PRESET_AMOUNTS = [50000, 100000, 150000, 200000, 300000];
 
 type AmountMode = "free" | "preset";
-type ValidityMode = "annual" | "custom";
 type PaymentMethod = "efectivo" | "transferencia" | "tarjeta_credito" | "tarjeta_debito";
 
 const PAYMENT_OPTIONS: Array<{ label: string; value: PaymentMethod; icon: ReactNode }> = [
@@ -43,31 +42,6 @@ interface CreateGiftCardModalProps {
   currency: string;
   onCreate: (submission: CreateGiftCardSubmission) => Promise<void>;
   isSubmitting: boolean;
-}
-
-function getDateInputFromToday(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function getTodayDateInput(): string {
-  const date = new Date();
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function calculateDaysBetweenToday(endDate: string): number {
-  const today = new Date(getTodayDateInput());
-  const target = new Date(endDate);
-  if (Number.isNaN(target.getTime())) return 0;
-  const milliseconds = target.getTime() - today.getTime();
-  return Math.ceil(milliseconds / (1000 * 60 * 60 * 24));
 }
 
 function formatAmountInput(value: number): string {
@@ -103,9 +77,6 @@ export function CreateGiftCardModal({
   const [beneficiaryEmail, setBeneficiaryEmail] = useState("");
   const [optionalMessage, setOptionalMessage] = useState("");
 
-  const [validityMode, setValidityMode] = useState<ValidityMode>("annual");
-  const [customExpiryDate, setCustomExpiryDate] = useState(getDateInputFromToday(365));
-
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -120,7 +91,7 @@ export function CreateGiftCardModal({
 
     return clients
       .filter((client) => {
-        const value = `${client.nombre} ${client.email ?? ""} ${client.id}`.toLowerCase();
+        const value = `${client.nombre} ${client.email ?? ""}`.toLowerCase();
         return value.includes(term);
       });
   }, [buyerSearch, clients]);
@@ -170,8 +141,6 @@ export function CreateGiftCardModal({
       setBeneficiaryPhone("");
       setBeneficiaryEmail("");
       setOptionalMessage("");
-      setValidityMode("annual");
-      setCustomExpiryDate(getDateInputFromToday(365));
       setPaymentMethod("efectivo");
       return;
     }
@@ -199,12 +168,6 @@ export function CreateGiftCardModal({
 
     if (!selectedBuyer) {
       setFormError("Debes seleccionar el cliente comprador.");
-      return;
-    }
-
-    const customDays = validityMode === "custom" ? calculateDaysBetweenToday(customExpiryDate) : 365;
-    if (validityMode === "custom" && customDays <= 0) {
-      setFormError("La fecha de vigencia personalizada debe ser posterior a hoy.");
       return;
     }
 
@@ -237,7 +200,6 @@ export function CreateGiftCardModal({
       sede_id: sedeId,
       valor: totalAmount,
       moneda: currency,
-      dias_vigencia: validityMode === "custom" ? customDays : 365,
       comprador_cliente_id: selectedBuyer.id,
       comprador_nombre: selectedBuyer.nombre,
       beneficiario_cliente_id: isForAnotherPerson ? undefined : selectedBuyer.id,
@@ -434,43 +396,12 @@ export function CreateGiftCardModal({
           <section className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <div className="space-y-3">
               <h3 className="text-base font-semibold text-gray-900">Vigencia</h3>
-              <div className="space-y-2">
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="radio"
-                    name="validity-mode"
-                    checked={validityMode === "annual"}
-                    onChange={() => setValidityMode("annual")}
-                    className="h-4 w-4 accent-indigo-600"
-                  />
-                  12 meses
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="radio"
-                    name="validity-mode"
-                    checked={validityMode === "custom"}
-                    onChange={() => setValidityMode("custom")}
-                    className="h-4 w-4 accent-indigo-600"
-                  />
-                  Personalizada
-                </label>
-              </div>
-
-              {validityMode === "custom" ? (
-                <Input
-                  type="date"
-                  value={customExpiryDate}
-                  min={getTodayDateInput()}
-                  onChange={(event) => setCustomExpiryDate(event.target.value)}
-                  className="h-11"
-                />
-              ) : null}
+              <Input value={NEVER_EXPIRES_LABEL} readOnly className="h-11 bg-gray-50" />
             </div>
 
             <div className="space-y-3">
-              <h3 className="text-base font-semibold text-gray-900">Sede</h3>
-              <Input value={sedeName?.trim() || sedeId} readOnly className="h-11 bg-gray-50" />
+              <h3 className="text-base font-semibold text-gray-900">Nombre Sede</h3>
+              <Input value={sedeName?.trim() || "—"} readOnly className="h-11 bg-gray-50" />
               <p className="text-xs text-gray-500">Total a emitir: {formatMoney(totalAmount, currency)}</p>
             </div>
           </section>

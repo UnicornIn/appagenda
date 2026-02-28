@@ -11,7 +11,7 @@ import {
 } from "../../../components/ui/dialog";
 import type { GiftCard } from "../types";
 import { GiftCardStatusBadge } from "./GiftCardStatusBadge";
-import { formatGiftCardDate, formatMoney } from "./utils";
+import { formatGiftCardDate, formatMoney, NEVER_EXPIRES_LABEL, resolveGiftCardSedeName } from "./utils";
 
 interface GiftCardConfirmationModalProps {
   open: boolean;
@@ -19,6 +19,8 @@ interface GiftCardConfirmationModalProps {
   giftCard: GiftCard | null;
   fallbackCurrency: string;
   beneficiaryEmail?: string;
+  sedeNamesById?: Record<string, string>;
+  fallbackSedeName?: string;
 }
 
 function escapeForHtml(value: string): string {
@@ -36,8 +38,20 @@ export function GiftCardConfirmationModal({
   giftCard,
   fallbackCurrency,
   beneficiaryEmail,
+  sedeNamesById,
+  fallbackSedeName,
 }: GiftCardConfirmationModalProps) {
   const currency = giftCard?.moneda || fallbackCurrency;
+  const resolvedSedeName = useMemo(() => {
+    if (!giftCard) return "—";
+
+    return resolveGiftCardSedeName({
+      sedeId: giftCard.sede_id,
+      sedeNombre: giftCard.sede_nombre,
+      sedeNamesById,
+      fallbackSedeName,
+    });
+  }, [fallbackSedeName, giftCard, sedeNamesById]);
 
   const emailLink = useMemo(() => {
     if (!giftCard) return null;
@@ -86,9 +100,10 @@ export function GiftCardConfirmationModal({
         <div class="row"><span>Estado</span><span>${escapeForHtml(giftCard.estado || "activa")}</span></div>
         <div class="row"><span>Valor</span><span>${escapeForHtml(formatMoney(Number(giftCard.valor || 0), currency))}</span></div>
         <div class="row"><span>Beneficiario</span><span>${escapeForHtml(giftCard.beneficiario_nombre || giftCard.comprador_nombre || "Sin beneficiario")}</span></div>
+        <div class="row"><span>Nombre sede</span><span>${escapeForHtml(resolvedSedeName)}</span></div>
         <div class="row"><span>Saldo disponible</span><span>${escapeForHtml(formatMoney(Number(giftCard.saldo_disponible || 0), currency))}</span></div>
         <div class="row"><span>Fecha emisión</span><span>${escapeForHtml(formatGiftCardDate(giftCard.fecha_emision || giftCard.created_at))}</span></div>
-        <div class="row"><span>Fecha vencimiento</span><span>${escapeForHtml(formatGiftCardDate(giftCard.fecha_vencimiento))}</span></div>
+        <div class="row"><span>Vigencia</span><span>${escapeForHtml(NEVER_EXPIRES_LABEL)}</span></div>
       </div>
     </div>
     <script>window.print(); window.close();</script>
@@ -142,6 +157,11 @@ export function GiftCardConfirmationModal({
               </div>
 
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+                <p className="text-xs text-gray-500">Nombre Sede</p>
+                <p className="mt-1 text-sm font-semibold text-gray-900">{resolvedSedeName}</p>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
                 <p className="text-xs text-gray-500">Saldo</p>
                 <p className="mt-1 text-sm font-semibold text-gray-900">
                   {formatMoney(Number(giftCard.saldo_disponible || 0), currency)}
@@ -156,10 +176,8 @@ export function GiftCardConfirmationModal({
               </div>
 
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-                <p className="text-xs text-gray-500">Fecha vencimiento</p>
-                <p className="mt-1 text-sm font-semibold text-gray-900">
-                  {formatGiftCardDate(giftCard.fecha_vencimiento)}
-                </p>
+                <p className="text-xs text-gray-500">Vigencia</p>
+                <p className="mt-1 text-sm font-semibold text-gray-900">{NEVER_EXPIRES_LABEL}</p>
               </div>
             </div>
           </div>
