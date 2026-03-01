@@ -158,7 +158,7 @@ export function ServiceProtocol({
   // Cargar fichas del cliente cuando se selecciona una cita
   useEffect(() => {
     if (selectedAppointment?.cliente_id) {
-      fetchFichasCliente(selectedAppointment.cliente_id)
+      fetchFichasCliente(selectedAppointment.cliente_id, selectedAppointment._id)
     } else {
       setFichasCliente([])
       setSelectedFicha(null)
@@ -168,7 +168,7 @@ export function ServiceProtocol({
     }
   }, [selectedAppointment])
 
-  const fetchFichasCliente = async (clienteId: string) => {
+  const fetchFichasCliente = async (clienteId: string, citaId?: string) => {
     try {
       setLoadingFichas(true)
       setErrorFichas(null)
@@ -180,8 +180,13 @@ export function ServiceProtocol({
         return
       }
 
+      const params = new URLSearchParams({ cliente_id: clienteId })
+      if (citaId) {
+        params.append('cita_id', citaId)
+      }
+
       const response = await fetch(
-        `${API_BASE_URL}scheduling/quotes/fichas?cliente_id=${clienteId}`,
+        `${API_BASE_URL}fichas?${params.toString()}`,
         {
           method: 'GET',
           headers: {
@@ -230,7 +235,7 @@ export function ServiceProtocol({
 
   const handleRetry = () => {
     if (selectedAppointment?.cliente_id) {
-      fetchFichasCliente(selectedAppointment.cliente_id)
+      fetchFichasCliente(selectedAppointment.cliente_id, selectedAppointment._id)
     }
   }
 
