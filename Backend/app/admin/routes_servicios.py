@@ -4,7 +4,7 @@ from datetime import datetime
 
 from app.admin.models import ServicioAdmin
 from app.auth.routes import get_current_user
-from app.database.mongo import collection_servicios
+from app.database.mongo import collection_servicios, collection_locales
 from app.id_generator.generator import generar_id, validar_id
 
 router = APIRouter(prefix="/admin/servicios", tags=["Admin - Servicios"])
@@ -14,13 +14,46 @@ router = APIRouter(prefix="/admin/servicios", tags=["Admin - Servicios"])
 # 🔁 Helper: convertir ObjectId a string
 # ===================================================
 def servicio_to_dict(s):
-    """Convierte ObjectId a string para respuesta JSON."""
     s["_id"] = str(s["_id"])
     return s
 
 
+async def _get_franquicia_id_de_sede(sede_id: str):
+    """Obtiene franquicia_id de una sede. Retorna None si no tiene."""
+    if not sede_id:
+        return None
+    sede = await collection_locales.find_one(
+        {"sede_id": sede_id},
+        {"franquicia_id": 1, "_id": 0}
+    )
+    return sede.get("franquicia_id") if sede else None
+
+
+def _build_sede_query(sede_id: str, franquicia_id: str = None) -> dict:
+    """
+    Construye el filtro de acceso a servicios según contexto.
+
+    LÓGICA HÍBRIDA:
+    - Con franquicia_id → servicios globales + franquicia + sede propia
+    - Sin franquicia_id → servicios globales + sede propia (comportamiento anterior)
+    
+    Los servicios "globales" son los que tienen sede_id: null (visibles para todos).
+    """
+    condiciones = [
+        {"sede_id": {"$exists": False}},  # Sin campo sede_id
+        {"sede_id": None},                 # sede_id explícitamente null (global)
+        {"sede_id": sede_id},              # Servicios propios de la sede
+    ]
+
+    if franquicia_id:
+        # ⭐ También incluir servicios marcados con esta franquicia_id
+        condiciones.append({"franquicia_id": franquicia_id})
+
+    return {"$or": condiciones}
+
+
 # ===================================================
-# ✅ Crear servicio CON ID NUMÉRICO
+# ✅ Crear servicio
 # ===================================================
 @router.post("/", response_model=dict)
 async def crear_servicio(
@@ -28,20 +61,20 @@ async def crear_servicio(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Crea un servicio con ID legible numérico tipo SV-231370287946194340.
-    
-    Permisos:
-    - super_admin: Puede crear servicios globales (sede_id=null) o por sede
-    - admin_sede: Solo puede crear servicios para su propia sede
-    """
-    # Validar permisos
-    if current_user["rol"] not in ["super_admin", "admin_sede"]:
-        raise HTTPException(
-            status_code=403, 
-            detail="No autorizado para crear servicios"
-        )
+    Crea un servicio.
 
-    # ⭐ GENERAR ID NUMÉRICO ÚNICO
+    Alcances posibles:
+    - global:     sede_id=null, sin franquicia_id   → visible para TODOS
+    - franquicia: sede_id=null, con franquicia_id   → visible para toda la franquicia
+    - local:      sede_id=X,   sin franquicia_id   → solo esa sede
+
+    Permisos:
+    - super_admin: puede crear en cualquier alcance
+    - admin_sede:  solo crea servicios para su sede (o su franquicia si la tiene)
+    """
+    if current_user["rol"] not in ["super_admin", "admin_sede"]:
+        raise HTTPException(403, "No autorizado para crear servicios")
+
     try:
         servicio_id = await generar_id(
             entidad="servicio",
@@ -52,40 +85,50 @@ async def crear_servicio(
             }
         )
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error al generar ID del servicio: {str(e)}"
-        )
+        raise HTTPException(500, f"Error al generar ID del servicio: {str(e)}")
 
-    # Preparar datos del servicio
     data = servicio.dict()
     data["servicio_id"] = servicio_id
     data["activo"] = True
     data["creado_por"] = current_user["email"]
     data["created_at"] = datetime.now()
 
-    # ⭐ LÓGICA DE ASIGNACIÓN DE SEDE
     if current_user["rol"] == "admin_sede":
-        # Admin sede: SOLO puede crear para su sede
-        data["sede_id"] = current_user.get("sede_id")
-    elif current_user["rol"] == "super_admin":
-        # Super admin: Puede crear global (null) o para sede específica
-        data["sede_id"] = servicio.sede_id  # Puede ser null o una sede específica
+        # admin_sede: servicio para su sede, y hereda franquicia_id si la tiene
+        sede_id = current_user.get("sede_id")
+        franquicia_id = await _get_franquicia_id_de_sede(sede_id)
 
-    # Guardar en base de datos
+        data["sede_id"] = sede_id
+        # ⭐ Marcar con franquicia_id si la sede pertenece a una
+        if franquicia_id:
+            data["franquicia_id"] = franquicia_id
+
+    elif current_user["rol"] == "super_admin":
+        # super_admin: respeta lo que venga en el payload
+        data["sede_id"] = servicio.sede_id  # Puede ser null (global) o una sede
+        # franquicia_id puede venir en el payload o no
+        # Si no viene, queda sin franquicia_id → es un servicio verdaderamente global
+
     result = await collection_servicios.insert_one(data)
+
+    alcance = "global"
+    if data.get("franquicia_id") and not data.get("sede_id"):
+        alcance = "franquicia"
+    elif data.get("sede_id"):
+        alcance = "local"
 
     return {
         "msg": "Servicio creado exitosamente",
         "servicio_id": servicio_id,
         "_id": str(result.inserted_id),
-        "sede_id": data["sede_id"],
-        "alcance": "global" if data["sede_id"] is None else "local"
+        "sede_id": data.get("sede_id"),
+        "franquicia_id": data.get("franquicia_id"),
+        "alcance": alcance
     }
 
 
 # ===================================================
-# 📋 Listar servicios - CORREGIDO
+# 📋 Listar servicios
 # ===================================================
 @router.get("/", response_model=list)
 async def listar_servicios(
@@ -93,79 +136,50 @@ async def listar_servicios(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Lista todos los servicios.
-    
-    - super_admin: Ve todos los servicios (globales y de todas las sedes)
-    - admin_sede: Ve servicios globales + servicios de su sede
-    
-    Query params:
-    - activo: Filtrar por estado (true/false)
+    Lista servicios según rol y contexto de franquicia.
+
+    admin_sede con franquicia_id → globales + franquicia + su sede
+    admin_sede sin franquicia_id → globales + su sede
+    super_admin                  → todos
     """
-    
-    # ⭐ CONSTRUIR QUERY SEGÚN ROL
     if current_user["rol"] == "admin_sede":
-        # Admin sede ve: servicios globales (sede_id es null) + servicios de su sede
-        sede_filter = {
-            "$or": [
-                {"sede_id": current_user["sede_id"]},  # De su sede
-                {"sede_id": {"$exists": False}},       # No tiene campo sede_id
-                {"sede_id": None}                       # sede_id es null
-            ]
-        }
-        
-        # Combinar con filtro de activo si existe
+        sede_id = current_user.get("sede_id")
+
+        # ⭐ Intentar obtener franquicia_id (primero del token, luego de la sede)
+        franquicia_id = current_user.get("franquicia_id") or await _get_franquicia_id_de_sede(sede_id)
+
+        query = _build_sede_query(sede_id, franquicia_id)
+
         if activo is not None:
-            query = {
-                "$and": [
-                    sede_filter,
-                    {"activo": activo}
-                ]
-            }
-        else:
-            query = sede_filter
-            
+            query = {"$and": [query, {"activo": activo}]}
+
     else:  # super_admin
-        # Super admin ve todos los servicios
         query = {}
         if activo is not None:
             query["activo"] = activo
 
     servicios = await collection_servicios.find(query).to_list(None)
-    
     return [servicio_to_dict(s) for s in servicios]
 
 
 # ===================================================
-# 🔍 Obtener servicio por ID (DUAL: legible o ObjectId)
+# 🔍 Obtener servicio por ID
 # ===================================================
 @router.get("/{servicio_id}", response_model=dict)
 async def obtener_servicio(
     servicio_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Obtiene un servicio por su ID legible (SV-2313702) o MongoDB ObjectId.
-    Esto permite compatibilidad con IDs antiguos.
-    """
-    # ⭐ BUSCAR POR ID LEGIBLE PRIMERO
-    servicio = await collection_servicios.find_one({
-        "servicio_id": servicio_id
-    })
-    
-    # Si no se encuentra, intentar con ObjectId (compatibilidad)
+    servicio = await collection_servicios.find_one({"servicio_id": servicio_id})
+
     if not servicio:
         try:
-            servicio = await collection_servicios.find_one({
-                "_id": ObjectId(servicio_id)
-            })
+            servicio = await collection_servicios.find_one({"_id": ObjectId(servicio_id)})
         except Exception:
             pass
 
     if not servicio:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Servicio no encontrado con ID: {servicio_id}"
-        )
+        raise HTTPException(404, f"Servicio no encontrado con ID: {servicio_id}")
 
     return servicio_to_dict(servicio)
 
@@ -179,80 +193,55 @@ async def actualizar_servicio(
     servicio_data: ServicioAdmin,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Actualiza los datos de un servicio.
-    
-    Permisos:
-    - super_admin: Puede editar cualquier servicio
-    - admin_sede: Solo puede editar servicios de su sede
-    """
     if current_user["rol"] not in ["super_admin", "admin_sede"]:
-        raise HTTPException(
-            status_code=403, 
-            detail="No autorizado para editar servicios"
-        )
+        raise HTTPException(403, "No autorizado para editar servicios")
 
-    # ⭐ BUSCAR EL SERVICIO PRIMERO
-    servicio_actual = await collection_servicios.find_one({
-        "servicio_id": servicio_id
-    })
-    
+    servicio_actual = await collection_servicios.find_one({"servicio_id": servicio_id})
     if not servicio_actual:
         try:
-            servicio_actual = await collection_servicios.find_one({
-                "_id": ObjectId(servicio_id)
-            })
+            servicio_actual = await collection_servicios.find_one({"_id": ObjectId(servicio_id)})
         except Exception:
             pass
-    
-    if not servicio_actual:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Servicio no encontrado con ID: {servicio_id}"
-        )
 
-    # ⭐ VALIDAR PERMISOS DE EDICIÓN
+    if not servicio_actual:
+        raise HTTPException(404, f"Servicio no encontrado con ID: {servicio_id}")
+
     if current_user["rol"] == "admin_sede":
-        # Admin sede solo puede editar servicios de su sede
-        if servicio_actual.get("sede_id") != current_user.get("sede_id"):
+        sede_id = current_user.get("sede_id")
+        franquicia_id = current_user.get("franquicia_id") or await _get_franquicia_id_de_sede(sede_id)
+
+        servicio_sede = servicio_actual.get("sede_id")
+        servicio_franquicia = servicio_actual.get("franquicia_id")
+
+        # Puede editar si el servicio es de su sede
+        # No puede editar servicios globales ni de otras franquicias
+        puede_editar = servicio_sede == sede_id
+
+        if not puede_editar:
             raise HTTPException(
-                status_code=403,
-                detail="No puedes editar servicios de otras sedes o servicios globales"
+                403,
+                "Solo puedes editar servicios de tu propia sede"
             )
 
-    # Preparar datos a actualizar (excluir None)
     update_data = {k: v for k, v in servicio_data.dict().items() if v is not None}
-    
-    # No permitir cambiar el ID ni la sede
     update_data.pop("servicio_id", None)
-    update_data.pop("sede_id", None)  # La sede no se puede cambiar
-    
-    # Agregar metadata de actualización
+    update_data.pop("sede_id", None)        # La sede no se puede cambiar
+    update_data.pop("franquicia_id", None)  # La franquicia no se puede cambiar
     update_data["updated_at"] = datetime.now()
     update_data["updated_by"] = current_user["email"]
 
-    # ⭐ ACTUALIZAR
-    if "servicio_id" in servicio_actual:
-        result = await collection_servicios.update_one(
-            {"servicio_id": servicio_id},
-            {"$set": update_data}
-        )
-    else:
-        result = await collection_servicios.update_one(
-            {"_id": ObjectId(servicio_id)},
-            {"$set": update_data}
-        )
+    filter_query = (
+        {"servicio_id": servicio_id}
+        if "servicio_id" in servicio_actual
+        else {"_id": ObjectId(servicio_id)}
+    )
+
+    result = await collection_servicios.update_one(filter_query, {"$set": update_data})
 
     if result.matched_count == 0:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Servicio no encontrado con ID: {servicio_id}"
-        )
+        raise HTTPException(404, f"Servicio no encontrado con ID: {servicio_id}")
 
-    return {
-        "msg": "Servicio actualizado correctamente",
-        "servicio_id": servicio_id
-    }
+    return {"msg": "Servicio actualizado correctamente", "servicio_id": servicio_id}
 
 
 # ===================================================
@@ -263,111 +252,74 @@ async def eliminar_servicio(
     servicio_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Desactiva un servicio (soft delete).
-    No lo elimina físicamente, solo marca como inactivo.
-    
-    Permisos:
-    - super_admin: Puede eliminar cualquier servicio
-    - admin_sede: Solo puede eliminar servicios de su sede
-    """
     if current_user["rol"] not in ["super_admin", "admin_sede"]:
-        raise HTTPException(
-            status_code=403, 
-            detail="No autorizado para eliminar servicios"
-        )
+        raise HTTPException(403, "No autorizado para eliminar servicios")
 
-    # ⭐ BUSCAR EL SERVICIO PRIMERO
-    servicio_actual = await collection_servicios.find_one({
-        "servicio_id": servicio_id
-    })
-    
+    servicio_actual = await collection_servicios.find_one({"servicio_id": servicio_id})
     if not servicio_actual:
         try:
-            servicio_actual = await collection_servicios.find_one({
-                "_id": ObjectId(servicio_id)
-            })
+            servicio_actual = await collection_servicios.find_one({"_id": ObjectId(servicio_id)})
         except Exception:
             pass
-    
-    if not servicio_actual:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Servicio no encontrado con ID: {servicio_id}"
-        )
 
-    # ⭐ VALIDAR PERMISOS DE ELIMINACIÓN
+    if not servicio_actual:
+        raise HTTPException(404, f"Servicio no encontrado con ID: {servicio_id}")
+
     if current_user["rol"] == "admin_sede":
-        # Admin sede solo puede eliminar servicios de su sede
+        # Solo puede eliminar servicios de su propia sede
         if servicio_actual.get("sede_id") != current_user.get("sede_id"):
             raise HTTPException(
-                status_code=403,
-                detail="No puedes eliminar servicios de otras sedes o servicios globales"
+                403,
+                "Solo puedes eliminar servicios de tu propia sede"
             )
 
-    # ⭐ SOFT DELETE: marcar como inactivo
-    update_data = {
-        "activo": False,
-        "deleted_at": datetime.now(),
-        "deleted_by": current_user["email"]
-    }
+    filter_query = (
+        {"servicio_id": servicio_id}
+        if "servicio_id" in servicio_actual
+        else {"_id": ObjectId(servicio_id)}
+    )
 
-    # Intentar por ID legible
-    if "servicio_id" in servicio_actual:
-        result = await collection_servicios.update_one(
-            {"servicio_id": servicio_id},
-            {"$set": update_data}
-        )
-    else:
-        result = await collection_servicios.update_one(
-            {"_id": ObjectId(servicio_id)},
-            {"$set": update_data}
-        )
+    result = await collection_servicios.update_one(
+        filter_query,
+        {"$set": {
+            "activo": False,
+            "deleted_at": datetime.now(),
+            "deleted_by": current_user["email"]
+        }}
+    )
 
     if result.matched_count == 0:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Servicio no encontrado con ID: {servicio_id}"
-        )
+        raise HTTPException(404, f"Servicio no encontrado con ID: {servicio_id}")
 
-    return {
-        "msg": "Servicio eliminado correctamente",
-        "servicio_id": servicio_id
-    }
+    return {"msg": "Servicio eliminado correctamente", "servicio_id": servicio_id}
 
 
 # ===================================================
-# 🔍 VALIDAR ID (Endpoint útil para frontend)
+# 🔍 VALIDAR ID
 # ===================================================
 @router.get("/validar/{servicio_id}", response_model=dict)
 async def validar_servicio_id(
     servicio_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Valida que un ID de servicio sea válido y exista.
-    Útil antes de crear relaciones (asignar a citas, etc.)
-    """
-    # Validar formato
     es_valido_formato = await validar_id(servicio_id, entidad="servicio")
-    
+
     if not es_valido_formato:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Formato de ID inválido. Debe ser: SV-[números]"
-        )
-    
-    # Validar que existe y está activo
+        raise HTTPException(400, "Formato de ID inválido. Debe ser: SV-[números]")
+
     servicio = await collection_servicios.find_one({
         "servicio_id": servicio_id,
         "activo": True
     })
 
     if not servicio:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"No existe servicio activo con ID: {servicio_id}"
-        )
+        raise HTTPException(404, f"No existe servicio activo con ID: {servicio_id}")
+
+    alcance = "global"
+    if servicio.get("franquicia_id") and not servicio.get("sede_id"):
+        alcance = "franquicia"
+    elif servicio.get("sede_id"):
+        alcance = "local"
 
     return {
         "valido": True,
@@ -375,7 +327,7 @@ async def validar_servicio_id(
         "nombre": servicio.get("nombre"),
         "duracion_minutos": servicio.get("duracion_minutos"),
         "precios": servicio.get("precios"),
-        "alcance": "global" if servicio.get("sede_id") is None else "local"
+        "alcance": alcance
     }
 
 
@@ -387,25 +339,14 @@ async def listar_servicios_por_categoria(
     categoria: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Lista servicios filtrados por categoría.
-    
-    Ejemplos de categorías: corte, color, tratamiento, manicure, etc.
-    """
-    query = {
-        "categoria": categoria,
-        "activo": True
-    }
-    
-    # ⭐ FILTRAR SEGÚN PERMISOS
+    query = {"categoria": categoria, "activo": True}
+
     if current_user["rol"] == "admin_sede":
-        # Admin sede ve: servicios globales + servicios de su sede
-        query["$or"] = [
-            {"sede_id": current_user["sede_id"]},
-            {"sede_id": None}
-        ]
-    # super_admin ve todos
+        sede_id = current_user.get("sede_id")
+        franquicia_id = current_user.get("franquicia_id") or await _get_franquicia_id_de_sede(sede_id)
+
+        filtro_acceso = _build_sede_query(sede_id, franquicia_id)
+        query = {"$and": [query, filtro_acceso]}
 
     servicios = await collection_servicios.find(query).to_list(None)
-    
     return [servicio_to_dict(s) for s in servicios]

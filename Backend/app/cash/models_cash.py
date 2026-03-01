@@ -48,17 +48,17 @@ class Moneda(str, Enum):
 class AperturaCajaRequest(BaseModel):
     sede_id: str = Field(..., description="ID de la sede")
     efectivo_inicial: float = Field(..., ge=0, description="Efectivo inicial en caja")
-    fecha: str = Field(..., description="Fecha de apertura (YYYY-MM-DD)")
+    fecha: str = Field(..., description="Fecha de apertura (DD-MM-YYYY)")
     moneda: Moneda = Field(default=Moneda.COP)
     observaciones: Optional[str] = None
     
     @validator('fecha')
     def validar_fecha(cls, v):
         try:
-            datetime.strptime(v, "%Y-%m-%d")
+            datetime.strptime(v, "%d-%m-%Y")
             return v
         except ValueError:
-            raise ValueError("Formato de fecha inválido. Use YYYY-MM-DD")
+            raise ValueError("Formato de fecha inválido. Use DD-MM-YYYY")
 
 class RegistroEgresoRequest(BaseModel):
     sede_id: str = Field(..., description="ID de la sede")
@@ -86,10 +86,10 @@ class RegistroIngresoRequest(BaseModel):
         if v is None:
             return v
         try:
-            datetime.strptime(v, "%Y-%m-%d")
+            datetime.strptime(v, "%d-%m-%Y")
             return v
         except ValueError:
-            raise ValueError("Formato de fecha inválido. Use YYYY-MM-DD")
+            raise ValueError("Formato de fecha inválido. Use DD-MM-YYYY")
 
 class DesgloseFisicoItem(BaseModel):
     denominacion: str = Field(..., description="Ej: 'billete_100', 'moneda_0.25'")
@@ -99,7 +99,7 @@ class DesgloseFisicoItem(BaseModel):
 
 class CierreCajaRequest(BaseModel):
     sede_id: str = Field(..., description="ID de la sede")
-    fecha: str = Field(..., description="Fecha del cierre (YYYY-MM-DD)")
+    fecha: str = Field(..., description="Fecha del cierre (DD-MM-YYYY)")
     efectivo_contado: float = Field(..., ge=0, description="Efectivo físico contado")
     desglose_fisico: Optional[List[DesgloseFisicoItem]] = None
     observaciones: Optional[str] = None
@@ -115,10 +115,10 @@ class ConsultaEfectivoRequest(BaseModel):
         if v is None:
             return v
         try:
-            datetime.strptime(v, "%Y-%m-%d")
+            datetime.strptime(v, "%d-%m-%Y")
             return v
         except ValueError:
-            raise ValueError("Formato de fecha inválido. Use YYYY-MM-DD")
+            raise ValueError("Formato de fecha inválido. Use DD-MM-YYYY")
 
 # ============================================================
 # RESPONSE MODELS
