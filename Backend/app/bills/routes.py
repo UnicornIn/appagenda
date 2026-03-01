@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from app.database.mongo import collection_giftcards
 from app.giftcards.routes_giftcards import _estado_giftcard
+from app.cash.utils_cash import fecha_a_datetime
 
 from app.database.mongo import (
     collection_citas,
@@ -19,11 +20,40 @@ from app.database.mongo import (
     collection_sales,
     collection_inventarios,
     collection_inventory_motions,
-    collection_productos
+    collection_productos,
+    collection_estilista
 )
 from app.auth.routes import get_current_user
 
 router = APIRouter()
+
+def _normalizar_categoria(valor: Optional[str]) -> str:
+    """Normaliza nombre de categoría para comparación robusta."""
+    return (valor or "").strip().lower()
+
+
+def _obtener_porcentaje_comision_servicio(servicio_db: dict, profesional_db: Optional[dict]) -> float:
+    """
+    Prioridad:
+    1) comisión por categoría del estilista (si existe y coincide)
+    2) comisión fija del servicio (comision_estilista)
+    """
+    if profesional_db:
+        comisiones_categoria = profesional_db.get("comisiones_por_categoria") or {}
+        categoria_servicio = _normalizar_categoria(servicio_db.get("categoria"))
+
+        if categoria_servicio and isinstance(comisiones_categoria, dict):
+            for categoria, porcentaje in comisiones_categoria.items():
+                if _normalizar_categoria(categoria) == categoria_servicio:
+                    try:
+                        return float(porcentaje)
+                    except (TypeError, ValueError):
+                        break
+
+    try:
+        return float(servicio_db.get("comision_estilista", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 def generar_numero_comprobante() -> str:
     return str(random.randint(10000000, 99999999))
@@ -69,6 +99,9 @@ async def facturar_cita_o_venta(
     sede_id = documento["sede_id"]
     profesional_id = documento.get("profesional_id")
     profesional_nombre = documento.get("profesional_nombre", "")
+    profesional_db = None
+    if profesional_id:
+        profesional_db = await collection_estilista.find_one({"profesional_id": profesional_id})
 
     sede = await collection_locales.find_one({"sede_id": sede_id})
     if not sede:
@@ -111,12 +144,14 @@ async def facturar_cita_o_venta(
             servicio_id = servicio_item.get("servicio_id")
             nombre = servicio_item.get("nombre", "Servicio")
             precio = servicio_item.get("precio", 0)
+            servicio_db = None
+            comision_porcentaje = 0
 
             comision_servicio = 0
             if tipo_comision in ["servicios", "mixto"] and profesional_id:
                 servicio_db = await collection_servicios.find_one({"servicio_id": servicio_id})
                 if servicio_db:
-                    comision_porcentaje = servicio_db.get("comision_estilista", 0)
+                    comision_porcentaje =  _obtener_porcentaje_comision_servicio(servicio_db, profesional_db)
                     comision_servicio = round((precio * comision_porcentaje) / 100, 2)
                     total_comision_servicios += comision_servicio
 
@@ -124,6 +159,8 @@ async def facturar_cita_o_venta(
                 "tipo": "servicio",
                 "servicio_id": servicio_id,
                 "nombre": nombre,
+                "categoria": servicio_db.get("categoria", "") if servicio_db else "",
+                "porcentaje_comision": comision_porcentaje if tipo_comision in ["servicios", "mixto"] and profesional_id else 0,
                 "cantidad": 1,
                 "precio_unitario": precio,
                 "subtotal": precio,
@@ -420,6 +457,8 @@ async def facturar_cita_o_venta(
             {
                 "servicio_id": item["servicio_id"],
                 "servicio_nombre": item["nombre"],
+                "categoria": item.get("categoria", ""),
+                "porcentaje": item.get("porcentaje_comision", 0),
                 "valor_servicio": item["precio_unitario"],
                 "valor_comision": round(item["comision"], 2),
                 "fecha": fecha_actual.strftime("%Y-%m-%d"),
@@ -661,8 +700,8 @@ async def obtener_ventas_sede(
     sede_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
-    fecha_desde: Optional[str] = Query(None, regex=r"^\d{4}-\d{2}-\d{2}$"),
-    fecha_hasta: Optional[str] = Query(None, regex=r"^\d{4}-\d{2}-\d{2}$"),
+    fecha_desde: Optional[str] = Query(None, regex=r"^\d{2}-\d{2}-\d{4}$|^\d{4}-\d{2}-\d{2}$"),
+    fecha_hasta: Optional[str] = Query(None, regex=r"^\d{2}-\d{2}-\d{4}$|^\d{4}-\d{2}-\d{2}$"),
     profesional_id: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     sort_order: str = Query("desc", regex=r"^(asc|desc)$"),
@@ -677,9 +716,9 @@ async def obtener_ventas_sede(
         if fecha_desde or fecha_hasta:
             filtros["fecha_pago"] = {}
             if fecha_desde:
-                filtros["fecha_pago"]["$gte"] = datetime.strptime(fecha_desde, "%Y-%m-%d")
+                filtros["fecha_pago"]["$gte"] = fecha_a_datetime(fecha_desde)
             if fecha_hasta:
-                fecha_fin = datetime.strptime(fecha_hasta, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+                fecha_fin = fecha_a_datetime(fecha_hasta).replace(hour=23, minute=59, second=59)
                 filtros["fecha_pago"]["$lte"] = fecha_fin
         elif not profesional_id and not search:
             fecha_fin = datetime.now()

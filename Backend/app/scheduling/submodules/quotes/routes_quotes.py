@@ -11,13 +11,7 @@ import json
 from dotenv import load_dotenv
 load_dotenv()
 
-
-from app.scheduling.submodules.quotes.controllers import (
-    generar_pdf_ficha,
-    crear_html_correo_ficha,
-    enviar_correo_con_pdf
-)
-from app.scheduling.models import FichaCreate
+from app.scheduling.submodules.fichas.controllers import generar_y_enviar_pdf_ficha
 from app.scheduling.models import Cita, ProductoItem, PagoRequest, ServicioEnCita, ServicioEnFicha
 from app.database.mongo import (
     collection_citas,
@@ -31,48 +25,12 @@ from app.database.mongo import (
     collection_commissions,
     collection_products
 )
+from app.cash.utils_cash import fecha_a_datetime
 from app.auth.routes import get_current_user
 
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-AWS_BUCKET_NAME = os.getenv("AWS_BUCKET_NAME")
-AWS_REGION = os.getenv("AWS_REGION")
 
 router = APIRouter()
 
-s3_client = boto3.client(
-    's3',
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-    region_name=os.getenv("AWS_REGION", "us-west-2")
-)
-
-
-def upload_to_s3(file: UploadFile, folder_path: str) -> str:
-    try:
-        file_extension = file.filename.split('.')[-1]
-
-        unique_filename = f"{uuid.uuid4()}.{file_extension}"
-        s3_key = f"{folder_path}/{unique_filename}"
-
-
-        s3_client.put_object(
-            Bucket=os.getenv("AWS_BUCKET_NAME"),
-            Key=s3_key,
-            Body=file.file.read(),
-            ContentType=file.content_type or "image/webp"
-        )
-
-        base_url = os.getenv("AWS_PUBLIC_BASE_URL")
-        if not base_url:    
-            raise RuntimeError("AWS_PUBLIC_BASE_URL no está configurado")
-
-        return f"{base_url}/{s3_key}"
-
-
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 # -----------------------
 # EMAIL (config desde env)
@@ -477,6 +435,7 @@ async def crear_cita(
         "cliente_telefono": cliente.get("telefono"),
         "profesional_nombre": profesional.get("nombre"),
         "sede_nombre": sede.get("nombre"),
+        "notas": cita.notas,
     
         # Fechas y estado
         "fecha": fecha_str,
@@ -1808,180 +1767,6 @@ async def no_asistio(cita_id: str, current_user: dict = Depends(get_current_user
 
     return {"success": True, "mensaje": "Marcada como no asistió", "cita_id": cita_id}
 
-# ... (resto de endpoints sin cambios: fichas, estilista, productos, etc.)
-# Los mantengo igual porque no necesitan modificaciones para monedas
-
-
-# =============================================================
-# 🔹 OBTENER FICHAS POR CLIENTE (con filtros inteligentes)
-# ⭐ ACTUALIZADO PARA SOPORTAR MÚLTIPLES SERVICIOS
-# =============================================================
-@router.get("/fichas", response_model=dict)
-async def obtener_fichas_por_cliente(
-    cliente_id: str = Query(...),
-    cita_id: str = Query(None, description="Filtrar por cita específica (para facturación)"),
-    fecha: str = Query(None, description="Filtrar por fecha (YYYY-MM-DD)"),
-    solo_hoy: bool = Query(False, description="Solo fichas de hoy"),
-    limit: int = Query(10, description="Límite de resultados"),
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Obtiene fichas técnicas de un cliente con filtros opcionales.
-    
-    Ejemplos de uso:
-    - Facturación: ?cliente_id=CL-90411&cita_id=6941c18a...
-    - Historial: ?cliente_id=CL-90411
-    - Fichas de hoy: ?cliente_id=CL-90411&solo_hoy=true
-    
-    ⭐ PRIORIDAD DE FILTROS:
-    1. cita_id (ignora fecha y solo_hoy)
-    2. fecha específica
-    3. solo_hoy
-    4. cliente_id solo
-    """
-    
-    # -----------------------------------------
-    # 1. Validación de acceso
-    # -----------------------------------------
-    rol = current_user["rol"]
-    if rol not in ["super_admin", "admin_franquicia", "admin_sede", "estilista"]:
-        raise HTTPException(status_code=403, detail="No autorizado")
-
-    # -----------------------------------------
-    # 2. Construir filtro dinámico
-    # -----------------------------------------
-    filtro = {"cliente_id": cliente_id}
-
-    # 🔹 PRIORIDAD 1: Si pasan cita_id, buscar en datos_especificos.cita_id
-    if cita_id:
-        filtro["datos_especificos.cita_id"] = cita_id
-        limit = 1  # Solo necesitamos una
-        print(f"🔍 Buscando ficha con cita_id: {cita_id}")
-    
-    # 🔹 PRIORIDAD 2: Filtrar por fecha específica
-    elif fecha:
-        filtro["fecha_reserva"] = fecha
-        print(f"🔍 Buscando fichas con fecha: {fecha}")
-    
-    # 🔹 PRIORIDAD 3: Filtrar por hoy
-    elif solo_hoy:
-        from datetime import datetime
-        hoy = datetime.now().strftime("%Y-%m-%d")
-        filtro["fecha_reserva"] = hoy
-        print(f"🔍 Buscando fichas de hoy: {hoy}")
-    
-    else:
-        print(f"🔍 Buscando todas las fichas del cliente: {cliente_id}")
-
-    # -----------------------------------------
-    # 3. Buscar fichas
-    # -----------------------------------------
-    print(f"📋 Filtro aplicado: {filtro}")
-    
-    fichas = (
-        await collection_card
-        .find(filtro)
-        .sort("fecha_ficha", -1)
-        .limit(limit)
-        .to_list(None)
-    )
-
-    print(f"✅ Fichas encontradas: {len(fichas)}")
-
-    if not fichas:
-        return {"success": True, "total": 0, "fichas": []}
-
-    resultado = []
-
-    # -----------------------------------------
-    # 4. Enriquecer cada ficha
-    # -----------------------------------------
-    for ficha in fichas:
-        # Extraer cita_id desde datos_especificos si existe
-        datos_especificos = ficha.get("datos_especificos", {})
-        cita_id_ficha = datos_especificos.get("cita_id") if isinstance(datos_especificos, dict) else None
-        
-        # ⭐ NUEVA LÓGICA: Manejar múltiples servicios
-        servicios_ficha = ficha.get("servicios", [])
-        servicio_id_principal = ficha.get("servicio_id")  # Compatibilidad
-        
-        # Si tiene array de servicios (nuevo formato)
-        if servicios_ficha and isinstance(servicios_ficha, list):
-            # Enriquecer todos los servicios
-            servicios_enriquecidos = []
-            for serv in servicios_ficha:
-                servicio_db = await collection_servicios.find_one(
-                    {"servicio_id": serv.get("servicio_id")}
-                )
-                servicios_enriquecidos.append({
-                    "servicio_id": serv.get("servicio_id"),
-                    "nombre": serv.get("nombre") or (servicio_db.get("nombre") if servicio_db else "Desconocido"),
-                    "precio": serv.get("precio", 0)
-                })
-        
-        # Si solo tiene servicio_id único (formato antiguo)
-        elif servicio_id_principal:
-            servicio_db = await collection_servicios.find_one(
-                {"servicio_id": servicio_id_principal}
-            )
-            servicios_enriquecidos = [{
-                "servicio_id": servicio_id_principal,
-                "nombre": servicio_db.get("nombre") if servicio_db else "Desconocido",
-                "precio": ficha.get("precio", 0)
-            }]
-        
-        else:
-            servicios_enriquecidos = []
-        
-        # Construir objeto de respuesta
-        ficha_norm = {
-            "id": str(ficha.get("_id")),
-            "cita_id": cita_id_ficha,
-            "cliente_id": ficha.get("cliente_id"),
-            "nombre": ficha.get("nombre"),
-            "apellido": ficha.get("apellido"),
-            "telefono": ficha.get("telefono"),
-            "cedula": ficha.get("cedula"),
-            
-            # ⭐ CAMBIO: Ahora devuelve array de servicios
-            "servicios": servicios_enriquecidos,
-            
-            # ⭐ COMPATIBILIDAD: Mantener campos antiguos
-            "servicio_id": servicio_id_principal,
-            "servicio_nombre": servicios_enriquecidos[0]["nombre"] if servicios_enriquecidos else None,
-            
-            "profesional_id": ficha.get("profesional_id"),
-            "sede_id": ficha.get("sede_id"),
-            "fecha_ficha": ficha.get("fecha_ficha"),
-            "fecha_reserva": ficha.get("fecha_reserva"),
-            "tipo_ficha": ficha.get("tipo_ficha"),
-            "precio": ficha.get("precio"),
-            "estado": ficha.get("estado"),
-            "estado_pago": ficha.get("estado_pago"),
-            "contenido": datos_especificos,
-        }
-
-        # Enriquecimiento de profesional y sede
-        profesional = await collection_estilista.find_one(
-            {"profesional_id": ficha.get("profesional_id")}
-        )
-        sede = await collection_locales.find_one(
-            {"sede_id": ficha.get("sede_id")}
-        )
-
-        ficha_norm["profesional_nombre"] = profesional.get("nombre") if profesional else None
-        ficha_norm["sede_nombre"] = sede.get("nombre") if sede else None
-
-        resultado.append(ficha_norm)
-
-    # -----------------------------------------
-    # 5. Respuesta final
-    # -----------------------------------------
-    return {
-        "success": True,
-        "total": len(resultado),
-        "fichas": resultado
-    }
 
 # ============================================================
 # 📅 Obtener citas del estilista autenticado - VERSIÓN OPTIMIZADA
@@ -1993,8 +1778,8 @@ async def obtener_fichas_por_cliente(
 @router.get("/citas/estilista", response_model=list)
 async def get_citas_estilista(
     current_user: dict = Depends(get_current_user),
-    fecha_desde: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
-    fecha_hasta: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+    fecha_desde: Optional[str] = Query(default=None, description="DD-MM-YYYY"),
+    fecha_hasta: Optional[str] = Query(default=None, description="DD-MM-YYYY"),
 ):
     if current_user["rol"] != "estilista":
         raise HTTPException(status_code=403, detail="Solo los estilistas pueden ver sus citas")
@@ -2006,8 +1791,8 @@ async def get_citas_estilista(
     profesional_id = estilista.get("profesional_id")
 
     hoy = datetime.utcnow()
-    dt_desde = datetime.strptime(fecha_desde, "%Y-%m-%d") if fecha_desde else hoy - timedelta(days=30)
-    dt_hasta = (datetime.strptime(fecha_hasta, "%Y-%m-%d") + timedelta(days=1)) if fecha_hasta else hoy + timedelta(days=60)
+    dt_desde = fecha_a_datetime(fecha_desde) if fecha_desde else hoy - timedelta(days=30)
+    dt_hasta = (fecha_a_datetime(fecha_hasta) + timedelta(days=1)) if fecha_hasta else hoy + timedelta(days=60)
 
     str_desde = dt_desde.strftime("%Y-%m-%d")
     str_hasta = (dt_hasta - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -2209,183 +1994,6 @@ async def get_citas_estilista(
         })
 
     return respuesta
-
-
-def parse_ficha(data: str = Form(...)):
-    try:
-        parsed = json.loads(data)
-        return FichaCreate(**parsed)
-    except Exception as e:
-        print("Error parseando JSON de ficha:", e)
-        raise HTTPException(422, "Formato inválido en 'data'. Debe ser JSON válido.")   
-
-# ============================================================
-# 📌 Crear ficha 
-# ============================================================
-@router.post("/create-ficha", response_model=dict)
-async def crear_ficha(
-    data: FichaCreate = Depends(parse_ficha),
-    fotos_antes: Optional[List[UploadFile]] = File(None),
-    fotos_despues: Optional[List[UploadFile]] = File(None),
-    current_user: dict = Depends(get_current_user)
-):
-    print("📝 Data recibida:", data.dict())
-
-    # ------------------------------
-    # ⭐ COMPATIBILIDAD: Determinar servicio(s)
-    # ------------------------------
-    servicios_lista = []
-    servicio_id_principal = None
-    
-    # Caso 1: Viene servicios (array) - NUEVO FORMATO
-    if data.servicios and len(data.servicios) > 0:
-        servicios_lista = data.servicios
-        servicio_id_principal = data.servicios[0].servicio_id
-        print(f"✅ Usando servicios (array): {[s.servicio_id for s in servicios_lista]}")
-    
-    # Caso 2: Viene servicio_id único - FORMATO ANTIGUO
-    elif data.servicio_id:
-        servicios_lista = [ServicioEnFicha(servicio_id=data.servicio_id)]
-        servicio_id_principal = data.servicio_id
-        print(f"✅ Usando servicio_id único: {servicio_id_principal}")
-    
-    else:
-        raise HTTPException(400, "Debe especificar al menos un servicio")
-
-    # ------------------------------
-    # VALIDAR
-    # ------------------------------
-    if current_user.get("rol") not in ["estilista", "admin_sede", "super_admin"]:
-        raise HTTPException(403, "No autorizado")
-
-    cliente = await collection_clients.find_one({"cliente_id": data.cliente_id})
-    if not cliente:
-        raise HTTPException(404, "Cliente no encontrado")
-
-    # ⭐ VALIDAR TODOS LOS SERVICIOS
-    servicios_validados = []
-    precio_total = 0
-    
-    for servicio_item in servicios_lista:
-        servicio = await collection_servicios.find_one({
-            "$or": [
-                {"servicio_id": servicio_item.servicio_id},
-                {"unique_id": servicio_item.servicio_id}
-            ]
-        })
-        if not servicio:
-            raise HTTPException(404, f"Servicio {servicio_item.servicio_id} no encontrado")
-        
-        servicios_validados.append({
-            "servicio_id": servicio_item.servicio_id,
-            "nombre": servicio.get("nombre"),
-            "precio": servicio_item.precio or servicio.get("precio", 0)
-        })
-        
-        precio_total += servicio_item.precio or servicio.get("precio", 0)
-
-    profesional = await collection_estilista.find_one({
-        "profesional_id": data.profesional_id
-    })
-    if not profesional:
-        raise HTTPException(404, "Profesional no encontrado")
-
-    sede = await collection_locales.find_one({"sede_id": data.sede_id})
-    if not sede:
-        raise HTTPException(404, "Sede no encontrada")
-
-    # ------------------------------
-    # SUBIR FOTOS
-    # ------------------------------
-    urls_antes = []
-    if fotos_antes:
-        for foto in fotos_antes:
-            url = upload_to_s3(
-                foto,
-                f"companies/{sede.get('company_id','default')}/clients/{data.cliente_id}/fichas/{data.tipo_ficha}/antes"
-            )
-            urls_antes.append(url)
-
-    urls_despues = []
-    if fotos_despues:
-        for foto in fotos_despues:
-            url = upload_to_s3(
-                foto,
-                f"companies/{sede.get('company_id','default')}/clients/{data.cliente_id}/fichas/{data.tipo_ficha}/despues"
-            )
-            urls_despues.append(url)
-
-    # ------------------------------
-    # FIX RESPUESTAS
-    # ------------------------------
-    respuestas_final = data.respuestas
-
-    if "respuestas" in data.datos_especificos:
-        respuestas_final = data.datos_especificos.get("respuestas", [])
-
-    # ------------------------------
-    # ⭐ OBJETO FINAL CON SERVICIOS
-    # ------------------------------
-    ficha = {
-        "_id": ObjectId(),
-        "cliente_id": data.cliente_id,
-        "sede_id": data.sede_id,
-        
-        # ⭐ COMPATIBILIDAD: Guardar ambos formatos
-        "servicio_id": servicio_id_principal,  # Para queries antiguas
-        "servicios": servicios_validados,  # NUEVO: Lista completa
-        
-        "servicio_nombre": servicios_validados[0]["nombre"],  # Primer servicio
-        "profesional_id": data.profesional_id,
-        "profesional_nombre": data.profesional_nombre or profesional.get("nombre"),
-        "sede_nombre": sede.get("nombre"),
-
-        "fecha_ficha": data.fecha_ficha or datetime.now().isoformat(),
-        "fecha_reserva": data.fecha_reserva,
-
-        "correo": data.email or cliente.get("correo"),
-        "nombre": data.nombre or cliente.get("nombre"),
-        "apellido": data.apellido or cliente.get("apellido"),
-        "cedula": data.cedula or cliente.get("cedula"),
-        "telefono": data.telefono or cliente.get("telefono"),
-
-        "precio": data.precio or precio_total,  # ⭐ Suma de todos los servicios
-        "estado": data.estado,
-        "estado_pago": data.estado_pago,
-
-        "tipo_ficha": data.tipo_ficha,
-
-        "datos_especificos": data.datos_especificos,
-        "descripcion_servicio": data.descripcion_servicio,
-        "respuestas": respuestas_final,
-
-        "fotos": {
-            "antes": urls_antes,
-            "despues": urls_despues,
-            "antes_urls": data.fotos_antes,
-            "despues_urls": data.fotos_despues
-        },
-
-        "autorizacion_publicacion": data.autorizacion_publicacion,
-        "comentario_interno": data.comentario_interno,
-
-        "created_at": datetime.now(),
-        "created_by": current_user.get("email"),
-        "user_id": current_user.get("user_id"),
-
-        "procesado_imagenes": bool(urls_antes or urls_despues),
-        "origen": "manual"
-    }
-
-    await collection_card.insert_one(ficha)
-
-    ficha["_id"] = str(ficha["_id"])
-
-    return {
-        "success": True,
-        "message": "Ficha creada exitosamente",
-        "ficha": ficha
-    }
 
 def fix_mongo_id(doc):
     doc["_id"] = str(doc["_id"])
@@ -2769,149 +2377,52 @@ async def finalizar_servicio_con_pdf(
     cita_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Finaliza un servicio, genera PDF y envía por correo.
-    """
-    # Verificar rol
     if current_user["rol"] not in ["admin_sede", "estilista"]:
-        raise HTTPException(
-            status_code=403,
-            detail="No tienes permisos para finalizar servicios"
-        )
+        raise HTTPException(status_code=403, detail="No tienes permisos para finalizar servicios")
 
-    # Verificar que la cita exista
     cita = await collection_citas.find_one({"_id": ObjectId(cita_id)})
     if not cita:
-        raise HTTPException(
-            status_code=404,
-            detail="La cita no existe"
-        )
+        raise HTTPException(status_code=404, detail="La cita no existe")
 
-    # No permitir finalizar si ya está finalizado
     if cita.get("estado") == "finalizado":
-        raise HTTPException(
-            status_code=400,
-            detail="Esta cita ya fue finalizada"
-        )
+        raise HTTPException(status_code=400, detail="Esta cita ya fue finalizada")
 
-    # Buscar la ficha asociada a la cita
     ficha = await collection_card.find_one({"datos_especificos.cita_id": cita_id})
     if not ficha:
-        raise HTTPException(
-            status_code=404,
-            detail="No se encontró ficha técnica asociada a esta cita"
-        )
+        raise HTTPException(status_code=404, detail="No se encontró ficha técnica asociada a esta cita")
 
-    # Actualizar estado de la cita
-    update_data = {
-        "estado": "finalizado",
-        "fecha_finalizacion": datetime.now(),
-        "finalizado_por": current_user.get("email"),
-    }
-
+    # Actualizar estado
     await collection_citas.update_one(
         {"_id": ObjectId(cita_id)},
-        {"$set": update_data}
+        {"$set": {
+            "estado":             "finalizado",
+            "fecha_finalizacion": datetime.now(),
+            "finalizado_por":     current_user.get("email")
+        }}
     )
-
-    # Obtener la cita actualizada con TODOS los datos
-    cita_actualizada = await collection_citas.find_one({"_id": ObjectId(cita_id)})
-
-    # Actualizar también el estado de la ficha
     await collection_card.update_one(
         {"_id": ficha["_id"]},
         {"$set": {"estado": "finalizado"}}
     )
 
-    # Generar PDF con los datos de la ficha
-    cliente_email = None  # Definir fuera del try para usarla en el return
-    try:
-        print(f"🔍 Generando PDF para cita {cita_id}...")
-        print(f"📄 Datos financieros de la cita: valor_total={cita_actualizada.get('valor_total')}, abono={cita_actualizada.get('abono')}")
-        print(f"📄 Método de pago: actual={cita_actualizada.get('metodo_pago_actual')}, inicial={cita_actualizada.get('metodo_pago_inicial')}")
-        
-        # Preparar datos de cita para el PDF
-        cita_data_for_pdf = {
-            "cita_id": cita_id,
-            "estado": cita_actualizada.get("estado", "finalizado"),
-            "fecha_finalizacion": cita_actualizada.get("fecha_finalizacion", datetime.now()),
-            "finalizado_por": cita_actualizada.get("finalizado_por", current_user.get("email")),
-            # Datos financieros COMPLETOS
-            "valor_total": cita_actualizada.get("valor_total", 0),
-            "abono": cita_actualizada.get("abono", 0),
-            "saldo_pendiente": cita_actualizada.get("saldo_pendiente", 0),
-            "estado_pago": cita_actualizada.get("estado_pago", "pendiente"),
-            "metodo_pago_actual": cita_actualizada.get("metodo_pago_actual"),
-            "metodo_pago_inicial": cita_actualizada.get("metodo_pago_inicial"),
-            "moneda": cita_actualizada.get("moneda", "COP"),
-            "hora_fin": cita_actualizada.get("hora_fin", "No especificado"),
-        }
-        
-        pdf_bytes = await generar_pdf_ficha(ficha, cita_data_for_pdf)
-        
-        print(f"✅ PDF generado exitosamente ({len(pdf_bytes)} bytes)")
-        
-        # Preparar datos para el correo
-        cliente_email = ficha.get("email")
-        if not cliente_email:
-            # Si no hay email en la ficha, buscar en el cliente
-            print(f"🔍 Buscando correo del cliente con ID: {ficha.get('cliente_id')}")
-            cliente = await collection_clients.find_one({"cliente_id": ficha.get("cliente_id")})
-            if cliente and cliente.get("correo"):
-                cliente_email = cliente.get("correo")
-                print(f"📧 Email encontrado: {cliente_email}")
-        
-        if cliente_email:
-            # Crear HTML del correo (SIN AWAIT - porque ahora es función normal)
-            html_correo = crear_html_correo_ficha(
-                cliente_nombre=ficha.get("nombre", "Cliente"),
-                servicio_nombre=ficha.get("servicio_nombre", "Servicio"),
-                fecha=datetime.now().strftime("%d/%m/%Y %H:%M")
-            )
-            
-            # Crear nombre del archivo PDF
-            ficha_id_str = str(ficha.get('_id', ''))
-            nombre_archivo = f"comprobante_servicio_{ficha_id_str[-6:] if len(ficha_id_str) >= 6 else ficha_id_str}.pdf"
-            
-            print(f"📧 Enviando correo a {cliente_email}")
-            
-            # Enviar correo con PDF adjunto (ESTA SÍ lleva await porque es async)
-            enviado = await enviar_correo_con_pdf(
-                destinatario=cliente_email,
-                asunto=f"✅ Comprobante de Servicio - {ficha.get('servicio_nombre', 'Servicio')}",
-                mensaje_html=html_correo,
-                pdf_bytes=pdf_bytes,
-                nombre_archivo=nombre_archivo
-            )
-            
-            if enviado:
-                print(f"✅ PDF enviado a {cliente_email}")
-            else:
-                print(f"⚠️ PDF generado pero no enviado")
-        else:
-            print("⚠️ No se encontró email del cliente")
-        
-        # Guardar referencia del PDF generado
-        await collection_citas.update_one(
-            {"_id": ObjectId(cita_id)},
-            {"$set": {
-                "pdf_generado": True,
-                "pdf_fecha_generacion": datetime.now(),
-                "pdf_enviado": bool(cliente_email)
-            }}
-        )
-        
-    except Exception as e:
-        print(f"❌ Error generando/enviando PDF: {e}")
-        import traceback
-        traceback.print_exc()
+    # Leer ficha actualizada y generar PDF — UNA SOLA LÍNEA en vez de 60
+    ficha_actualizada = await collection_card.find_one({"_id": ficha["_id"]})
+    pdf_result = await generar_y_enviar_pdf_ficha(ficha_actualizada, cita_id)
+
+    # Guardar resultado del PDF en la cita
+    await collection_citas.update_one(
+        {"_id": ObjectId(cita_id)},
+        {"$set": {
+            "pdf_generado":         pdf_result["pdf_generado"],
+            "pdf_fecha_generacion": datetime.now(),
+            "pdf_enviado":          pdf_result["pdf_enviado"]
+        }}
+    )
 
     return {
         "success": True,
         "message": "Servicio finalizado correctamente",
         "cita_id": cita_id,
-        "estado": "finalizado",
-        "pdf_generado": True,
-        "pdf_enviado": bool(cliente_email) if cliente_email is not None else False,
-        "cliente_email": cliente_email
+        "estado":  "finalizado",
+        **pdf_result  # contiene: pdf_generado, pdf_enviado, cliente_email
     }

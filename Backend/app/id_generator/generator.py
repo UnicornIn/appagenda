@@ -72,6 +72,7 @@ PREFIJOS_VALIDOS = {
     "cliente": "CL",
     "cita": "CT",
     "servicio": "SV",
+    "franquicia": "FQ",
     "producto": "PR",
     "estilista": "ES",
     "profesional": "ES",
@@ -98,7 +99,7 @@ TipoEntidad = Literal[
     "cliente", "cita", "servicio", "producto", "estilista", "profesional",
     "factura", "venta", "pago", "inventario", "pedido", "movimiento", "proveedor",
     "sede", "local", "promocion", "descuento", "categoria",
-    "nota", "recordatorio", "notificacion", "reporte", "usuario"
+    "nota", "recordatorio", "notificacion", "reporte", "usuario", "franquicia"
 ]
 
 

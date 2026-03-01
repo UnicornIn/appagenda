@@ -171,4 +171,3 @@ async def eliminar_bloqueo(
         raise HTTPException(status_code=404, detail="Bloqueo no encontrado")
 
     return {"msg": "Bloqueo eliminado correctamente"}
-
