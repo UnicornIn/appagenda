@@ -1,8 +1,10 @@
 import { API_BASE_URL } from "../../../types/config";
 import type { Estilista, CreateEstilistaData } from "../../../types/estilista";
+import { extractKnownServiceCommissionFields } from "../../../lib/serviceCommissions";
 
 // Interface para la respuesta de la API
 interface ApiEstilista {
+  [key: string]: unknown;
   _id: string;
   nombre: string;
   email: string;
@@ -87,6 +89,7 @@ export const estilistaService = {
       })) || [];
 
       return {
+        ...(estilista as Record<string, unknown>),
         _id: estilista._id,
         nombre: estilista.nombre,
         email: estilista.email,
@@ -282,7 +285,7 @@ export const estilistaService = {
     return result;
   },
 
-  async updateEstilista(token: string, profesionalId: string, estilistaData: Partial<Estilista>): Promise<Estilista> {
+  async updateEstilista(token: string, profesionalId: string, estilistaData: Partial<Estilista> & Record<string, unknown>): Promise<Estilista> {
     const requestData: any = {
       nombre: estilistaData.nombre?.trim(),
       email: estilistaData.email?.trim(),
@@ -295,6 +298,11 @@ export const estilistaService = {
     if (estilistaData.comision !== undefined) {
       requestData.comision = estilistaData.comision;
     }
+    
+    Object.assign(
+      requestData,
+      extractKnownServiceCommissionFields(estilistaData),
+    );
 
     console.log('📤 Actualizando estilista:', requestData);
 
@@ -326,6 +334,7 @@ export const estilistaService = {
     })) || [];
 
     return {
+      ...(result.profesional as Record<string, unknown>),
       _id: result.profesional._id,
       nombre: result.profesional.nombre,
       email: result.profesional.email,
@@ -386,6 +395,7 @@ export const estilistaService = {
     })) || [];
     
     return {
+      ...(data as Record<string, unknown>),
       _id: data._id,
       nombre: data.nombre,
       email: data.email,

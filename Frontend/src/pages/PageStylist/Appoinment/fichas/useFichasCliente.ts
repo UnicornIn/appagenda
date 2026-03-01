@@ -88,7 +88,7 @@ export function useFichasCliente({
       console.log('🔍 Buscando fichas con params:', params.toString());
 
       const response = await fetch(
-        `${API_BASE_URL}scheduling/quotes/fichas?${params.toString()}`,
+        `${API_BASE_URL}fichas?${params.toString()}`,
         {
           method: 'GET',
           headers: {

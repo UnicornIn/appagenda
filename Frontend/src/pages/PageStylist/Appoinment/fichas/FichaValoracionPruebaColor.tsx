@@ -307,7 +307,7 @@ export function FichaValoracionPruebaColor({ cita, datosIniciales, onGuardar, on
       formDataToSend.append('data', JSON.stringify(fichaData));
 
       // 6. Enviar petición
-      const response = await fetch(`${API_BASE_URL}scheduling/quotes/create-ficha`, {
+      const response = await fetch(`${API_BASE_URL}create-ficha`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

@@ -1,12 +1,19 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { X, Loader, ChevronDown, ChevronUp } from 'lucide-react'
 import type { Estilista } from "../../../types/estilista"
+import { ServiceCommissionsModal } from "../../../components/Professionales/ServiceCommissionsModal"
 import { sedeService, type Sede } from "../../PageSuperAdmin/Sedes/sedeService"
 import { serviciosService } from "../Services/serviciosService"
 import { useAuth } from "../../../components/Auth/AuthContext"
 import { formatSedeNombre } from "../../../lib/sede"
+import {
+  buildServiceCommissionPatch,
+  resolveServiceCommissions,
+  type ServiceCommissionBinding,
+  type ServiceCommissionEntry,
+} from "../../../lib/serviceCommissions"
 
 // Definir el tipo Servicio que coincide con la respuesta del servicio
 interface Servicio {
@@ -49,7 +56,23 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
   const [isLoadingServicios, setIsLoadingServicios] = useState(false)
   const [isSedeDropdownOpen, setIsSedeDropdownOpen] = useState(false)
   const [isServiciosDropdownOpen, setIsServiciosDropdownOpen] = useState(false)
+  const [isCommissionsModalOpen, setIsCommissionsModalOpen] = useState(false)
+  const [serviceCommissionBinding, setServiceCommissionBinding] = useState<ServiceCommissionBinding | null>(null)
+  const [serviceCommissionEntries, setServiceCommissionEntries] = useState<ServiceCommissionEntry[]>([])
   const { user } = useAuth()
+
+  const serviceOptions = useMemo(() => {
+    return servicios.map((servicio) => ({
+      id: servicio.servicio_id,
+      nombre: servicio.nombre,
+    }))
+  }, [servicios])
+
+  const configuredServiceCommissions = useMemo(() => {
+    return serviceCommissionEntries.filter((entry) => entry.valor > 0).length
+  }, [serviceCommissionEntries])
+
+  const canPersistServiceCommissions = serviceCommissionBinding !== null
 
   // Cargar sedes y servicios disponibles
   useEffect(() => {
@@ -143,6 +166,23 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
     }
   }, [estilista, isOpen])
 
+  useEffect(() => {
+    if (!isOpen || !estilista) {
+      setServiceCommissionBinding(null)
+      setServiceCommissionEntries([])
+      return
+    }
+
+    const sedeId = formData.sede_id || estilista.sede_id
+    const resolved = resolveServiceCommissions(
+      estilista as unknown as Record<string, unknown>,
+      sedeId,
+    )
+
+    setServiceCommissionBinding(resolved.binding)
+    setServiceCommissionEntries(resolved.entries)
+  }, [formData.sede_id, isOpen, estilista])
+
   // Cerrar dropdowns cuando se hace clic fuera
   useEffect(() => {
     const handleClickOutside = () => {
@@ -156,6 +196,12 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
 
     return () => {
       document.removeEventListener('click', handleClickOutside)
+    }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsCommissionsModalOpen(false)
     }
   }, [isOpen])
 
@@ -208,6 +254,17 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
     // Solo incluir password si es un nuevo estilista y tiene valor
     if (!estilista && formData.password.trim()) {
       saveData.password = formData.password;
+    }
+
+    if (estilista) {
+      const serviceCommissionsPatch = buildServiceCommissionPatch(
+        estilista as unknown as Record<string, unknown>,
+        serviceCommissionBinding,
+        formData.sede_id || estilista.sede_id,
+        serviceCommissionEntries,
+      )
+
+      Object.assign(saveData as Record<string, unknown>, serviceCommissionsPatch)
     }
 
     // Validaciones finales antes de enviar
@@ -386,6 +443,32 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
             </p>
           </div>
 
+          {estilista && (
+            <div className="rounded-lg border border-gray-300 bg-gray-50 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Comisiones por servicio</p>
+                  <p className="text-xs text-gray-700">
+                    {configuredServiceCommissions} servicio(s) con comisión mayor a 0.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsCommissionsModalOpen(true)}
+                  className="px-3 py-2 text-sm font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                  disabled={isSaving || serviceOptions.length === 0}
+                >
+                  Editar comisiones
+                </button>
+              </div>
+              {!canPersistServiceCommissions && (
+                <p className="mt-2 text-xs text-amber-700">
+                  No se detectó un campo de comisiones por servicio en el payload actual del backend para este estilista.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Selector de Servicios (Especialidades) */}
           <div className="relative">
             <label className="block text-sm font-medium mb-2">Especialidades (Servicios)</label>
@@ -534,6 +617,19 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
             </button>
           </div>
         </form>
+
+        <ServiceCommissionsModal
+          isOpen={isCommissionsModalOpen}
+          stylistName={formData.nombre || estilista?.nombre || "estilista"}
+          services={serviceOptions}
+          initialEntries={serviceCommissionEntries}
+          canPersist={canPersistServiceCommissions}
+          onClose={() => setIsCommissionsModalOpen(false)}
+          onSave={(entries) => {
+            setServiceCommissionEntries(entries)
+            setIsCommissionsModalOpen(false)
+          }}
+        />
       </div>
     </div>
   )

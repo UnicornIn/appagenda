@@ -82,17 +82,20 @@ export default function EstilistasPage() {
 
       if (editingEstilista) {
         console.log('🔄 Actualizando estilista existente:', editingEstilista.profesional_id);
+        const updatePayload: Partial<Estilista> & Record<string, unknown> = {
+          ...(estilistaData as Record<string, unknown>),
+          nombre: estilistaData.nombre,
+          email: estilistaData.email,
+          sede_id: estilistaData.sede_id,
+          especialidades: especialidades,
+          comision: estilistaData.comision ?? null,
+          activo: estilistaData.activo
+        }
+
         await estilistaService.updateEstilista(
           user.access_token,
           editingEstilista.profesional_id,
-          {
-            nombre: estilistaData.nombre,
-            email: estilistaData.email,
-            sede_id: estilistaData.sede_id,
-            especialidades: especialidades,
-            comision: estilistaData.comision || null,
-            activo: estilistaData.activo
-          }
+          updatePayload
         )
 
         await loadEstilistas()
@@ -103,7 +106,7 @@ export default function EstilistasPage() {
           email: estilistaData.email || "",
           sede_id: estilistaData.sede_id || "",
           especialidades: especialidades,
-          comision: estilistaData.comision || null,
+          comision: estilistaData.comision ?? null,
           password: estilistaData.password || "Unicornio123"
         }
 
