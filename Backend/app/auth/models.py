@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from typing import Optional
 from datetime import datetime
 
@@ -51,3 +51,30 @@ class TokenResponse(BaseModel):
 class TokenData(BaseModel):
     sub: str
     rol: str
+
+# =========================================================
+# ✏️ UPDATE USER - todos los campos son opcionales (PATCH)
+# =========================================================
+
+class UserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # rechaza campos desconocidos
+
+    nombre: Optional[str] = None
+    correo_electronico: Optional[EmailStr] = None
+    rol: Optional[str] = None
+    sede_id: Optional[str] = None
+    franquicia_id: Optional[str] = None
+    activo: Optional[bool] = None
+    password: Optional[str] = None
+
+
+class UserUpdateResponse(BaseModel):
+    id: str
+    nombre: str
+    correo_electronico: str
+    rol: str
+    sede_id: Optional[str] = None
+    franquicia_id: Optional[str] = None
+    activo: bool
+    modificado_por: str
+    fecha_modificacion: str
