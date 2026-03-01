@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI):
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(scheduling_router, prefix="/scheduling")
 app.include_router(admin_franquicias_router, prefix="/admin/franquicias", tags=["Franquicias"])
-app.include_router(routes_fichas_router, tags=["Fichas"])
+app.include_router(routes_fichas_router, prefix="/scheduling/quotes", tags=["Fichas"])
 app.include_router(admin_locales_router)
 app.include_router(admin_servicios_router)
 app.include_router(admin_profesionales_router)

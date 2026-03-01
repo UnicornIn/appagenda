@@ -15,7 +15,7 @@ from app.auth.controllers import (
     REFRESH_TOKEN_EXPIRE_DAYS,
     create_refresh_token
 )
-from app.auth.models import TokenResponse, UserResponse
+from app.auth.models import TokenResponse, UserResponse, UserUpdate, UserUpdateResponse
 from app.database.mongo import (
     collection_auth,
     collection_estilista,
@@ -187,6 +187,10 @@ async def login(
         print("❌ Usuario no encontrado en collection_auth:", email)
         raise HTTPException(status_code=400, detail="Usuario no encontrado")
 
+    # ⭐ AGREGAR ESTO — verificar que está activo
+    if not user.get("activo", True):
+        raise HTTPException(status_code=403, detail="Usuario desactivado. Contacta al administrador")
+
     # Verificar contraseña
     try:
         if not pwd_context.verify(password, user["hashed_password"]):
@@ -300,6 +304,219 @@ async def create_initial_superadmin(
         "msg": "✅ Super admin creado exitosamente.",
         "correo": correo_electronico,
         "rol": "super_admin"
+    }
+
+# =========================================================
+# ✏️ EDITAR USUARIO  PATCH /auth/users/{user_id}
+# =========================================================
+
+VALID_ROLES = ["super_admin", "admin_franquicia", "admin_sede", "estilista", "usuario"]
+
+
+@router.patch("/users/{user_id}", response_model=UserUpdateResponse)
+async def update_user(
+    user_id: str,
+    payload: UserUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    # ── 1. Validar que el user_id tiene formato válido ──────────────────
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="ID de usuario inválido")
+
+    # ── 2. Obtener el usuario objetivo ──────────────────────────────────
+    target = await collection_auth.find_one({"_id": ObjectId(user_id)})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    editor_rol   = current_user["rol"]
+    editor_id    = current_user["user_id"]
+    target_rol   = target.get("rol")
+    target_id    = str(target["_id"])
+
+    # ── 3. Nadie puede editarse a sí mismo el rol ───────────────────────
+    if editor_id == target_id and payload.rol and payload.rol != target_rol:
+        raise HTTPException(
+            status_code=403,
+            detail="No puedes cambiar tu propio rol"
+        )
+
+    # ── 4. Permisos por rol del editor ──────────────────────────────────
+    if editor_rol == "admin_sede":
+        # Solo puede editar estilistas de su misma sede
+        if target_rol not in ("estilista", "usuario"):
+            raise HTTPException(
+                status_code=403,
+                detail="admin_sede solo puede editar estilistas y usuarios"
+            )
+        if str(target.get("sede_id")) != str(current_user["sede_id"]):
+            raise HTTPException(
+                status_code=403,
+                detail="No tienes permiso sobre usuarios de otra sede"
+            )
+        # No puede cambiar roles privilegiados
+        if payload.rol and payload.rol not in ("estilista", "usuario"):
+            raise HTTPException(
+                status_code=403,
+                detail="No puedes asignar ese rol"
+            )
+
+    elif editor_rol == "admin_franquicia":
+        # Solo puede editar admin_sede y estilistas de su franquicia
+        if target_rol not in ("admin_sede", "estilista", "usuario"):
+            raise HTTPException(
+                status_code=403,
+                detail="admin_franquicia solo puede editar admin_sede, estilistas y usuarios"
+            )
+        if str(target.get("franquicia_id")) != str(current_user["franquicia_id"]):
+            raise HTTPException(
+                status_code=403,
+                detail="No tienes permiso sobre usuarios de otra franquicia"
+            )
+        # No puede promover a super_admin ni admin_franquicia
+        if payload.rol and payload.rol not in ("admin_sede", "estilista", "usuario"):
+            raise HTTPException(
+                status_code=403,
+                detail="No puedes asignar ese rol"
+            )
+
+    elif editor_rol != "super_admin":
+        # Cualquier otro rol no autorizado
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    # ── 5. Nadie (ni super_admin) puede crear otro super_admin por este endpoint ──
+    #       Para eso existe /create-superadmin (o se hace directo en DB)
+    if payload.rol == "super_admin" and editor_rol != "super_admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Solo un super_admin puede asignar el rol super_admin"
+        )
+
+    # ── 6. Validar rol si viene en el payload ───────────────────────────
+    if payload.rol and payload.rol not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Rol inválido. Válidos: {VALID_ROLES}")
+
+    # ── 7. Construir el dict de cambios ─────────────────────────────────
+    # exclude_unset=True → SOLO los campos que el cliente realmente envió
+    raw_changes = payload.model_dump(exclude_unset=True)
+
+    if not raw_changes:
+        raise HTTPException(status_code=400, detail="No se enviaron campos para actualizar")
+
+    changes: dict = {}
+
+    # Nombre
+    if "nombre" in raw_changes:
+        changes["nombre"] = raw_changes["nombre"].strip()
+
+    # Correo (con validación de colisión)
+    if "correo_electronico" in raw_changes:
+        new_email = str(raw_changes["correo_electronico"]).lower()
+        collision = await collection_auth.find_one({"correo_electronico": new_email})
+        if collision and str(collision["_id"]) != target_id:
+            raise HTTPException(status_code=400, detail="El correo ya está en uso")
+        changes["correo_electronico"] = new_email
+
+    # Rol (con validación)
+    if "rol" in raw_changes:
+        if raw_changes["rol"] not in VALID_ROLES:
+            raise HTTPException(status_code=400, detail=f"Rol inválido. Válidos: {VALID_ROLES}")
+        changes["rol"] = raw_changes["rol"]
+
+    # sede_id — guarda exactamente lo que llegó (str, "" o None)
+    if "sede_id" in raw_changes:
+        changes["sede_id"] = raw_changes["sede_id"] if raw_changes["sede_id"] else None
+
+    # franquicia_id — igual
+    if "franquicia_id" in raw_changes:
+        changes["franquicia_id"] = raw_changes["franquicia_id"] if raw_changes["franquicia_id"] else None
+
+    # Activo
+    if "activo" in raw_changes:
+        changes["activo"] = raw_changes["activo"]
+
+    # Password
+    if "password" in raw_changes:
+        pwd = raw_changes["password"]
+        if pwd:  # solo procesa si no es "" ni None
+            if len(pwd) < 8:
+                raise HTTPException(
+                    status_code=400,
+                    detail="La contraseña debe tener al menos 8 caracteres"
+                )
+            changes["hashed_password"] = pwd_context.hash(pwd)
+
+    if not changes:
+        raise HTTPException(status_code=400, detail="No se enviaron campos para actualizar")
+
+    # ── 8. Metadatos de auditoría ────────────────────────────────────────
+    changes["modificado_por"]       = current_user["email"]
+    changes["fecha_modificacion"]   = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # ── 9. Aplicar cambios ───────────────────────────────────────────────
+    await collection_auth.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": changes}
+    )
+
+    # ── 10. Devolver el documento actualizado ────────────────────────────
+    updated = await collection_auth.find_one({"_id": ObjectId(user_id)})
+
+    return UserUpdateResponse(
+        id=str(updated["_id"]),
+        nombre=updated.get("nombre", ""),
+        correo_electronico=updated.get("correo_electronico", ""),
+        rol=updated.get("rol", ""),
+        sede_id=updated.get("sede_id"),
+        franquicia_id=updated.get("franquicia_id"),
+        activo=updated.get("activo", True),
+        modificado_por=changes["modificado_por"],
+        fecha_modificacion=changes["fecha_modificacion"],
+    )
+
+
+# =========================================================
+# 🔴 DESACTIVAR / ACTIVAR USUARIO  (shortcut)
+# PATCH /auth/users/{user_id}/toggle-active
+# =========================================================
+
+@router.patch("/users/{user_id}/toggle-active")
+async def toggle_user_active(
+    user_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Shortcut para activar/desactivar sin enviar todo el body."""
+    if current_user["rol"] not in ("super_admin", "admin_franquicia", "admin_sede"):
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="ID inválido")
+
+    target = await collection_auth.find_one({"_id": ObjectId(user_id)})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    # Misma lógica de scope que arriba (simplificada)
+    editor_rol = current_user["rol"]
+    if editor_rol == "admin_sede" and str(target.get("sede_id")) != str(current_user["sede_id"]):
+        raise HTTPException(status_code=403, detail="Fuera de tu sede")
+    if editor_rol == "admin_franquicia" and str(target.get("franquicia_id")) != str(current_user["franquicia_id"]):
+        raise HTTPException(status_code=403, detail="Fuera de tu franquicia")
+
+    nuevo_estado = not target.get("activo", True)
+
+    await collection_auth.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {
+            "activo": nuevo_estado,
+            "modificado_por": current_user["email"],
+            "fecha_modificacion": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }}
+    )
+
+    return {
+        "msg": f"Usuario {'activado' if nuevo_estado else 'desactivado'} correctamente",
+        "user_id": user_id,
+        "activo": nuevo_estado,
     }
 
 
