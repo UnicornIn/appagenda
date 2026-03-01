@@ -6,6 +6,7 @@ import {
   normalizeCurrencyCode,
   resolveCurrencyLocale
 } from "../../../lib/currency";
+import { toBackendDate } from "../../../lib/dateFormat";
 
 export interface SalesMetricsData {
   ventas_totales: number;
@@ -61,8 +62,8 @@ export async function getSalesMetrics(
   if (params.sede_id) queryParams.append('sede_id', params.sede_id);
   
   // Parámetros para período custom
-  if (params.start_date) queryParams.append('start_date', params.start_date);
-  if (params.end_date) queryParams.append('end_date', params.end_date);
+  if (params.start_date) queryParams.append('start_date', toBackendDate(params.start_date));
+  if (params.end_date) queryParams.append('end_date', toBackendDate(params.end_date));
 
   const url = `${API_BASE_URL}api/sales-dashboard/ventas/dashboard?${queryParams.toString()}`;
   console.log('📡 Fetching sales metrics from:', url);

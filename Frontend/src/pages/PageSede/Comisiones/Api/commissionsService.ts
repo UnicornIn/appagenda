@@ -11,6 +11,7 @@ import {
   PendientesResumen,
 } from '../../../../types/commissions';
 import { getStoredCurrency, normalizeCurrencyCode } from '../../../../lib/currency';
+import { toBackendDate } from '../../../../lib/dateFormat';
 
 export class CommissionsService {
   // Generar un requestKey único basado en filtros
@@ -176,8 +177,8 @@ export class CommissionsService {
     const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
     
     return {
-      fecha_inicio: firstDayOfMonth.toISOString().split('T')[0],
-      fecha_fin: lastDayOfMonth.toISOString().split('T')[0]
+      fecha_inicio: toBackendDate(firstDayOfMonth.toISOString().split('T')[0]),
+      fecha_fin: toBackendDate(lastDayOfMonth.toISOString().split('T')[0])
     };
   }
 }

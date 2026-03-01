@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "../../../../types/config";
+import { normalizeBackendDateParams } from "../../../../lib/dateFormat";
 
 const getToken = (): string | null => {
   return sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
@@ -23,9 +24,10 @@ const getBaseUrl = () => (API_BASE_URL.endsWith("/") ? API_BASE_URL : `${API_BAS
 const buildUrl = (path: string, params?: Record<string, any>) => {
   const normalized = path.startsWith("/") ? path : `/${path}`;
   const url = new URL(`${getBaseUrl()}cash${normalized}`);
+  const normalizedParams = normalizeBackendDateParams(params);
 
-  if (params) {
-    Object.entries(params).forEach(([key, value]) => {
+  if (normalizedParams) {
+    Object.entries(normalizedParams).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== "") {
         url.searchParams.append(key, String(value));
       }
