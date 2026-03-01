@@ -45,18 +45,22 @@ interface EstilistaCompleto extends Estilista {
 }
 
 // Reducir horas mostradas o mantener todas pero con menos espacio
-const HOURS = Array.from({ length: 29 }, (_, i) => {
-  const hour = Math.floor(i / 2) + 5;
-  return `${hour.toString().padStart(2, '0')}:${i % 2 === 0 ? '00' : '30'}`;
+const SLOT_INTERVAL_MINUTES = 60;
+const START_HOUR = 5;
+const END_HOUR = 19;
+const TIME_COLUMN_WIDTH = 64;
+const APPOINTMENT_VERTICAL_OFFSET = 6;
+const HOURS = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => {
+  const hour = START_HOUR + i;
+  return `${hour.toString().padStart(2, '0')}:00`;
 });
 
 // COLORS PARA CITAS (SE MANTIENEN)
 const COLORS = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-amber-500', 'bg-indigo-500', 'bg-teal-500', 'bg-pink-500', 'bg-cyan-500'];
 
 // REDUCIR TAMAÑOS
-const CELL_HEIGHT = 32;
+const CELL_HEIGHT = 36;
 const CELL_WIDTH = 96;
-const HEADER_HEIGHT = 40;
 
 const CalendarScheduler: React.FC = () => {
   const { user } = useAuth();
@@ -207,7 +211,7 @@ const CalendarScheduler: React.FC = () => {
 
     setLoadingBloqueos(true);
     try {
-      let todosBloqueos: BloqueoCalendario[] = [];
+      let todosBloqueos: Bloqueo[] = [];
 
       console.log('🔍 CARGANDO BLOQUEOS PARA:', {
         sede: selectedSede.nombre,
@@ -263,12 +267,17 @@ const CalendarScheduler: React.FC = () => {
         }
       });
 
+      const bloqueosConId: BloqueoCalendario[] = bloqueosFiltrados.filter(
+        (bloqueo): bloqueo is BloqueoCalendario =>
+          typeof bloqueo._id === 'string' && bloqueo._id.trim().length > 0
+      );
+
       console.log('🔒 BLOQUEOS CARGADOS Y FILTRADOS:', {
         total: todosBloqueos.length,
-        filtrados: bloqueosFiltrados.length,
+        filtrados: bloqueosConId.length,
         fecha: selectedDateString,
         sede: selectedSede.nombre,
-        detalles: bloqueosFiltrados.map(b => ({
+        detalles: bloqueosConId.map(b => ({
           id: b._id,
           estilista: b.profesional_id,
           horario: `${b.hora_inicio} - ${b.hora_fin}`,
@@ -277,7 +286,7 @@ const CalendarScheduler: React.FC = () => {
         }))
       });
 
-      setBloqueos(bloqueosFiltrados);
+      setBloqueos(bloqueosConId);
     } catch (error) {
       console.error('Error general cargando bloqueos:', error);
       setBloqueos([]);
@@ -478,17 +487,17 @@ const CalendarScheduler: React.FC = () => {
     const [startHour, startMin] = apt.start.split(':').map(Number);
     const [endHour, endMin] = apt.end.split(':').map(Number);
 
-    const startMinutesFrom5AM = (startHour - 5) * 60 + startMin;
-    const endMinutesFrom5AM = (endHour - 4.9) * 60 + endMin;
+    const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
+    const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
 
-    const startBlock = Math.floor(startMinutesFrom5AM / 30);
-    const endBlock = Math.ceil(endMinutesFrom5AM / 30);
+    const startBlock = startMinutesFrom5AM / SLOT_INTERVAL_MINUTES;
+    const endBlock = endMinutesFrom5AM / SLOT_INTERVAL_MINUTES;
     const totalBlocks = endBlock - startBlock;
 
     const minHeight = Math.max(totalBlocks * CELL_HEIGHT - 4, 20);
 
-    const leftPosition = 64 + (profIndex * CELL_WIDTH);
-    const topPosition = HEADER_HEIGHT + (startBlock * CELL_HEIGHT) + -33;
+    const leftPosition = profIndex * CELL_WIDTH;
+    const topPosition = (startBlock * CELL_HEIGHT) + APPOINTMENT_VERTICAL_OFFSET;
 
     const position = {
       left: leftPosition,
@@ -562,7 +571,7 @@ const CalendarScheduler: React.FC = () => {
 
       const parseTime = (time: string) => {
         const [hours, minutes] = time.split(':').map(Number);
-        return (hours - 5) * 60 + minutes;
+        return (hours - START_HOUR) * 60 + minutes;
       };
 
       const startMinutes = parseTime(cita.hora_inicio);
@@ -619,9 +628,14 @@ const CalendarScheduler: React.FC = () => {
     handleClose();
   }, [cargarCitas, cargarEstilistas, cargarBloqueos, handleClose]);
 
+  const overlapsSlot = useCallback((startMinutes: number, endMinutes: number, slotStartMinutes: number) => {
+    const slotEndMinutes = slotStartMinutes + SLOT_INTERVAL_MINUTES;
+    return startMinutes < slotEndMinutes && endMinutes > slotStartMinutes;
+  }, []);
+
   const tieneCitaOBloqueo = useCallback((estilistaNombre: string, hora: string) => {
     const [blockHour, blockMin] = hora.split(':').map(Number);
-    const blockMinutesFrom5AM = (blockHour - 5) * 60 + blockMin;
+    const blockMinutesFrom5AM = (blockHour - START_HOUR) * 60 + blockMin;
 
     const tieneCitaActual = appointments.some(apt => {
       const estilista = profesionales.find(p => p.name === estilistaNombre);
@@ -633,12 +647,12 @@ const CalendarScheduler: React.FC = () => {
       if (aptProfesionalId !== estilistaId) return false;
 
       const [startHour, startMin] = apt.start.split(':').map(Number);
-      const startMinutesFrom5AM = (startHour - 5) * 60 + startMin;
+      const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
 
       const [endHour, endMin] = apt.end.split(':').map(Number);
-      const endMinutesFrom5AM = (endHour - 5) * 60 + endMin;
+      const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
 
-      return blockMinutesFrom5AM >= startMinutesFrom5AM && blockMinutesFrom5AM < endMinutesFrom5AM;
+      return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
     });
 
     if (tieneCitaActual) return true;
@@ -650,16 +664,16 @@ const CalendarScheduler: React.FC = () => {
       if (bloqueo.profesional_id !== estilista.estilista.profesional_id) return false;
 
       const [startHour, startMin] = bloqueo.hora_inicio.split(':').map(Number);
-      const startMinutesFrom5AM = (startHour - 5) * 60 + startMin;
+      const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
 
       const [endHour, endMin] = bloqueo.hora_fin.split(':').map(Number);
-      const endMinutesFrom5AM = (endHour - 5) * 60 + endMin;
+      const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
 
-      return blockMinutesFrom5AM >= startMinutesFrom5AM && blockMinutesFrom5AM < endMinutesFrom5AM;
+      return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
     });
 
     return tieneBloqueo;
-  }, [appointments, profesionales, bloqueos]);
+  }, [appointments, profesionales, bloqueos, overlapsSlot]);
 
   // const handleCellHover = useCallback((estilista: EstilistaCompleto, hora: string) => {
   //   setHoveredCell({ estilista, hora });
@@ -888,21 +902,21 @@ const CalendarScheduler: React.FC = () => {
 
     const esBloqueo = useMemo(() => {
       const [blockHour, blockMin] = hour.split(':').map(Number);
-      const blockMinutesFrom5AM = (blockHour - 5) * 60 + blockMin;
+      const blockMinutesFrom5AM = (blockHour - START_HOUR) * 60 + blockMin;
 
       return bloqueos.some(bloqueo => {
         const estilistaId = prof.estilista.profesional_id;
         if (bloqueo.profesional_id !== estilistaId) return false;
 
         const [startHour, startMin] = bloqueo.hora_inicio.split(':').map(Number);
-        const startMinutesFrom5AM = (startHour - 5) * 60 + startMin;
+        const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
 
         const [endHour, endMin] = bloqueo.hora_fin.split(':').map(Number);
-        const endMinutesFrom5AM = (endHour - 5) * 60 + endMin;
+        const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
 
-        return blockMinutesFrom5AM >= startMinutesFrom5AM && blockMinutesFrom5AM < endMinutesFrom5AM;
+        return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
       });
-    }, [bloqueos, hour, prof.estilista.profesional_id]);
+    }, [bloqueos, hour, prof.estilista.profesional_id, overlapsSlot]);
 
     // Limpiar timeout cuando el componente se desmonta
     useEffect(() => {
@@ -921,13 +935,14 @@ const CalendarScheduler: React.FC = () => {
             if (aptProfesionalId !== prof.estilista.profesional_id) return false;
 
             const [startHour, startMin] = apt.start.split(':').map(Number);
+            const [endHour, endMin] = apt.end.split(':').map(Number);
             const [blockHour, blockMin] = hour.split(':').map(Number);
 
-            const startMinutesFrom5AM = (startHour - 5) * 60 + startMin;
-            const endMinutesFrom5AM = (parseInt(apt.end.split(':')[0]) - 5) * 60 + parseInt(apt.end.split(':')[1]);
-            const blockMinutesFrom5AM = (blockHour - 5) * 60 + blockMin;
+            const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
+            const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
+            const blockMinutesFrom5AM = (blockHour - START_HOUR) * 60 + blockMin;
 
-            return blockMinutesFrom5AM >= startMinutesFrom5AM && blockMinutesFrom5AM < endMinutesFrom5AM;
+            return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
           });
 
           if (citaEnHora) {
@@ -939,7 +954,7 @@ const CalendarScheduler: React.FC = () => {
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
         setShowButtons(true);
       }
-    }, [tieneCitaOBloqueoEnEstaHora, esBloqueo, appointments, prof.estilista.profesional_id, hour, handleCitaClick]);
+    }, [tieneCitaOBloqueoEnEstaHora, esBloqueo, appointments, prof.estilista.profesional_id, hour, handleCitaClick, overlapsSlot]);
 
     const handleReservarClick = useCallback((e: React.MouseEvent) => {
       e.stopPropagation();
@@ -1003,7 +1018,7 @@ const CalendarScheduler: React.FC = () => {
         onClick={handleCellClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={`w-24 h-8 border-l border-gray-100 relative transition-all duration-150 ${tieneCitaOBloqueoEnEstaHora
+        className={`w-24 h-9 border-l border-gray-100 relative transition-all duration-150 ${tieneCitaOBloqueoEnEstaHora
           ? esBloqueo
             ? 'bg-gray-100/40 hover:bg-gray-200/50 border-gray-300 cursor-default'
             : 'bg-white/30 hover:bg-gray-100/50 border-gray-200 cursor-pointer'
@@ -1184,8 +1199,8 @@ const CalendarScheduler: React.FC = () => {
     return (
       <div
         className={`absolute rounded-md shadow-sm cursor-pointer overflow-hidden 
-                 transition-all duration-150 z-30 ${styles.bg} ${styles.hover} ${styles.shadow}
-                 hover:shadow hover:scale-[1.01] hover:z-40 border-l-3 ${styles.border}
+                 transition-all duration-150 z-10 ${styles.bg} ${styles.hover} ${styles.shadow}
+                 hover:shadow hover:scale-[1.01] hover:z-20 border-l-3 ${styles.border}
                  group pointer-events-auto active:scale-95 active:shadow-inner`}
         style={position}
         onClick={() => handleCitaClick(apt)}
@@ -1387,38 +1402,49 @@ const CalendarScheduler: React.FC = () => {
 
                 {profesionales.length > 0 && (
                   <div className="relative">
-                    {HOURS.map((hour) => (
-                      <div key={hour}
-                        className={`flex border-b border-gray-100/80 group z-0 relative  ${HOURS.indexOf(hour) % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-gray-50/30 transition-colors`}>
-                        <div className="w-16 flex-shrink-0 text-xs text-gray-600 p-2 text-right border-r border-gray-200/60 bg-white/95 backdrop-blur-sm sticky left-0 z-10 font-medium">{hour}</div>
-                        {profesionales.map((prof) => (
-                          <CalendarCell key={`${hour}-${prof.estilista.unique_key}`} prof={prof} hour={hour} />
-                        ))}
-                      </div>
-                    ))}
-
-                    {/* LÍNEA DE TIEMPO ACTUAL */}
                     {(() => {
                       const now = new Date();
                       const currentHour = now.getHours();
                       const currentMinute = now.getMinutes();
-                      if (currentHour >= 5 && currentHour <= 19 && selectedDate.toDateString() === today.toDateString()) {
-                        const minutesFrom5AM = (currentHour - 5) * 60 + currentMinute;
-                        const top = (minutesFrom5AM / 30) * CELL_HEIGHT + HEADER_HEIGHT;
+                      const isTodaySelected = selectedDate.toDateString() === today.toDateString();
+                      const currentMinutesFromStart = (currentHour - START_HOUR) * 60 + currentMinute;
+
+                      return HOURS.map((hour, hourIndex) => {
+                        const rowStart = hourIndex * SLOT_INTERVAL_MINUTES;
+                        const rowEnd = rowStart + SLOT_INTERVAL_MINUTES;
+                        const showCurrentTimeDot =
+                          isTodaySelected &&
+                          currentHour >= START_HOUR &&
+                          currentHour <= END_HOUR &&
+                          currentMinutesFromStart >= rowStart &&
+                          currentMinutesFromStart < rowEnd;
+                        const dotTop = ((currentMinutesFromStart - rowStart) / SLOT_INTERVAL_MINUTES) * CELL_HEIGHT;
+
                         return (
-                          <div className="absolute left-0 right-0 z-30 pointer-events-none" style={{ top: `${top}px` }}>
-                            <div className="flex">
-                              <div className="w-16 flex-shrink-0 flex items-center justify-end pr-2"><div className="w-2 h-2 bg-gray-900 rounded-full animate-pulse" /></div>
-                              <div className="flex-1 border-t-1 border-gray-900 border-dashed" />
+                          <div key={hour}
+                            className={`flex border-b border-gray-100/80 group relative ${hourIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-gray-50/30 transition-colors`}>
+                            <div className="w-16 flex-shrink-0 text-xs text-gray-600 p-2 text-right border-r border-gray-200/60 bg-white/95 backdrop-blur-sm sticky left-0 z-50 font-medium relative">
+                              {hour}
+                              {showCurrentTimeDot && (
+                                <div
+                                  className="pointer-events-none absolute right-2 z-40 h-2 w-2 -translate-y-1/2 rounded-full bg-gray-900 animate-pulse"
+                                  style={{ top: `${dotTop}px` }}
+                                />
+                              )}
                             </div>
+                            {profesionales.map((prof) => (
+                              <CalendarCell key={`${hour}-${prof.estilista.unique_key}`} prof={prof} hour={hour} />
+                            ))}
                           </div>
                         );
-                      }
-                      return null;
+                      });
                     })()}
 
                     {/* CITAS */}
-                    <div className="absolute top-0 left-0 right-0 bottom-0 z-0 pointer-events-none">
+                    <div
+                      className="absolute top-0 right-0 bottom-0 z-0 pointer-events-none"
+                      style={{ left: `${TIME_COLUMN_WIDTH}px` }}
+                    >
                       {appointments.map((apt) => (
                         <CitaComponent key={`${apt.id}-${apt.start}-${apt.profesional_id}`} apt={apt} />
                       ))}

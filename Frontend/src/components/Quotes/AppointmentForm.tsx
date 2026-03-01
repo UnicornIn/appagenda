@@ -53,6 +53,10 @@ interface CitaParaPago {
     notas: string;
 }
 
+const START_HOUR = 5;
+const END_HOUR = 19;
+const SLOT_INTERVAL_MINUTES = 60;
+
 const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
     onClose,
     sedeId,
@@ -65,7 +69,7 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [selectedTime, setSelectedTime] = useState(normalizeAgendaTimeValue(horaSeleccionada || '10:00') || '10:00');
-    const [selectedEndTime, setSelectedEndTime] = useState('10:30');
+    const [selectedEndTime, setSelectedEndTime] = useState('11:00');
     const [isEndTimeManual, setIsEndTimeManual] = useState(false);
     const [showTimeSelector, setShowTimeSelector] = useState(false);
     const [showMiniCalendar, setShowMiniCalendar] = useState(false);
@@ -468,11 +472,8 @@ const handleContinuar = async () => {
 
     const generateTimeSlots = useCallback(() => {
         const slots = [];
-        for (let hour = 5; hour <= 19; hour++) {
-            for (let min = 0; min < 60; min += 30) {
-                if (hour === 19 && min > 30) break;
-                slots.push(`${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`);
-            }
+        for (let hour = START_HOUR; hour <= END_HOUR; hour += 1) {
+            slots.push(`${hour.toString().padStart(2, '0')}:00`);
         }
         return slots;
     }, []);
@@ -559,7 +560,7 @@ const handleContinuar = async () => {
     useEffect(() => {
         if (!selectedTime || isEndTimeManual) return;
 
-        const duracionAuto = duracionTotal > 0 ? duracionTotal : 30;
+        const duracionAuto = duracionTotal > 0 ? duracionTotal : SLOT_INTERVAL_MINUTES;
         setSelectedEndTime(calculateEndTime(selectedTime, duracionAuto));
     }, [selectedTime, duracionTotal, isEndTimeManual, calculateEndTime]);
 
@@ -948,7 +949,7 @@ const handleContinuar = async () => {
                                     <button
                                         type="button"
                                         onClick={() => {
-                                            const duracionAuto = duracionTotal > 0 ? duracionTotal : 30;
+                                            const duracionAuto = duracionTotal > 0 ? duracionTotal : SLOT_INTERVAL_MINUTES;
                                             setSelectedEndTime(calculateEndTime(selectedTime, duracionAuto));
                                             setIsEndTimeManual(false);
                                         }}

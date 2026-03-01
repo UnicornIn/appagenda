@@ -467,30 +467,34 @@ const Bloqueos: React.FC<BloqueosProps> = ({
           };
 
       const response = await createBloqueo(dataToSend, user.access_token);
+      const responseObj = response && typeof response === "object" ? response : {};
+      const bloqueoResponse = "bloqueo" in responseObj
+        ? (responseObj as { bloqueo?: Partial<Bloqueo> }).bloqueo
+        : (responseObj as Partial<Bloqueo>);
+
+      const bloqueoCreado: Bloqueo = {
+        profesional_id: formData.profesional_id.trim(),
+        sede_id: formData.sede_id.trim(),
+        hora_inicio: formData.hora_inicio,
+        hora_fin: formData.hora_fin,
+        motivo: formData.motivo.trim() || "Bloqueo de agenda",
+        ...(bloqueoResponse || {}),
+        fecha: normalizeFecha((bloqueoResponse || {}).fecha || formData.fecha) || formData.fecha,
+      };
+
+      onBloqueoGuardado?.(bloqueoCreado, "create");
 
       if (isRecurrent) {
-        const creados = Number(response?.resumen?.creados ?? 0);
-        const omitidos = Number(response?.resumen?.omitidos ?? 0);
-        setMensaje(
-          `✅ Bloqueos recurrentes creados correctamente (${creados} creados${omitidos > 0 ? `, ${omitidos} omitidos` : ""})`
-        );
+        const creados = Number((responseObj as any)?.resumen?.creados ?? (bloqueoResponse ? 1 : 0));
+        const omitidos = Number((responseObj as any)?.resumen?.omitidos ?? 0);
+        if ((responseObj as any)?.resumen) {
+          setMensaje(
+            `✅ Bloqueos recurrentes creados correctamente (${creados} creados${omitidos > 0 ? `, ${omitidos} omitidos` : ""})`
+          );
+        } else {
+          setMensaje("✅ Bloqueo recurrente creado correctamente");
+        }
       } else {
-        const responseObj = response && typeof response === "object" ? response : {};
-        const bloqueoResponse = "bloqueo" in responseObj
-          ? (responseObj as { bloqueo?: Partial<Bloqueo> }).bloqueo
-          : (responseObj as Partial<Bloqueo>);
-
-        const bloqueoCreado: Bloqueo = {
-          profesional_id: formData.profesional_id.trim(),
-          sede_id: formData.sede_id.trim(),
-          hora_inicio: formData.hora_inicio,
-          hora_fin: formData.hora_fin,
-          motivo: formData.motivo.trim() || "Bloqueo de agenda",
-          ...(bloqueoResponse || {}),
-          fecha: normalizeFecha((bloqueoResponse || {}).fecha || formData.fecha) || formData.fecha,
-        };
-
-        onBloqueoGuardado?.(bloqueoCreado, "create");
         setMensaje("✅ Bloqueo creado exitosamente");
       }
 
@@ -783,7 +787,8 @@ const Bloqueos: React.FC<BloqueosProps> = ({
               onChange={(e) => handleInputChange('hora_inicio', e.target.value)}
               required
               inputClassName={controlClass}
-              buttonClassName={useCompactView ? "h-5 w-5" : ""}
+              showButton={!useCompactView}
+              openPickerOnInputClick
             />
           </div>
           <div>
@@ -796,7 +801,8 @@ const Bloqueos: React.FC<BloqueosProps> = ({
               required
               min={minHoraFin}
               inputClassName={controlClass}
-              buttonClassName={useCompactView ? "h-5 w-5" : ""}
+              showButton={!useCompactView}
+              openPickerOnInputClick
             />
           </div>
         </div>
