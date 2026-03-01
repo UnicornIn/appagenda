@@ -1,13 +1,20 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { X, Loader, ChevronDown, ChevronUp, Clock } from 'lucide-react'
 import type { Estilista } from "../../../types/estilista"
+import { ServiceCommissionsModal } from "../../../components/Professionales/ServiceCommissionsModal"
 import { sedeService, type Sede } from "../Sedes/sedeService"
 import { serviciosService } from "../Services/serviciosService"
 import { estilistaService } from "./estilistaService"
 import { useAuth } from "../../../components/Auth/AuthContext"
 import { formatSedeNombre } from "../../../lib/sede"
+import {
+  buildServiceCommissionPatch,
+  resolveServiceCommissions,
+  type ServiceCommissionBinding,
+  type ServiceCommissionEntry,
+} from "../../../lib/serviceCommissions"
 
 // Definir el tipo Servicio
 interface Servicio {
@@ -101,7 +108,23 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
   const [horarioPredefinido, setHorarioPredefinido] = useState<string>("")
   const [horarioId, setHorarioId] = useState<string>("") // Para guardar el ID del horario cuando se edita
   const [isLoadingHorario, setIsLoadingHorario] = useState(false)
+  const [isCommissionsModalOpen, setIsCommissionsModalOpen] = useState(false)
+  const [serviceCommissionBinding, setServiceCommissionBinding] = useState<ServiceCommissionBinding | null>(null)
+  const [serviceCommissionEntries, setServiceCommissionEntries] = useState<ServiceCommissionEntry[]>([])
   const { user } = useAuth()
+
+  const serviceOptions = useMemo(() => {
+    return servicios.map((servicio) => ({
+      id: servicio.servicio_id,
+      nombre: servicio.nombre,
+    }))
+  }, [servicios])
+
+  const configuredServiceCommissions = useMemo(() => {
+    return serviceCommissionEntries.filter((entry) => entry.valor > 0).length
+  }, [serviceCommissionEntries])
+
+  const canPersistServiceCommissions = serviceCommissionBinding !== null
 
   // Cargar sedes y servicios disponibles
   useEffect(() => {
@@ -256,6 +279,23 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
     }
   }, [estilista, isOpen, user?.access_token])
 
+  useEffect(() => {
+    if (!isOpen || !estilista) {
+      setServiceCommissionBinding(null)
+      setServiceCommissionEntries([])
+      return
+    }
+
+    const sedeId = formData.sede_id || estilista.sede_id
+    const resolved = resolveServiceCommissions(
+      estilista as unknown as Record<string, unknown>,
+      sedeId,
+    )
+
+    setServiceCommissionBinding(resolved.binding)
+    setServiceCommissionEntries(resolved.entries)
+  }, [formData.sede_id, isOpen, estilista])
+
   // Actualizar sede_id en horario cuando se selecciona una sede
   useEffect(() => {
     if (formData.sede_id) {
@@ -313,6 +353,12 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
     }
   }, [isOpen])
 
+  useEffect(() => {
+    if (!isOpen) {
+      setIsCommissionsModalOpen(false)
+    }
+  }, [isOpen])
+
   if (!isOpen) return null
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -361,6 +407,17 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
     // Solo incluir password si es un nuevo estilista y tiene valor
     if (!estilista && formData.password.trim()) {
       saveData.password = formData.password;
+    }
+
+    if (estilista) {
+      const serviceCommissionsPatch = buildServiceCommissionPatch(
+        estilista as unknown as Record<string, unknown>,
+        serviceCommissionBinding,
+        formData.sede_id || estilista.sede_id,
+        serviceCommissionEntries,
+      )
+
+      Object.assign(saveData as Record<string, unknown>, serviceCommissionsPatch)
     }
 
     // Incluir datos del horario si está configurado
@@ -567,6 +624,32 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
               Dejar vacío si no aplica comisión. Máximo 2 decimales.
             </p>
           </div>
+
+          {estilista && (
+            <div className="rounded-lg border border-gray-300 bg-gray-50 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Comisiones por servicio</p>
+                  <p className="text-xs text-gray-700">
+                    {configuredServiceCommissions} servicio(s) con comisión mayor a 0.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsCommissionsModalOpen(true)}
+                  className="px-3 py-2 text-sm font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
+                  disabled={isSaving || serviceOptions.length === 0}
+                >
+                  Editar comisiones
+                </button>
+              </div>
+              {!canPersistServiceCommissions && (
+                <p className="mt-2 text-xs text-amber-700">
+                  No se detectó un campo de comisiones por servicio en el payload actual del backend para este estilista.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Selector de Servicios (Especialidades) */}
           <div className="relative">
@@ -831,6 +914,19 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
             </button>
           </div>
         </form>
+
+        <ServiceCommissionsModal
+          isOpen={isCommissionsModalOpen}
+          stylistName={formData.nombre || estilista?.nombre || "estilista"}
+          services={serviceOptions}
+          initialEntries={serviceCommissionEntries}
+          canPersist={canPersistServiceCommissions}
+          onClose={() => setIsCommissionsModalOpen(false)}
+          onSave={(entries) => {
+            setServiceCommissionEntries(entries)
+            setIsCommissionsModalOpen(false)
+          }}
+        />
       </div>
     </div>
   )
