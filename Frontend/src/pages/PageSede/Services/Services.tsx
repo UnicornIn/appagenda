@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "../../../components/Layout/Sidebar";
+import { PageHeader } from "../../../components/Layout/PageHeader";
 import { ServicesList } from "./services-list";
 import { ServiceFormModal } from "./service-form-modal";
 import { ServiceFilters } from "./service-filters";
 import { Button } from "../../../components/ui/button";
-import { Plus, Loader, DollarSign, AlertCircle } from "lucide-react";
+import { Plus, Loader, AlertCircle } from "lucide-react";
 import { serviciosService, type ServiceWithCurrency } from "./serviciosService";
 import { useAuth } from "../../../components/Auth/AuthContext";
 
@@ -189,23 +190,20 @@ export default function ServicesPage() {
       <main className="flex-1 overflow-y-auto">
         <div className="p-8">
           {/* Encabezado */}
-          <div className="mb-8 flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Servicios</h1>
-              <p className="mt-1 text-sm text-gray-600 flex items-center gap-2">
-                <DollarSign className="h-4 w-4" />
-                Precios en {monedaUsuario} para {user.pais || 'internacional'}
-                {monedaUsuario === 'USD' && user.pais !== 'Ecuador' && ' (internacional)'}
-              </p>
-            </div>
-
-            <Button
-              onClick={handleAddService}
-              className="bg-[oklch(0.55_0.25_280)] hover:bg-[oklch(0.50_0.25_280)]"
-            >
-              <Plus className="mr-2 h-4 w-4" /> Añadir servicio
-            </Button>
-          </div>
+          <PageHeader
+            title="Servicios"
+            subtitle={`Precios en ${monedaUsuario} para ${user.pais || "internacional"}${
+              monedaUsuario === "USD" && user.pais !== "Ecuador" ? " (internacional)" : ""
+            }`}
+            actions={
+              <Button
+                onClick={handleAddService}
+                className="bg-gray-900 text-white hover:bg-gray-800"
+              >
+                <Plus className="mr-2 h-4 w-4" /> Añadir servicio
+              </Button>
+            }
+          />
 
           {/* Mensaje de error */}
           {error && (

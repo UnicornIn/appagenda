@@ -65,7 +65,7 @@ export function EstilistasList({
   return (
     <div className="h-full flex flex-col">
       {/* Buscador elegante */}
-      <div className="p-4 border-b border-gray-100">
+      <div className="p-3 border-b border-gray-100">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <input
@@ -73,13 +73,13 @@ export function EstilistasList({
             placeholder="Buscar estilistas..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 text-gray-900"
+            className="w-full pl-10 pr-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 text-gray-900"
           />
         </div>
       </div>
 
       {/* Filtros elegantes */}
-      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+      <div className="px-3 py-2 border-b border-gray-100 bg-gray-50">
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-gray-500" />
           <div className="flex-1 flex gap-2">
@@ -118,7 +118,7 @@ export function EstilistasList({
       </div>
 
       {/* Lista de estilistas */}
-      <div className="flex-1 overflow-y-auto p-2">
+      <div className="flex-1 overflow-y-auto p-1.5">
         {filteredEstilistas.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48">
             <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-3">
@@ -143,7 +143,7 @@ export function EstilistasList({
                 <div
                   key={estilista.profesional_id}
                   onClick={() => onSelectEstilista(estilista)}
-                  className={`p-3 cursor-pointer rounded-xl transition-all duration-200 ${
+                  className={`p-2.5 cursor-pointer rounded-lg transition-all duration-200 ${
                     isSelected
                       ? 'bg-gray-100 border-l-4 border-l-gray-800 shadow-sm'
                       : 'bg-white hover:bg-gray-50 border border-gray-100 hover:border-gray-200 hover:shadow-sm'
@@ -151,7 +151,7 @@ export function EstilistasList({
                 >
                   <div className="flex items-start gap-3">
                     {/* Avatar/Inicial elegante */}
-                    <div className={`flex-shrink-0 h-10 w-10 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
+                    <div className={`flex-shrink-0 h-9 w-9 rounded-full flex items-center justify-center text-xs font-medium transition-colors ${
                       isSelected 
                         ? 'bg-gray-800 text-white' 
                         : 'bg-gray-100 text-gray-900 group-hover:bg-gray-200'
@@ -204,7 +204,7 @@ export function EstilistasList({
                       </div>
 
                       {especialidadesCount > 0 && (
-                        <div className="mt-2.5">
+                        <div className="mt-2">
                           <div className="flex flex-wrap gap-1.5">
                             {especialidades.slice(0, 2).map((especialidad, index) => (
                               <span
@@ -285,7 +285,7 @@ export function EstilistasList({
       </div>
 
       {/* Contador elegante */}
-      <div className="p-3 border-t border-gray-100 bg-gray-50">
+      <div className="p-2 border-t border-gray-100 bg-gray-50">
         <p className="text-xs text-gray-600 text-center font-medium">
           Mostrando {filteredEstilistas.length} de {safeEstilistas.length} estilistas
         </p>

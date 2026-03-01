@@ -467,12 +467,12 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-4">
-      <div className="bg-white rounded-lg w-full max-w-md p-6 max-h-[90vh] overflow-y-auto my-auto" onClick={stopPropagation}>
+      <div className="bg-white rounded-lg w-full max-w-md p-6 max-h-[90vh] overflow-y-auto my-auto text-gray-900" onClick={stopPropagation}>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold">{estilista ? "Editar estilista" : "Añadir estilista"}</h2>
           <button 
             onClick={onClose} 
-            className="text-gray-400 hover:text-gray-600 disabled:opacity-50"
+            className="text-gray-900 hover:text-black disabled:opacity-50"
             disabled={isSaving}
           >
             <X className="h-5 w-5" />
@@ -486,7 +486,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
               type="text"
               value={formData.nombre}
               onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
               required
               disabled={isSaving}
               placeholder="Ingresa el nombre completo"
@@ -499,7 +499,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
               type="email"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
               required
               disabled={isSaving}
               placeholder="ejemplo@correo.com"
@@ -516,10 +516,10 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                 setIsSedeDropdownOpen(!isSedeDropdownOpen)
                 setIsServiciosDropdownOpen(false)
               }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20 text-left flex justify-between items-center"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 text-left flex justify-between items-center"
               disabled={isSaving || isLoadingSedes}
             >
-              <span className={formData.sede_id ? "text-gray-900" : "text-gray-500"}>
+              <span className={formData.sede_id ? "text-gray-900" : "text-gray-900"}>
                 {isLoadingSedes ? "Cargando sedes..." : getSedeNombre()}
               </span>
               {isLoadingSedes ? (
@@ -537,15 +537,15 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                     type="button"
                     onClick={() => handleSelectSede(sede)}
                     className={`w-full text-left px-3 py-2 hover:bg-gray-100 ${
-                      formData.sede_id === sede.sede_id ? 'bg-blue-50 text-blue-600' : ''
+                      formData.sede_id === sede.sede_id ? 'bg-gray-100 text-gray-900' : ''
                     }`}
                     >
                       <div className="font-medium">{formatSedeNombre(sede.nombre)}</div>
-                      <div className="text-sm text-gray-500 truncate">{sede.direccion}</div>
+                      <div className="text-sm text-gray-900 truncate">{sede.direccion}</div>
                     </button>
                   ))}
                 {sedes.length === 0 && (
-                  <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                  <div className="px-3 py-2 text-sm text-gray-900 text-center">
                     No hay sedes disponibles
                   </div>
                 )}
@@ -559,11 +559,11 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
               type="text"
               value={formData.comision}
               onChange={(e) => handleComisionChange(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
               placeholder="Ej: 15.5 (opcional)"
               disabled={isSaving}
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-gray-900 mt-1">
               Dejar vacío si no aplica comisión. Máximo 2 decimales.
             </p>
           </div>
@@ -578,10 +578,10 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                 setIsServiciosDropdownOpen(!isServiciosDropdownOpen)
                 setIsSedeDropdownOpen(false)
               }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20 text-left flex justify-between items-center"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 text-left flex justify-between items-center"
               disabled={isSaving || isLoadingServicios}
             >
-              <span className={formData.especialidades.length > 0 ? "text-gray-900" : "text-gray-500"}>
+              <span className={formData.especialidades.length > 0 ? "text-gray-900" : "text-gray-900"}>
                 {isLoadingServicios 
                   ? "Cargando servicios..." 
                   : formData.especialidades.length === 0 
@@ -607,19 +607,19 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                       type="checkbox"
                       checked={formData.especialidades.includes(servicio.servicio_id)}
                       onChange={() => handleToggleServicio(servicio.servicio_id)}
-                      className="h-4 w-4 text-[oklch(0.65_0.25_280)] focus:ring-[oklch(0.65_0.25_280)] rounded border-gray-300"
+                      className="h-4 w-4 text-gray-900 focus:ring-gray-900 rounded border-gray-300"
                       disabled={isSaving}
                     />
                     <span className="ml-2 flex-1">
                       <div className="font-medium">{servicio.nombre}</div>
-                      <div className="text-sm text-gray-500">
-                        ID: {servicio.servicio_id} • {servicio.duracion} min • ${servicio.precio?.toLocaleString()}
+                      <div className="text-sm text-gray-900">
+                        ID: {servicio.servicio_id} • {servicio.duracion} min • ${Math.round(servicio.precio || 0).toLocaleString("es-CO", { maximumFractionDigits: 0 })}
                       </div>
                     </span>
                   </label>
                 ))}
                 {servicios.length === 0 && (
-                  <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                  <div className="px-3 py-2 text-sm text-gray-900 text-center">
                     No hay servicios disponibles
                   </div>
                 )}
@@ -638,15 +638,15 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                     console.warn('❌ Servicio no encontrado para ID:', servicioId);
                   }
                   return (
-                    <div key={servicioId} className="text-sm text-gray-700 flex items-center justify-between">
+                    <div key={servicioId} className="text-sm text-gray-900 flex items-center justify-between">
                       <div className="flex items-center">
-                        <span className="w-2 h-2 bg-[oklch(0.65_0.25_280)] rounded-full mr-2"></span>
+                        <span className="w-2 h-2 bg-gray-900 rounded-full mr-2"></span>
                         <span>
                           {servicio ? `${servicio.nombre} (${servicio.servicio_id})` : `ID: ${servicioId}`}
                         </span>
                       </div>
                       {servicio && (
-                        <span className="text-xs text-gray-500">
+                        <span className="text-xs text-gray-900">
                           {servicio.duracion}min
                         </span>
                       )}
@@ -661,7 +661,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
           <div className="border border-gray-300 rounded-lg p-4 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-gray-600" />
+                <Clock className="h-5 w-5 text-gray-900" />
                 <h3 className="text-sm font-medium">
                   Configuración de Horario {estilista ? '(Edición)' : '(Nuevo)'}
                 </h3>
@@ -673,7 +673,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                 <button
                   type="button"
                   onClick={() => setShowHorarioConfig(!showHorarioConfig)}
-                  className="text-sm text-blue-600 hover:text-blue-800"
+                  className="text-sm text-gray-900 hover:text-black"
                 >
                   {showHorarioConfig ? "Ocultar" : "Mostrar"}
                 </button>
@@ -683,7 +683,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
             {showHorarioConfig && (
               <>
                 {estilista && horarioId && (
-                  <div className="text-xs text-green-600 bg-green-50 p-2 rounded">
+                  <div className="text-xs text-gray-900 bg-gray-100 p-2 rounded">
                     <p>✅ Este estilista ya tiene un horario configurado (ID: {horarioId})</p>
                   </div>
                 )}
@@ -696,7 +696,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                       setHorarioPredefinido(e.target.value);
                       aplicarHorarioPredefinido(e.target.value);
                     }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
                     disabled={isSaving || isLoadingHorario}
                   >
                     <option value="">Seleccionar horario predefinido</option>
@@ -706,7 +706,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-900 mt-1">
                     Selecciona un horario predefinido o configura manualmente abajo
                   </p>
                 </div>
@@ -723,12 +723,12 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                               type="checkbox"
                               checked={dia.activo}
                               onChange={(e) => actualizarHorarioDia(dia.dia_semana, 'activo', e.target.checked)}
-                              className="h-4 w-4 text-[oklch(0.65_0.25_280)] focus:ring-[oklch(0.65_0.25_280)] rounded border-gray-300"
+                              className="h-4 w-4 text-gray-900 focus:ring-gray-900 rounded border-gray-300"
                               disabled={isSaving || isLoadingHorario}
                             />
                             <span className="font-medium">{diaInfo?.nombre || `Día ${dia.dia_semana}`}</span>
                           </label>
-                          <span className={`text-xs px-2 py-1 rounded ${dia.activo ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                          <span className={`text-xs px-2 py-1 rounded ${dia.activo ? 'bg-gray-200 text-gray-900' : 'bg-gray-100 text-gray-900'}`}>
                             {dia.activo ? 'Activo' : 'Inactivo'}
                           </span>
                         </div>
@@ -736,22 +736,22 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                         {dia.activo && (
                           <div className="grid grid-cols-2 gap-3">
                             <div>
-                              <label className="block text-xs text-gray-600 mb-1">Hora Inicio</label>
+                              <label className="block text-xs text-gray-900 mb-1">Hora Inicio</label>
                               <input
                                 type="time"
                                 value={dia.hora_inicio}
                                 onChange={(e) => actualizarHorarioDia(dia.dia_semana, 'hora_inicio', e.target.value)}
-                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-1 focus:ring-[oklch(0.65_0.25_280)]/20"
+                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900/10"
                                 disabled={isSaving || isLoadingHorario}
                               />
                             </div>
                             <div>
-                              <label className="block text-xs text-gray-600 mb-1">Hora Fin</label>
+                              <label className="block text-xs text-gray-900 mb-1">Hora Fin</label>
                               <input
                                 type="time"
                                 value={dia.hora_fin}
                                 onChange={(e) => actualizarHorarioDia(dia.dia_semana, 'hora_fin', e.target.value)}
-                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-1 focus:ring-[oklch(0.65_0.25_280)]/20"
+                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900/10"
                                 disabled={isSaving || isLoadingHorario}
                               />
                             </div>
@@ -762,7 +762,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                   })}
                 </div>
 
-                <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded">
+                <div className="text-xs text-gray-900 bg-gray-100 p-2 rounded">
                   <p>💡 {estilista ? 
                     'Los cambios en el horario se aplicarán al guardar.' : 
                     'El horario se creará automáticamente para el estilista con la configuración establecida.'}
@@ -780,13 +780,13 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
                 type="password"
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
                 required={!estilista}
                 placeholder="Ingresa una contraseña segura"
                 disabled={isSaving}
                 minLength={6}
               />
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-900 mt-1">
                 Mínimo 6 caracteres
               </p>
             </div>
@@ -798,10 +798,10 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
               id="activo"
               checked={formData.activo}
               onChange={(e) => setFormData({ ...formData, activo: e.target.checked })}
-              className="h-4 w-4 rounded border-gray-300 text-[oklch(0.65_0.25_280)] focus:ring-[oklch(0.65_0.25_280)]"
+              className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
               disabled={isSaving}
             />
-            <label htmlFor="activo" className="text-sm font-medium text-gray-700">
+            <label htmlFor="activo" className="text-sm font-medium text-gray-900">
               Estilista activo
             </label>
           </div>
@@ -817,7 +817,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-2 bg-[oklch(0.65_0.25_280)] text-white rounded-lg hover:bg-[oklch(0.60_0.25_280)] disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              className="flex-1 px-4 py-2 bg-black text-white border border-black rounded-lg hover:bg-gray-900 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
               disabled={isSaving || !formData.sede_id || !formData.nombre.trim() || !formData.email.trim() || (!estilista && !formData.password.trim())}
             >
               {isSaving ? (

@@ -78,7 +78,7 @@ export function EstilistaDetail({ estilista, onEdit, onDelete }: EstilistaDetail
                 onClick={handleEdit}
                 variant="outline"
                 size="sm"
-                className="border-gray-300 text-gray-700 hover:bg-gray-50 hover:text-gray-900"
+                className="border-black bg-black text-white hover:bg-gray-900 hover:text-white"
               >
                 <Edit className="h-4 w-4 mr-2" />
                 Editar

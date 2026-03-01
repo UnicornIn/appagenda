@@ -1,5 +1,11 @@
 // src/services/salesMetricsApi.ts
 import { API_BASE_URL } from "../../../types/config";
+import {
+  formatCurrencyNoDecimals,
+  getStoredCurrency,
+  normalizeCurrencyCode,
+  resolveCurrencyLocale
+} from "../../../lib/currency";
 
 export interface SalesMetricsData {
   ventas_totales: number;
@@ -85,8 +91,11 @@ export async function getSalesMetrics(
       };
     }
 
+    const rawResponse = await response.clone().text();
+    console.log("📥 [SalesMetrics][raw response]:", rawResponse);
+
     const data = await response.json();
-    console.log('✅ Respuesta parseada de la API:', data);
+    console.log("📥 [SalesMetrics][parsed response]:", data);
     return data;
   } catch (error) {
     console.error('❌ Error en fetch:', error);
@@ -108,11 +117,11 @@ export function extractMainMetrics(data: SalesMetricsResponse): {
   productos: number;
   moneda: string;
 } {
-  // Obtener la moneda de la sede desde la respuesta
-  const moneda = data.moneda_sede || 'USD';
-  
-  // Buscar las métricas en la moneda correcta
-  const metricas = data.metricas_por_moneda[moneda] || {
+  const fallbackCurrency = normalizeCurrencyCode(getStoredCurrency("USD"));
+  const moneda = normalizeCurrencyCode(data.moneda_sede || fallbackCurrency);
+  const firstAvailableCurrency = Object.keys(data.metricas_por_moneda || {})[0];
+  const metricas = data.metricas_por_moneda[moneda] ||
+    (firstAvailableCurrency ? data.metricas_por_moneda[firstAvailableCurrency] : null) || {
     ventas_totales: 0,
     ventas_servicios: 0,
     ventas_productos: 0
@@ -130,37 +139,21 @@ export function extractMainMetrics(data: SalesMetricsResponse): {
  * Helper para formatear moneda
  * Formatea un número como moneda con formato es-CO
  */
-export function formatCurrencyMetric(value: number, currency: string = 'USD'): string {
-  try {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  } catch (error) {
-    console.error('❌ Error formateando moneda:', error);
-    // Formato de respaldo usando la misma moneda solicitada
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: currency || 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  }
+export function formatCurrencyMetric(value: number, currency: string = getStoredCurrency("USD")): string {
+  return formatCurrencyNoDecimals(value, currency, resolveCurrencyLocale(currency, "es-CO"));
 }
 
 /**
  * Formato de moneda corto para valores grandes
  * Ej: 1,500,000 → $1.5M
  */
-export function formatCurrencyShort(value: number, currency: string = 'USD'): string {
+export function formatCurrencyShort(value: number, currency: string = getStoredCurrency("USD")): string {
   const currencySymbol = getCurrencySymbol(currency);
   
   if (value >= 1000000) {
-    return `${currencySymbol}${(value / 1000000).toFixed(1)}M`;
+    return `${currencySymbol}${Math.round(value / 1000000)}M`;
   } else if (value >= 1000) {
-    return `${currencySymbol}${(value / 1000).toFixed(1)}K`;
+    return `${currencySymbol}${Math.round(value / 1000)}K`;
   }
   return formatCurrencyMetric(value, currency);
 }

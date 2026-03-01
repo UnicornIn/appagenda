@@ -405,14 +405,14 @@ export function ServiceProtocol({
     setProductsQuantities({})
   }
 
-  // Función para formatear dinero con separadores de miles y 2 decimales
+  // Función para formatear dinero con separadores de miles sin decimales
   const formatMoney = (amount: number): string => {
     if (typeof amount !== 'number' || isNaN(amount)) {
       amount = 0
     }
     return amount.toLocaleString('es-ES', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
       useGrouping: true
     })
   }

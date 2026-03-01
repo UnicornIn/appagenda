@@ -1,5 +1,6 @@
 // src/services/analyticsApi.ts
 import { API_BASE_URL } from "../../../types/config";
+import { formatCurrencyNoDecimals, getStoredCurrency, resolveCurrencyLocale } from "../../../lib/currency";
 
 // Interfaces para el dashboard de ventas (financiero)
 export interface VentasMetricas {
@@ -145,6 +146,9 @@ export interface Sede {
   telefono: string;
   email: string;
   sede_id: string;
+  pais?: string;
+  moneda?: string;
+  es_internacional?: boolean;
   fecha_creacion: string;
   creado_por: string;
   activa: boolean;
@@ -192,7 +196,13 @@ export async function getVentasDashboard(
     );
   }
 
-  return response.json();
+  const rawResponse = await response.clone().text();
+  console.log("📥 [VentasDashboard][raw response]:", rawResponse);
+
+  const parsedResponse = await response.json();
+  console.log("📥 [VentasDashboard][parsed response]:", parsedResponse);
+
+  return parsedResponse;
 }
 
 /**
@@ -241,7 +251,13 @@ export async function getDashboard(
     throw new Error(`Error al obtener dashboard: ${response.status} ${response.statusText} - ${errorData?.detail || 'Sin detalles'}`);
   }
 
-  return response.json();
+  const rawResponse = await response.clone().text();
+  console.log("📥 [AnalyticsDashboard][raw response]:", rawResponse);
+
+  const parsedResponse = await response.json();
+  console.log("📥 [AnalyticsDashboard][parsed response]:", parsedResponse);
+
+  return parsedResponse;
 }
 
 /**
@@ -329,12 +345,8 @@ export async function getSedes(
 /**
  * Helper para formatear moneda
  */
-export function formatCurrency(amount: number, currency: string = 'USD'): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: currency,
-    minimumFractionDigits: 2,
-  }).format(amount);
+export function formatCurrency(amount: number, currency: string = getStoredCurrency("USD")): string {
+  return formatCurrencyNoDecimals(amount, currency, resolveCurrencyLocale(currency, "en-US"));
 }
 
 /**

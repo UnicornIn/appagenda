@@ -82,6 +82,7 @@ export interface CommissionSummary {
   servicios: ServiceCommission[];
   productos: ProductCommission[];
   totales: CommissionTotals;
+  moneda: string;
 }
 
 export interface ServiceCommission {

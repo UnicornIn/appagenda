@@ -309,6 +309,9 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
         : []
   const fichasCargando = fichasRaw === undefined
   const totalFichas = fichasCliente.length
+  const emailDisplay = client.email && client.email !== 'No disponible' ? client.email : '—'
+  const telefonoDisplay = client.telefono && client.telefono !== 'No disponible' ? client.telefono : '—'
+  const cedulaDisplay = client.cedula?.trim() ? client.cedula.trim() : '—'
 
   return (
     <div className="flex h-full flex-col bg-white">
@@ -323,9 +326,9 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
           correo: client.email !== 'No disponible' ? client.email : '',
           telefono: client.telefono !== 'No disponible' ? client.telefono : '',
           notas: client.nota,
-          cedula: '',
-          ciudad: '',
-          fecha_de_nacimiento: ''
+          cedula: client.cedula || '',
+          ciudad: client.ciudad || '',
+          fecha_de_nacimiento: client.fecha_de_nacimiento || ''
         }}
         token={sessionStorage.getItem('access_token') || ''}
       />
@@ -530,9 +533,11 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
           <div>
             <h1 className="text-base font-medium text-gray-900">{client.nombre}</h1>
             <div className="flex items-center gap-2 mt-0.5">
-              <p className="text-xs text-gray-500">{client.email}</p>
+              <p className="text-xs text-gray-500">{emailDisplay}</p>
               <span className="text-gray-300">•</span>
-              <p className="text-xs text-gray-500">{client.telefono}</p>
+              <p className="text-xs text-gray-500">{telefonoDisplay}</p>
+              <span className="text-gray-300">•</span>
+              <p className="text-xs text-gray-500">{cedulaDisplay}</p>
             </div>
           </div>
         </div>

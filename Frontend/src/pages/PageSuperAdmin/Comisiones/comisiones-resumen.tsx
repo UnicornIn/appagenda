@@ -5,6 +5,7 @@ import { AlertTriangle, User, Building } from "lucide-react";
 import { commissionsService } from "./Api/commissionsService";
 import { CommissionSummary } from "../../../types/commissions";
 import { Button } from "../../../components/ui/button";
+import { formatCurrencyNoDecimals, getStoredCurrency } from "../../../lib/currency";
 
 interface ComisionesResumenProps {
   filters?: {
@@ -18,31 +19,8 @@ interface ComisionesResumenProps {
 }
 
 // Función para formatear moneda (fuera del componente)
-const formatMoneda = (monto: number, moneda: string = 'USD'): string => {
-  if (!monto) return `${moneda} 0.00`;
-
-  const currencyConfig: Record<string, any> = {
-    'USD': {
-      currency: 'USD',
-      style: 'currency',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    },
-    'COP': {
-      currency: 'COP',
-      style: 'currency',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }
-  };
-
-  const config = currencyConfig[moneda] || currencyConfig.USD;
-
-  try {
-    return new Intl.NumberFormat('es-ES', config).format(monto);
-  } catch (error) {
-    return `${config.currency} ${monto.toFixed(2)}`;
-  }
+const formatMoneda = (monto: number, moneda: string = getStoredCurrency("USD")): string => {
+  return formatCurrencyNoDecimals(monto, moneda);
 };
 
 export function ComisionesResumen({ filters = {} }: ComisionesResumenProps) {
@@ -165,9 +143,9 @@ export function ComisionesResumen({ filters = {} }: ComisionesResumenProps) {
   // ✅ ESTADO INICIAL: Cuando no hay sede seleccionada
   if (!filters.sede_id) {
     return (
-      <div className="rounded-lg border border-gray-300 bg-blue-50 p-8 text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100">
-          <Building className="h-8 w-8 text-blue-600" />
+      <div className="rounded-lg border border-gray-300 bg-gray-100 p-8 text-center">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-200">
+          <Building className="h-8 w-8 text-gray-700" />
         </div>
         <h3 className="mb-2 text-lg font-medium text-gray-900">
           Selecciona una sede
@@ -182,9 +160,9 @@ export function ComisionesResumen({ filters = {} }: ComisionesResumenProps) {
   // ✅ ESTADO INICIAL: Cuando no hay estilista seleccionado
   if (!filters.profesional_id) {
     return (
-      <div className="rounded-lg border border-gray-300 bg-blue-50 p-8 text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100">
-          <User className="h-8 w-8 text-blue-600" />
+      <div className="rounded-lg border border-gray-300 bg-gray-100 p-8 text-center">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-200">
+          <User className="h-8 w-8 text-gray-700" />
         </div>
         <h3 className="mb-2 text-lg font-medium text-gray-900">
           Selecciona un estilista
@@ -249,7 +227,7 @@ export function ComisionesResumen({ filters = {} }: ComisionesResumenProps) {
   }
 
   const { servicios, productos, totales } = summary;
-  const moneda = 'USD';
+  const moneda = summary.moneda || getStoredCurrency("USD");
 
   return (
     <div className="flex flex-col gap-8 lg:flex-row">
@@ -338,8 +316,8 @@ export function ComisionesResumen({ filters = {} }: ComisionesResumenProps) {
 
         {/* Si no hay servicios ni productos */}
         {servicios.length === 0 && productos.length === 0 && summary && (
-          <div className="rounded-lg border border-gray-300 bg-yellow-50 p-6 text-center">
-            <AlertTriangle className="mx-auto mb-4 h-12 w-12 text-yellow-600" />
+          <div className="rounded-lg border border-gray-300 bg-gray-100 p-6 text-center">
+            <AlertTriangle className="mx-auto mb-4 h-12 w-12 text-gray-600" />
             <h3 className="mb-2 text-lg font-medium text-gray-900">
               Comisión encontrada sin detalle
             </h3>

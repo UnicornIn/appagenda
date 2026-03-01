@@ -32,9 +32,11 @@ export interface BloqueoCreatePayload {
 }
 
 export interface BloqueoUpdatePayload {
-  hora_inicio: string;
-  hora_fin: string;
-  motivo: string;
+  hora_inicio?: string;
+  hora_fin?: string;
+  motivo?: string;
+  fecha_fin_regla?: string;
+  editar_serie?: boolean;
 }
 
 // Obtener bloqueos de un profesional específico - CAMBIÉ EL NOMBRE DEL PARÁMETRO
@@ -125,8 +127,9 @@ export async function createBloqueo(data: BloqueoCreatePayload, token: string) {
 }
 
 export async function updateBloqueo(id: string, data: BloqueoUpdatePayload, token: string) {
-  const res = await fetch(`${API_BASE_URL}scheduling/block/${id}`, {
-    method: "PUT",
+  const url = `${API_BASE_URL}scheduling/block/${id}`;
+  const buildRequest = (method: "PATCH" | "PUT") => ({
+    method,
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
@@ -135,12 +138,21 @@ export async function updateBloqueo(id: string, data: BloqueoUpdatePayload, toke
     body: JSON.stringify(data),
   });
 
+  let res = await fetch(url, buildRequest("PATCH"));
+
+  // Compatibilidad: algunos entornos aún exponen actualización con PUT.
+  if (res.status === 405) {
+    res = await fetch(url, buildRequest("PUT"));
+  }
+
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
     throw new Error(errorData.detail || "Error al actualizar bloqueo");
   }
 
-  return res.json();
+  const raw = await res.text();
+  if (!raw) return {};
+  return JSON.parse(raw);
 }
 
 export async function deleteBloqueo(id: string, token: string) {

@@ -8,6 +8,9 @@ export interface Sede {
   telefono: string;
   email: string;
   sede_id: string;
+  pais?: string;
+  moneda?: string;
+  es_internacional?: boolean;
   fecha_creacion: string;
   creado_por: string;
   activa: boolean;

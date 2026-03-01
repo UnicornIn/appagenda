@@ -4,6 +4,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card"
 import { Users, RefreshCw, AlertCircle, DollarSign } from "lucide-react"
 import { formatMoney, extractNumericValue } from "./formatMoney"
+import { getStoredCurrency, resolveCurrencyLocale } from "../../../lib/currency"
 
 interface KPI {
   valor: number | string;
@@ -15,13 +16,15 @@ interface ClientIndicatorsProps {
   tasaRecurrencia: KPI;
   tasaChurn: KPI;
   ticketPromedio: KPI;
+  currency?: string;
 }
 
 export function ClientIndicators({ 
   nuevosClientes, 
   tasaRecurrencia, 
   tasaChurn, 
-  ticketPromedio 
+  ticketPromedio,
+  currency = getStoredCurrency("USD"),
 }: ClientIndicatorsProps) {
 
   // --- SAFE METHOD ---
@@ -39,7 +42,7 @@ export function ClientIndicators({
   const formatTicketPromedio = (value: number | string) => {
     const numericValue =
       typeof value === "string" ? extractNumericValue(value) : value;
-    return formatMoney(numericValue, "USD", "es-CO");
+    return formatMoney(numericValue, currency, resolveCurrencyLocale(currency, "es-CO"));
   };
 
   const safeChange = (value: KPI["crecimiento"]) =>

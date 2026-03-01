@@ -4,6 +4,8 @@ import { Search, Plus, User, X } from 'lucide-react';
 import { getClientesPorSede, crearCliente, buscarClientesPorSede, Cliente, CrearClienteRequest } from '../../../../components/Quotes/clientsService';
 import { useAuth } from '../../../../components/Auth/AuthContext';
 
+const SEARCH_DEBOUNCE_MS = 300;
+
 interface ClientSearchProps {
   sedeId: string;
   selectedClient: Cliente | null;
@@ -77,7 +79,7 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
       }
     };
 
-    const timeoutId = setTimeout(buscar, 250);
+    const timeoutId = setTimeout(buscar, SEARCH_DEBOUNCE_MS);
     return () => {
       cancel = true;
       clearTimeout(timeoutId);

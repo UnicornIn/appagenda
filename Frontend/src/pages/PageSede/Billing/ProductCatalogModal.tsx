@@ -8,6 +8,12 @@ import { Input } from "../../../components/ui/input"
 import { Badge } from "../../../components/ui/badge"
 import { ScrollArea } from "../../../components/ui/scroll-area"
 import { API_BASE_URL } from "../../../types/config"
+import {
+  formatCurrencyNoDecimals,
+  getStoredCurrency,
+  normalizeCurrencyCode,
+  resolveCurrencyLocale,
+} from "../../../lib/currency"
 
 interface Producto {
   _id?: string
@@ -47,7 +53,7 @@ export function ProductCatalogModal({
   onClose,
   onAddProducts,
   selectedProducts = [],
-  moneda = "USD",
+  moneda = getStoredCurrency("USD"),
   citaId = ""
 }: ProductCatalogModalProps) {
   const [productos, setProductos] = useState<Producto[]>([])
@@ -56,7 +62,7 @@ export function ProductCatalogModal({
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [tempSelectedProducts, setTempSelectedProducts] = useState<Producto[]>([])
   const [quantities, setQuantities] = useState<Record<string, number>>({})
-  const [selectedMoneda, setSelectedMoneda] = useState<string>(moneda)
+  const [selectedMoneda, setSelectedMoneda] = useState<string>(normalizeCurrencyCode(moneda || getStoredCurrency("USD")))
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Función para preparar productos en el formato correcto
@@ -90,6 +96,12 @@ export function ProductCatalogModal({
       fetchProducts()
     }
   }, [isOpen, selectedMoneda])
+
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedMoneda(normalizeCurrencyCode(moneda || getStoredCurrency("USD")))
+    }
+  }, [isOpen, moneda])
 
   useEffect(() => {
     if (isOpen) {
@@ -266,7 +278,7 @@ export function ProductCatalogModal({
   )).filter(Boolean)
 
   const handleCurrencyChange = (newCurrency: string) => {
-    setSelectedMoneda(newCurrency)
+    setSelectedMoneda(normalizeCurrencyCode(newCurrency))
   }
 
   const handleProductSelect = (product: Producto) => {
@@ -434,7 +446,9 @@ export function ProductCatalogModal({
         const comision = result.comision_calculada || 0
 
         alert(`✅ ${productosAgregados} producto(s) agregado(s) correctamente a la cita.${
-          comision > 0 ? `\n\n💰 Comisión calculada: $${comision.toFixed(2)}` : ''
+          comision > 0
+            ? `\n\n💰 Comisión calculada: ${formatCurrencyNoDecimals(comision, selectedMoneda, resolveCurrencyLocale(selectedMoneda, "es-CO"))}`
+            : ''
         }`)
       } else {
         console.warn('⚠️ El servidor no devolvió success=true:', result)
@@ -470,13 +484,7 @@ export function ProductCatalogModal({
   const totalQuantity = Object.values(quantities).reduce((sum, qty) => sum + qty, 0)
 
   const formatCurrency = (amount: number) => {
-    const formatter = new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: selectedMoneda,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    })
-    return formatter.format(amount)
+    return formatCurrencyNoDecimals(amount, selectedMoneda, resolveCurrencyLocale(selectedMoneda, "es-CO"))
   }
 
   if (!isOpen) return null

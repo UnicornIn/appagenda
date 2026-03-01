@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Clock, Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Plus, Trash2 } from 'lucide-react';
+import { Clock, Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Plus, Trash2, Wand2 } from 'lucide-react';
 import { useAuth } from '../../components/Auth/AuthContext';
 import { getEstilistas, getEstilistaCompleto, Estilista } from '../../components/Professionales/estilistasApi';
 import { getServicios, Servicio } from '../../components/Quotes/serviciosApi';
 import { Cliente } from './clientsService';
 import { ClientSearch } from '../../pages/PageSuperAdmin/Appoinment/Clients/ClientSearch';
 import { PaymentModal } from '../../pages/PageSede/Appoinment/PaymentMethods/PaymentMethods'; // 🔥 IMPORTAR EL MODAL DE PAGO
+import TimeInputWithPicker from '../ui/time-input-with-picker';
+import { formatAgendaTime, normalizeAgendaTimeValue } from '../../lib/agenda';
 
 interface Service {
     id: string;
@@ -62,7 +64,7 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
     const { user } = useAuth();
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-    const [selectedTime, setSelectedTime] = useState(horaSeleccionada || '10:00');
+    const [selectedTime, setSelectedTime] = useState(normalizeAgendaTimeValue(horaSeleccionada || '10:00') || '10:00');
     const [selectedEndTime, setSelectedEndTime] = useState('10:30');
     const [isEndTimeManual, setIsEndTimeManual] = useState(false);
     const [showTimeSelector, setShowTimeSelector] = useState(false);
@@ -114,8 +116,9 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
         }
 
         if (horaSeleccionada) {
-            setSelectedTime(horaSeleccionada);
-            setSelectedEndTime(horaSeleccionada);
+            const normalizedHora = normalizeAgendaTimeValue(horaSeleccionada) || '10:00';
+            setSelectedTime(normalizedHora);
+            setSelectedEndTime(normalizedHora);
             setIsEndTimeManual(false);
         }
     }, [fecha, horaSeleccionada, parseDateSafely]);
@@ -914,7 +917,7 @@ const handleContinuar = async () => {
                                     >
                                         <span className="flex items-center gap-1">
                                             <Clock className="w-3 h-3" />
-                                            {selectedTime}
+                                            {formatAgendaTime(selectedTime)}
                                         </span>
                                     </button>
 
@@ -929,7 +932,7 @@ const handleContinuar = async () => {
                                                 >
                                                     <div className="flex items-center gap-1">
                                                         <Clock className="w-3 h-3" />
-                                                        {time}
+                                                        {formatAgendaTime(time)}
                                                         {selectedTime === time && (
                                                             <span className="ml-auto">✓</span>
                                                         )}
@@ -953,22 +956,23 @@ const handleContinuar = async () => {
                                             setSelectedEndTime(calculateEndTime(selectedTime, duracionAuto));
                                             setIsEndTimeManual(false);
                                         }}
-                                        className="text-[10px] text-gray-600 hover:text-gray-900"
+                                        className="inline-flex items-center gap-1 rounded border border-gray-300 bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-200 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40"
                                     >
+                                        <Wand2 className="h-3 w-3" />
                                         Auto
                                     </button>
                                 </div>
-                                <input
-                                    type="time"
+                                <TimeInputWithPicker
                                     value={selectedEndTime}
                                     onChange={(e) => {
                                         setSelectedEndTime(e.target.value);
                                         setIsEndTimeManual(true);
                                     }}
-                                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white"
+                                    inputClassName="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white"
+                                    buttonClassName="h-5 w-5"
                                 />
                                 <p className="mt-1 text-[10px] text-gray-500">
-                                    Hora fin actual: {isEndTimeManual ? 'manual' : 'automática según servicios'}
+                                    Hora inicio: {formatAgendaTime(selectedTime)} · Hora fin: {formatAgendaTime(selectedEndTime)} ({isEndTimeManual ? 'manual' : 'automática según servicios'})
                                 </p>
                             </div>
                         </div>

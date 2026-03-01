@@ -244,7 +244,7 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
             <button
               type="submit"
               disabled={isSaving}
-              className="flex items-center gap-2 rounded-lg bg-[oklch(0.55_0.25_280)] px-6 py-2 font-medium text-white transition-colors hover:bg-[oklch(0.50_0.25_280)] disabled:opacity-50"
+              className="flex items-center gap-2 rounded-lg bg-gray-900 px-6 py-2 font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
             >
               {isSaving ? (
                 <>

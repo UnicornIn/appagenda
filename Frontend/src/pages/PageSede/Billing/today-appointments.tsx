@@ -46,6 +46,11 @@ export function TodayAppointments({ onSelectAppointment, selectedAppointmentId }
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
   const [allAppointments, setAllAppointments] = useState<Appointment[]>([])
 
+  const formatAmountNoDecimals = (value: number | undefined) => {
+    const safeValue = Number.isFinite(value) ? Number(value) : 0
+    return Math.round(safeValue).toLocaleString("es-CO", { maximumFractionDigits: 0 })
+  }
+
   // Función para formatear la fecha en español
   const formatFecha = (fecha: Date) => {
     return formatDateDMY(fecha)
@@ -457,7 +462,7 @@ export function TodayAppointments({ onSelectAppointment, selectedAppointmentId }
                     {appointment.valor_total !== undefined && (
                       <div className="flex items-center gap-1">
                         <span className="font-medium">Valor:</span>
-                        <span className="font-semibold">${appointment.valor_total?.toLocaleString() || '0'}</span>
+                        <span className="font-semibold">${formatAmountNoDecimals(appointment.valor_total)}</span>
                       </div>
                     )}
                     
@@ -477,7 +482,7 @@ export function TodayAppointments({ onSelectAppointment, selectedAppointmentId }
                     {appointment.abono !== undefined && appointment.abono > 0 && (
                       <div className="flex items-center gap-1">
                         <span className="font-medium">Abono:</span>
-                        <span>${appointment.abono.toLocaleString()}</span>
+                        <span>${formatAmountNoDecimals(appointment.abono)}</span>
                       </div>
                     )}
                     
@@ -485,7 +490,7 @@ export function TodayAppointments({ onSelectAppointment, selectedAppointmentId }
                       <div className="flex items-center gap-1">
                         <span className="font-medium">Saldo:</span>
                         <span className="text-red-600 font-semibold">
-                          ${appointment.saldo_pendiente.toLocaleString()}
+                          ${formatAmountNoDecimals(appointment.saldo_pendiente)}
                         </span>
                       </div>
                     )}

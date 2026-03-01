@@ -43,7 +43,7 @@ const navItems: NavItem[] = [
   { title: 'Agenda', href: '/sede/appointments', icon: Users, roles: ['admin_sede'] },
   { title: 'Productos', href: '/sede/products', icon: Package, roles: ['admin_sede'] },
   { title: 'Clientes', href: '/sede/clients', icon: Users, roles: ['admin_sede'] },
-  { title: 'Facturacion', href: '/sede/billing', icon: CreditCard, roles: ['admin_sede'] },
+  { title: 'Facturación', href: '/sede/billing', icon: CreditCard, roles: ['admin_sede'] },
   { title: 'Gift Cards', href: '/sede/gift-cards', icon: Gift, roles: ['admin_sede'] },
   { title: 'Estilistas', href: '/sede/stylists', icon: Users, roles: ['admin_sede'] },
   { title: 'Comisiones', href: '/sede/commissions', icon: CreditCard, roles: ['admin_sede'] },
