@@ -1,5 +1,6 @@
 // src/services/apiClient.ts
 import { API_BASE_URL } from '../../../../types/config';
+import { normalizeBackendDateParams } from '../../../../lib/dateFormat';
 
 export interface ApiResponse<T = any> {
   data?: T;
@@ -68,8 +69,9 @@ export class ApiClient {
       // Construir URL con parámetros
       let url = `${this.baseURL}${cleanEndpoint}`;
       if (params) {
+        const normalizedParams = normalizeBackendDateParams(params);
         const queryParams = new URLSearchParams();
-        Object.entries(params).forEach(([key, value]) => {
+        Object.entries(normalizedParams).forEach(([key, value]) => {
           if (value !== null && value !== undefined && value !== '') {
             queryParams.append(key, String(value));
           }

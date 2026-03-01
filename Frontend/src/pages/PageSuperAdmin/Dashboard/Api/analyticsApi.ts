@@ -1,5 +1,6 @@
 import { API_BASE_URL } from "../../../../types/config";
 import { formatCurrencyNoDecimals, getStoredCurrency, resolveCurrencyLocale } from "../../../../lib/currency";
+import { toBackendDate } from "../../../../lib/dateFormat";
 
 // Interfaces para el dashboard de ventas (financiero)
 export interface VentasMetricas {
@@ -164,8 +165,8 @@ export async function getVentasDashboard(
 
   if (params.period) queryParams.append('period', params.period);
   if (params.sede_id) queryParams.append('sede_id', params.sede_id);
-  if (params.start_date) queryParams.append('start_date', params.start_date);
-  if (params.end_date) queryParams.append('end_date', params.end_date);
+  if (params.start_date) queryParams.append('start_date', toBackendDate(params.start_date));
+  if (params.end_date) queryParams.append('end_date', toBackendDate(params.end_date));
 
   const url = `${API_BASE_URL}api/sales-dashboard/ventas/dashboard?${queryParams.toString()}`;
   console.log('Fetching ventas dashboard from:', url);
@@ -215,16 +216,16 @@ export async function getDashboard(
     queryParams.append('period', params.period);
   } else if (params.start_date && params.end_date) {
     // Rango personalizado
-    queryParams.append('start_date', params.start_date);
-    queryParams.append('end_date', params.end_date);
+    queryParams.append('start_date', toBackendDate(params.start_date));
+    queryParams.append('end_date', toBackendDate(params.end_date));
   } else if (params.period === "custom") {
     // Si es custom pero no hay fechas, usar un rango por defecto
     const today = new Date();
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(today.getDate() - 30);
     
-    queryParams.append('start_date', thirtyDaysAgo.toISOString().split('T')[0]);
-    queryParams.append('end_date', today.toISOString().split('T')[0]);
+    queryParams.append('start_date', toBackendDate(thirtyDaysAgo.toISOString().split('T')[0]));
+    queryParams.append('end_date', toBackendDate(today.toISOString().split('T')[0]));
   }
 
   if (params.sede_id) queryParams.append('sede_id', params.sede_id);
@@ -286,8 +287,8 @@ export async function getChurnClientes(
   queryParams.append('export', 'false');
 
   if (params?.sede_id) queryParams.append('sede_id', params.sede_id);
-  if (params?.start_date) queryParams.append('start_date', params.start_date);
-  if (params?.end_date) queryParams.append('end_date', params.end_date);
+  if (params?.start_date) queryParams.append('start_date', toBackendDate(params.start_date));
+  if (params?.end_date) queryParams.append('end_date', toBackendDate(params.end_date));
 
   const url = `${API_BASE_URL}analytics/churn-clientes?${queryParams.toString()}`;
   console.log('Fetching churn data from:', url);

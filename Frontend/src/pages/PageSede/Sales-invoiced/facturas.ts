@@ -4,6 +4,7 @@ import {
   extractPaymentMethodTotalsFromApiSummary,
   type PaymentMethodTotals,
 } from "../../../lib/payment-methods-summary";
+import { toBackendDate } from "../../../lib/dateFormat";
 
 export interface FacturaAPI {
   _id: string;
@@ -129,24 +130,26 @@ export class FacturaService {
     fecha_desde?: string,
     fecha_hasta?: string
   ): { fecha_desde: string; fecha_hasta: string } {
-    const desde = String(fecha_desde || "").trim();
-    const hasta = String(fecha_hasta || "").trim();
+    const desde = toBackendDate(String(fecha_desde || "").trim());
+    const hasta = toBackendDate(String(fecha_hasta || "").trim());
+    const defaultFrom = toBackendDate(FacturaService.DEFAULT_FULL_FROM);
+    const defaultTo = toBackendDate(FacturaService.DEFAULT_FULL_TO);
 
     if (desde && hasta) {
       return { fecha_desde: desde, fecha_hasta: hasta };
     }
 
     if (desde && !hasta) {
-      return { fecha_desde: desde, fecha_hasta: FacturaService.DEFAULT_FULL_TO };
+      return { fecha_desde: desde, fecha_hasta: defaultTo };
     }
 
     if (!desde && hasta) {
-      return { fecha_desde: FacturaService.DEFAULT_FULL_FROM, fecha_hasta: hasta };
+      return { fecha_desde: defaultFrom, fecha_hasta: hasta };
     }
 
     return {
-      fecha_desde: FacturaService.DEFAULT_FULL_FROM,
-      fecha_hasta: FacturaService.DEFAULT_FULL_TO,
+      fecha_desde: defaultFrom,
+      fecha_hasta: defaultTo,
     };
   }
 
