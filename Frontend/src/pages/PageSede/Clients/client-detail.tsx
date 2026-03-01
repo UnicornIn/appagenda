@@ -276,7 +276,7 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
         return <Thermometer className="h-3 w-3 text-yellow-500" />;
       case 'baja':
       case 'muy baja':
-        return <Droplets className="h-3 w-3 text-blue-500" />;
+        return <Droplets className="h-3 w-3 text-gray-500" />;
       case 'lanoso / ulótrico':
         return <Scissors className="h-3 w-3 text-purple-500" />;
       default:
@@ -293,7 +293,7 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
         return 'bg-yellow-50 text-yellow-700 border-yellow-100';
       case 'baja':
       case 'muy baja':
-        return 'bg-blue-50 text-blue-700 border-blue-100';
+        return 'bg-gray-50 text-gray-700 border-gray-200';
       default:
         return 'bg-gray-50 text-gray-700 border-gray-100';
     }
@@ -432,8 +432,8 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="relative w-full max-w-md rounded-lg bg-white p-4 shadow-lg">
             <div className="flex items-start gap-3">
-              <div className="rounded-full bg-blue-50 p-2">
-                <AlertCircle className="h-5 w-5 text-blue-600" />
+              <div className="rounded-full bg-gray-100 p-2">
+                <AlertCircle className="h-5 w-5 text-gray-700" />
               </div>
               <div className="flex-1">
                 <h3 className="text-sm font-semibold text-gray-900 mb-1">
@@ -516,9 +516,8 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
           {/* Botón de editar */}
           <Button
             onClick={handleEditClick}
-            variant="outline"
             size="sm"
-            className="gap-1.5 text-xs border-gray-300 text-gray-700 hover:text-gray-900 hover:bg-gray-50"
+            className="gap-1.5 text-xs bg-gray-900 text-white hover:bg-gray-800"
           >
             <Edit className="h-3.5 w-3.5" />
             Editar

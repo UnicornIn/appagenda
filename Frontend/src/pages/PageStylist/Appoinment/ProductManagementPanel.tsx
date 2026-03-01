@@ -15,6 +15,7 @@ import { Button } from "../../../components/ui/button"
 import { Badge } from "../../../components/ui/badge"
 import { ProductCatalogModal } from "../../PageSede/Billing/ProductCatalogModal"
 import { API_BASE_URL } from "../../../types/config"
+import { getStoredCurrency, normalizeCurrencyCode } from "../../../lib/currency"
 
 interface Producto {
     _id?: string
@@ -51,9 +52,10 @@ interface ProductManagementPanelProps {
 export function ProductManagementPanel({
     citaId,
     onProductsUpdated,
-    moneda = "USD",
+    moneda = getStoredCurrency("USD"),
     disabled = false
 }: ProductManagementPanelProps) {
+    const resolvedCurrency = normalizeCurrencyCode(moneda || getStoredCurrency("USD"))
     const [showProductModal, setShowProductModal] = useState(false)
     const [selectedProducts, setSelectedProducts] = useState<Producto[]>([])
     const [productsQuantities, setProductsQuantities] = useState<Record<string, number>>({})
@@ -109,7 +111,7 @@ export function ProductManagementPanel({
                         activo: p.activo !== false,
                         descuento: p.descuento || 0,
                         tipo_precio: p.tipo_precio || "sin_iva_internacional",
-                        moneda_local: moneda
+                        moneda_local: resolvedCurrency
                     }))
 
                     console.log('Productos transformados:', productosTransformados)
@@ -320,7 +322,7 @@ export function ProductManagementPanel({
         return (
             <div className="rounded-lg border border-gray-200 p-4">
                 <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                    <Loader2 className="h-6 w-6 animate-spin text-gray-600" />
                     <span className="ml-2 text-gray-600">Cargando productos...</span>
                 </div>
             </div>
@@ -334,15 +336,15 @@ export function ProductManagementPanel({
                 onClose={() => setShowProductModal(false)}
                 onAddProducts={handleAddProducts}
                 selectedProducts={selectedProducts}
-                moneda={moneda}
+                moneda={resolvedCurrency}
                 citaId={citaId}
             />
 
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                        <ShoppingCart className="h-5 w-5 text-blue-600" />
-                        <h3 className="font-semibold text-blue-900">Productos para Facturar</h3>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <ShoppingCart className="h-5 w-5 text-gray-600" />
+                        <h3 className="font-semibold text-gray-900">Productos para Facturar</h3>
                         {selectedProducts.length > 0 && (
                             <Badge variant="secondary" className="ml-2">
                                 {Object.values(productsQuantities).reduce((sum, qty) => sum + qty, 0)} items
@@ -350,13 +352,13 @@ export function ProductManagementPanel({
                         )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                         {selectedProducts.length > 0 && (
                             <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={handleDeleteAllProducts}
-                                className="text-red-700 hover:text-red-800 hover:bg-red-50 border border-red-200"
+                                className="w-full border border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-800 sm:w-auto"
                                 disabled={disabled}
                             >
                                 <Trash2 className="h-4 w-4 mr-2" />
@@ -367,7 +369,7 @@ export function ProductManagementPanel({
                         <Button
                             size="sm"
                             onClick={() => setShowProductModal(true)}
-                            className="bg-blue-600 hover:bg-blue-700 text-white"
+                            className="w-full bg-gray-600 text-white hover:bg-gray-700 sm:w-auto"
                             disabled={disabled}
                         >
                             <Plus className="h-4 w-4 mr-2" />
@@ -386,7 +388,7 @@ export function ProductManagementPanel({
                     </div>
                 ) : (
                     <>
-                        <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2">
+                        <div className="max-h-[260px] space-y-2 overflow-y-auto pr-0 sm:max-h-[220px] sm:pr-2">
                             {Object.entries(productsQuantities).map(([productId, quantity]) => {
                                 const product = selectedProducts.find(p => p.id === productId)
                                 if (!product) return null
@@ -395,28 +397,28 @@ export function ProductManagementPanel({
                                 const totalProducto = precio * quantity
 
                                 return (
-                                    <div key={productId} className="bg-white rounded p-3 flex items-center justify-between">
+                                    <div key={productId} className="flex flex-col gap-3 rounded bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
                                         <div className="flex-1">
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex flex-wrap items-center gap-2">
                                                 <span className="font-medium text-sm">{product.nombre}</span>
                                                 <Badge variant="outline" className="text-xs">
                                                     {product.categoria}
                                                 </Badge>
                                             </div>
-                                            <div className="flex items-center gap-4 mt-1 text-sm text-gray-600">
+                                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-600">
                                                 <span>Cantidad: {quantity}</span>
                                                 <span>${formatMoney(precio)} c/u</span>
                                                 <span>Total: ${formatMoney(totalProducto)}</span>
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-bold text-blue-600">
+                                        <div className="flex items-center justify-between gap-2 sm:justify-end">
+                                            <span className="font-bold text-gray-600">
                                                 ${formatMoney(totalProducto)}
                                             </span>
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
-                                                className="h-8 px-2 text-red-700 hover:text-red-800 hover:bg-red-100 border border-red-200"
+                                                className="h-8 px-2 text-gray-700 hover:text-gray-800 hover:bg-gray-100 border border-gray-200"
                                                 onClick={() => handleDeleteProduct(productId)}
                                                 disabled={disabled || isDeleting === productId}
                                                 title="Eliminar producto"
@@ -433,17 +435,17 @@ export function ProductManagementPanel({
                             })}
                         </div>
 
-                        <div className="flex items-center justify-between pt-3 border-t border-blue-200 mt-3">
-                            <div className="text-sm text-blue-800">
+                        <div className="mt-3 flex flex-col gap-2 border-t border-gray-200 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="text-sm text-gray-800">
                                 Total productos: ${formatMoney(calculateTotal())}
                             </div>
 
-                            <div className="flex items-center gap-2">
+                            <div className="flex w-full items-center gap-2 sm:w-auto">
                                 <Button
                                     variant="outline"
                                     size="sm"
                                     onClick={handleClearProducts}
-                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    className="w-full text-gray-600 hover:bg-gray-50 hover:text-gray-700 sm:w-auto"
                                     disabled={disabled}
                                 >
                                     <Trash2 className="h-4 w-4 mr-2" />
@@ -453,19 +455,19 @@ export function ProductManagementPanel({
                         </div>
 
                         {/* Estado del producto */}
-                        <div className="mt-3 pt-3 border-t border-blue-100">
+                        <div className="mt-3 pt-3 border-t border-gray-100">
                             <div className="flex items-center gap-2 text-sm">
                                 {selectedProducts.some(p => Number(p.stock) < (productsQuantities[p.id] || 1)) ? (
                                     <>
-                                        <AlertCircle className="h-4 w-4 text-yellow-600" />
-                                        <span className="text-yellow-700">
+                                        <AlertCircle className="h-4 w-4 text-gray-600" />
+                                        <span className="text-gray-700">
                                             Algunos productos tienen stock insuficiente
                                         </span>
                                     </>
                                 ) : (
                                     <>
-                                        <CheckCircle className="h-4 w-4 text-green-600" />
-                                        <span className="text-green-700">
+                                        <CheckCircle className="h-4 w-4 text-gray-600" />
+                                        <span className="text-gray-700">
                                             Todo el stock está disponible
                                         </span>
                                     </>

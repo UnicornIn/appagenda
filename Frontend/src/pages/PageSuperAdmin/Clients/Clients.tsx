@@ -297,7 +297,7 @@ export default function ClientsPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="flex items-center gap-3">
-          <Loader className="h-6 w-6 animate-spin text-blue-600" />
+          <Loader className="h-6 w-6 animate-spin text-gray-700" />
           <span className="text-lg text-gray-600">
             {authLoading ? "Verificando autenticación..." : "Cargando clientes..."}
           </span>

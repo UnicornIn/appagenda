@@ -242,7 +242,7 @@ ${datos.productos_sugeridos || 'No especificados'}
         return <Thermometer className="h-3 w-3 text-yellow-500" />;
       case 'baja':
       case 'muy baja':
-        return <Droplets className="h-3 w-3 text-blue-500" />;
+        return <Droplets className="h-3 w-3 text-gray-500" />;
       case 'lanoso / ulótrico':
         return <Scissors className="h-3 w-3 text-purple-500" />; // Usamos Scissors en lugar de Hair
       default:
@@ -259,7 +259,7 @@ ${datos.productos_sugeridos || 'No especificados'}
         return 'bg-yellow-50 text-yellow-700 border-yellow-100';
       case 'baja':
       case 'muy baja':
-        return 'bg-blue-50 text-blue-700 border-blue-100';
+        return 'bg-gray-50 text-gray-700 border-gray-200';
       default:
         return 'bg-gray-50 text-gray-700 border-gray-100';
     }
@@ -401,9 +401,8 @@ ${datos.productos_sugeridos || 'No especificados'}
           {/* Botón de editar */}
           <Button
             onClick={handleEditClick}
-            variant="outline"
             size="sm"
-            className="gap-1.5 text-xs border-gray-300 text-gray-700 hover:text-gray-900 hover:bg-gray-50"
+            className="gap-1.5 text-xs bg-gray-900 text-white hover:bg-gray-800"
           >
             <Edit className="h-3.5 w-3.5" />
             Editar

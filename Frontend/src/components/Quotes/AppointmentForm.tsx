@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Clock, Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Plus, Trash2, Wand2 } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Plus, Trash2, Wand2 } from 'lucide-react';
 import { useAuth } from '../../components/Auth/AuthContext';
 import { getEstilistas, getEstilistaCompleto, Estilista } from '../../components/Professionales/estilistasApi';
 import { getServicios, Servicio } from '../../components/Quotes/serviciosApi';
@@ -915,23 +915,19 @@ const handleContinuar = async () => {
                                         onClick={() => setShowTimeSelector(!showTimeSelector)}
                                         className="w-full flex items-center justify-between border border-gray-300 rounded px-2 py-1.5 hover:border-gray-900 bg-white text-xs"
                                     >
-                                        <span className="flex items-center gap-1">
-                                            <Clock className="w-3 h-3" />
-                                            {formatAgendaTime(selectedTime)}
-                                        </span>
+                                        <span className="flex items-center">{formatAgendaTime(selectedTime)}</span>
                                     </button>
 
                                     {showTimeSelector && (
                                         <div className="absolute z-[9999] mt-1 w-full bg-white border border-gray-300 rounded shadow max-h-40 overflow-y-auto text-xs">
                                             {allTimeSlots.map((time, i) => (
                                                 <button
-                                                    key={`time-slot-${time}-${i}`}
-                                                    onClick={() => handleTimeSelect(time)}
-                                                    className={`w-full text-left px-2 py-1.5 hover:bg-gray-100 border-b border-gray-100 last:border-b-0
+                                                        key={`time-slot-${time}-${i}`}
+                                                        onClick={() => handleTimeSelect(time)}
+                                                        className={`w-full text-left px-2 py-1.5 hover:bg-gray-100 border-b border-gray-100 last:border-b-0
                                                         ${selectedTime === time ? 'bg-gray-900 text-white font-semibold' : 'text-gray-700'}`}
                                                 >
-                                                    <div className="flex items-center gap-1">
-                                                        <Clock className="w-3 h-3" />
+                                                    <div className="flex items-center">
                                                         {formatAgendaTime(time)}
                                                         {selectedTime === time && (
                                                             <span className="ml-auto">✓</span>
@@ -945,7 +941,7 @@ const handleContinuar = async () => {
                             </div>
 
                             <div className="mt-2">
-                                <div className="mb-1 flex items-center justify-between">
+                                <div className="mb-2 space-y-1">
                                     <label className="block text-xs font-semibold text-gray-700">
                                         Hora fin *
                                     </label>
@@ -956,7 +952,7 @@ const handleContinuar = async () => {
                                             setSelectedEndTime(calculateEndTime(selectedTime, duracionAuto));
                                             setIsEndTimeManual(false);
                                         }}
-                                        className="inline-flex items-center gap-1 rounded border border-gray-300 bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-200 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40"
+                                        className="inline-flex w-full items-center justify-center gap-1 rounded border border-gray-300 bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-200 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40"
                                     >
                                         <Wand2 className="h-3 w-3" />
                                         Auto
@@ -968,7 +964,7 @@ const handleContinuar = async () => {
                                         setSelectedEndTime(e.target.value);
                                         setIsEndTimeManual(true);
                                     }}
-                                    inputClassName="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white"
+                                    inputClassName="hide-native-time-indicator w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white"
                                     buttonClassName="h-5 w-5"
                                 />
                                 <p className="mt-1 text-[10px] text-gray-500">

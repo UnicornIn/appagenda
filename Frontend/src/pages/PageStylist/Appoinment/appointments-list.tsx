@@ -315,7 +315,7 @@ export function AppointmentsList({
                         {nombresServicios}
                       </h3>
                       {cantidadServicios > 1 && (
-                        <span className="shrink-0 rounded-full bg-blue-100 px-2 py-1 text-[10px] font-semibold text-blue-700">
+                        <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-[10px] font-semibold text-gray-700">
                           {cantidadServicios}
                         </span>
                       )}

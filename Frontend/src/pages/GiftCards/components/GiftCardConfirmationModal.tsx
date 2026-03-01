@@ -91,10 +91,10 @@ export function GiftCardConfirmationModal({
     <style>
       body { font-family: Arial, sans-serif; background: #f4f6fb; margin: 0; padding: 28px; }
       .container { max-width: 640px; margin: 0 auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; }
-      .header { padding: 24px; background: linear-gradient(90deg, #4338ca, #2563eb); color: #fff; }
+      .header { padding: 24px; background: linear-gradient(90deg, #111827, #1f2937); color: #fff; }
       .code { font-size: 30px; font-weight: 700; letter-spacing: 1px; margin-top: 8px; }
       .body { padding: 24px; color: #0f172a; }
-      .row { display: flex; justify-content: space-between; border-bottom: 1px solid #eef2ff; padding: 10px 0; }
+      .row { display: flex; justify-content: space-between; border-bottom: 1px solid #e5e7eb; padding: 10px 0; }
       .row span:first-child { color: #475569; }
       .row span:last-child { font-weight: 600; }
     </style>
@@ -127,10 +127,10 @@ export function GiftCardConfirmationModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl border-0 bg-white p-0 shadow-2xl">
-        <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-blue-600 px-6 py-6 text-white">
+        <div className="bg-gradient-to-r from-gray-900 via-gray-800 to-black px-6 py-6 text-white">
           <DialogHeader className="text-left">
             <DialogTitle className="text-2xl font-semibold">Gift Card creada exitosamente</DialogTitle>
-            <DialogDescription className="text-indigo-100">
+            <DialogDescription className="text-gray-200">
               El código fue emitido y ya se encuentra disponible para uso.
             </DialogDescription>
           </DialogHeader>
@@ -138,9 +138,9 @@ export function GiftCardConfirmationModal({
 
         {giftCard ? (
           <div className="space-y-5 px-6 py-6">
-            <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-4 text-center">
-              <p className="text-xs font-medium uppercase tracking-wide text-indigo-600">Código</p>
-              <p className="mt-1 text-3xl font-bold text-indigo-800">{giftCard.codigo}</p>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-4 text-center">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-600">Código</p>
+              <p className="mt-1 text-3xl font-bold text-gray-900">{giftCard.codigo}</p>
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -199,7 +199,7 @@ export function GiftCardConfirmationModal({
           </Button>
           <Button
             type="button"
-            className="bg-indigo-600 text-white hover:bg-indigo-500"
+            className="bg-black text-white hover:bg-gray-800"
             onClick={() => {
               if (!emailLink) return;
               window.location.href = emailLink;

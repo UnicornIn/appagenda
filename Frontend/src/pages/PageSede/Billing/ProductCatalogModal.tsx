@@ -2,12 +2,13 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Search, X, Plus, Check, ShoppingCart, Filter, DollarSign } from "lucide-react"
+import { Search, X, Plus, Check, ShoppingCart, Filter, DollarSign, ChevronDown } from "lucide-react"
 import { Button } from "../../../components/ui/button"
 import { Input } from "../../../components/ui/input"
 import { Badge } from "../../../components/ui/badge"
 import { ScrollArea } from "../../../components/ui/scroll-area"
 import { API_BASE_URL } from "../../../types/config"
+import { useAuth } from "../../../components/Auth/AuthContext"
 import {
   formatCurrencyNoDecimals,
   getStoredCurrency,
@@ -56,14 +57,17 @@ export function ProductCatalogModal({
   moneda = getStoredCurrency("USD"),
   citaId = ""
 }: ProductCatalogModalProps) {
+  const { user } = useAuth()
+  const currencyFromSede = normalizeCurrencyCode(moneda || user?.moneda || getStoredCurrency("USD"))
   const [productos, setProductos] = useState<Producto[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [tempSelectedProducts, setTempSelectedProducts] = useState<Producto[]>([])
   const [quantities, setQuantities] = useState<Record<string, number>>({})
-  const [selectedMoneda, setSelectedMoneda] = useState<string>(normalizeCurrencyCode(moneda || getStoredCurrency("USD")))
+  const [selectedMoneda, setSelectedMoneda] = useState<string>(currencyFromSede)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [mobileExpandedModule, setMobileExpandedModule] = useState<"catalog" | "summary">("catalog")
 
   // Función para preparar productos en el formato correcto
   const prepararProductosParaEnvio = () => {
@@ -99,14 +103,15 @@ export function ProductCatalogModal({
 
   useEffect(() => {
     if (isOpen) {
-      setSelectedMoneda(normalizeCurrencyCode(moneda || getStoredCurrency("USD")))
+      setSelectedMoneda(currencyFromSede)
     }
-  }, [isOpen, moneda])
+  }, [isOpen, currencyFromSede])
 
   useEffect(() => {
     if (isOpen) {
       console.log('🔄 Modal abierto - Inicializando productos...')
       console.log('Productos existentes recibidos:', selectedProducts)
+      setMobileExpandedModule("catalog")
       
       // Siempre limpiar el carrito del modal cuando se abre
       setTempSelectedProducts([])
@@ -276,10 +281,6 @@ export function ProductCatalogModal({
       .filter(product => product && product.categoria)
       .map(p => p.categoria)
   )).filter(Boolean)
-
-  const handleCurrencyChange = (newCurrency: string) => {
-    setSelectedMoneda(normalizeCurrencyCode(newCurrency))
-  }
 
   const handleProductSelect = (product: Producto) => {
     if (!product || !product.id) return
@@ -490,23 +491,23 @@ export function ProductCatalogModal({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-lg w-full max-w-7xl max-h-[90vh] flex flex-col mx-4">
+    <div className="fixed inset-0 z-50 bg-black/50 p-0 sm:p-4">
+      <div className="mx-auto flex h-[100dvh] w-full flex-col bg-white sm:h-auto sm:max-h-[95vh] sm:max-w-7xl sm:rounded-lg">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-300">
-          <div className="space-y-1">
-            <h2 className="text-2xl font-bold text-gray-900">Catálogo de Productos</h2>
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-300 px-4 py-4 sm:flex-nowrap sm:items-center sm:px-6">
+          <div className="min-w-0 space-y-1">
+            <h2 className="text-xl font-bold text-gray-900 sm:text-2xl">Catálogo de Productos</h2>
             <p className="text-gray-700 text-sm">
               Selecciona productos para agregar a la cita
             </p>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-1.5 border border-gray-300">
+          <div className="ml-auto flex items-center gap-2 sm:gap-4">
+            <div className="flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-gray-100 px-3">
               <DollarSign className="h-4 w-4 text-gray-800" />
               <select
                 value={selectedMoneda}
-                onChange={(e) => handleCurrencyChange(e.target.value)}
-                className="bg-transparent border-none text-sm font-medium text-gray-900 focus:outline-none focus:ring-0"
+                disabled
+                className="cursor-not-allowed bg-transparent border-none text-sm font-medium text-gray-900 focus:outline-none focus:ring-0"
               >
                 <option value="USD">USD</option>
                 <option value="COP">COP</option>
@@ -518,7 +519,7 @@ export function ProductCatalogModal({
               variant="ghost"
               size="sm"
               onClick={onClose}
-              className="h-9 w-9 p-0 rounded-full hover:bg-gray-200 text-gray-800"
+              className="h-9 w-9 rounded-full p-0 text-gray-800 hover:bg-gray-200"
             >
               <X className="h-4 w-4" />
               <span className="sr-only">Cerrar</span>
@@ -526,12 +527,53 @@ export function ProductCatalogModal({
           </div>
         </div>
 
+        <div className="border-b border-gray-300 px-4 py-3 lg:hidden">
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setMobileExpandedModule("catalog")}
+              className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm font-medium transition-colors ${
+                mobileExpandedModule === "catalog"
+                  ? "border-black bg-gray-100 text-black"
+                  : "border-gray-300 bg-white text-gray-800"
+              }`}
+            >
+              <span>Catálogo de productos</span>
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${
+                  mobileExpandedModule === "catalog" ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileExpandedModule("summary")}
+              className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm font-medium transition-colors ${
+                mobileExpandedModule === "summary"
+                  ? "border-black bg-gray-100 text-black"
+                  : "border-gray-300 bg-white text-gray-800"
+              }`}
+            >
+              <span>Resumen de compra ({totalQuantity})</span>
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${
+                  mobileExpandedModule === "summary" ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
         {/* Contenido principal */}
-        <div className="flex-1 flex overflow-hidden min-h-0">
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           {/* Panel izquierdo - Catálogo */}
-          <div className="flex-1 p-6 border-r border-gray-300 overflow-hidden flex flex-col">
+          <div
+            className={`order-1 min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6 ${
+              mobileExpandedModule === "catalog" ? "flex border-b border-gray-300" : "hidden"
+            } lg:flex lg:border-b-0 lg:border-r`}
+          >
             {/* Filtros y búsqueda */}
-            <div className="space-y-4 mb-6">
+            <div className="mb-4 space-y-4 sm:mb-6">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-700" />
                 <Input
@@ -549,12 +591,12 @@ export function ProductCatalogModal({
                     <Filter className="h-4 w-4 text-gray-800" />
                     <span className="text-sm font-medium text-gray-900">Filtrar por categoría:</span>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                     <Button
                       variant={selectedCategory === null ? "default" : "outline"}
                       size="sm"
                       onClick={() => setSelectedCategory(null)}
-                      className={`h-8 px-3 ${selectedCategory === null ? 'bg-black text-white hover:bg-gray-800' : 'border-gray-300 text-gray-800 hover:bg-gray-200 hover:text-black'}`}
+                      className={`h-8 whitespace-nowrap px-3 ${selectedCategory === null ? 'bg-black text-white hover:bg-gray-800' : 'border-gray-300 text-gray-800 hover:bg-gray-200 hover:text-black'}`}
                     >
                       Todas las categorías
                     </Button>
@@ -564,7 +606,7 @@ export function ProductCatalogModal({
                         variant={selectedCategory === category ? "default" : "outline"}
                         size="sm"
                         onClick={() => setSelectedCategory(category)}
-                        className={`h-8 px-3 ${selectedCategory === category ? 'bg-black text-white hover:bg-gray-800' : 'border-gray-300 text-gray-800 hover:bg-gray-200 hover:text-black'}`}
+                        className={`h-8 whitespace-nowrap px-3 ${selectedCategory === category ? 'bg-black text-white hover:bg-gray-800' : 'border-gray-300 text-gray-800 hover:bg-gray-200 hover:text-black'}`}
                       >
                         {category}
                       </Button>
@@ -575,7 +617,7 @@ export function ProductCatalogModal({
             </div>
 
             {/* Lista de productos */}
-            <ScrollArea className="flex-1 pr-4">
+            <ScrollArea className="flex-1 pr-1 sm:pr-3">
               {loading ? (
                 <div className="flex flex-col justify-center items-center py-16">
                   <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-900 mb-4"></div>
@@ -600,7 +642,7 @@ export function ProductCatalogModal({
                   )}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-4">
                   {filteredProducts.map(product => {
                     if (!product) return null
 
@@ -615,7 +657,7 @@ export function ProductCatalogModal({
                     return (
                       <div
                         key={product.id}
-                        className={`border rounded-xl p-4 space-y-3 transition-all duration-200 ${isSelected
+                        className={`space-y-3 rounded-xl border p-3 transition-all duration-200 sm:p-4 ${isSelected
                           ? 'border-black bg-gray-50 shadow-sm'
                           : 'border-gray-300 hover:border-gray-500 hover:shadow-md'
                           }`}
@@ -684,7 +726,7 @@ export function ProductCatalogModal({
 
                         {/* Controles de cantidad */}
                         {isSelected ? (
-                          <div className="flex items-center justify-between pt-3">
+                          <div className="flex flex-col gap-2 pt-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="flex items-center gap-3">
                               <Button
                                 variant="outline"
@@ -710,7 +752,7 @@ export function ProductCatalogModal({
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-8 px-3 text-gray-800 hover:text-black hover:bg-gray-200"
+                              className="h-8 justify-start px-3 text-gray-800 hover:bg-gray-200 hover:text-black sm:justify-center"
                               onClick={() => handleRemoveProduct(product.id)}
                             >
                               <X className="h-4 w-4 mr-1" />
@@ -737,8 +779,8 @@ export function ProductCatalogModal({
             </ScrollArea>
 
             {/* Contador de productos */}
-            <div className="mt-6 pt-4 border-t border-gray-300">
-              <div className="flex items-center justify-between text-sm text-gray-800">
+            <div className="mt-4 border-t border-gray-300 pt-4 sm:mt-6">
+              <div className="flex flex-col gap-1 text-xs text-gray-800 sm:flex-row sm:items-center sm:justify-between sm:text-sm">
                 <span>
                   Mostrando <span className="font-medium text-gray-900">{filteredProducts.length}</span> de{" "}
                   <span className="font-medium text-gray-900">{productos.length}</span> productos
@@ -751,9 +793,13 @@ export function ProductCatalogModal({
           </div>
 
           {/* Panel derecho - Resumen */}
-          <div className="w-96 p-6 bg-gray-50 flex flex-col border-l border-gray-300">
-            <div className="mb-6 space-y-2">
-              <h3 className="font-bold text-xl text-gray-900 flex items-center gap-2">
+          <div
+            className={`order-2 min-h-0 flex-1 flex-col bg-gray-50 px-4 py-4 sm:px-6 ${
+              mobileExpandedModule === "summary" ? "flex border-t border-gray-300" : "hidden"
+            } lg:flex lg:w-[390px] lg:flex-none lg:border-l lg:border-t-0`}
+          >
+            <div className="mb-4 space-y-2 sm:mb-6">
+              <h3 className="flex items-center gap-2 text-lg font-bold text-gray-900 sm:text-xl">
                 <ShoppingCart className="h-5 w-5" />
                 Resumen de compra
               </h3>
@@ -761,11 +807,11 @@ export function ProductCatalogModal({
                 <div className="px-2 py-1 bg-gray-200 text-gray-900 rounded-md font-medium border border-gray-300">
                   {selectedMoneda}
                 </div>
-                <span className="text-gray-700">Moneda seleccionada</span>
+                <span className="text-gray-700">Moneda de la sede</span>
               </div>
             </div>
 
-            <ScrollArea className="flex-1 mb-6">
+            <ScrollArea className="mb-4 min-h-0 flex-1 sm:mb-6">
               {totalQuantity === 0 ? (
                 <div className="text-center py-12">
                   <div className="w-20 h-20 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4 border border-gray-300">
@@ -788,13 +834,13 @@ export function ProductCatalogModal({
                     const totalProducto = precio * qty
 
                     return (
-                      <div key={productId} className="bg-white rounded-xl p-4 border border-gray-300 shadow-sm">
-                        <div className="flex items-start justify-between mb-3">
+                      <div key={productId} className="rounded-xl border border-gray-300 bg-white p-3 shadow-sm sm:p-4">
+                        <div className="mb-3 flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <h4 className="font-medium text-sm text-gray-900 truncate mb-1">
                               {nombre}
                             </h4>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <Badge variant="outline" className="text-xs bg-gray-100 text-gray-800 border-gray-300">
                                 {categoria}
                               </Badge>
@@ -803,7 +849,7 @@ export function ProductCatalogModal({
                               </span>
                             </div>
                           </div>
-                          <div className="text-right flex-shrink-0 ml-4">
+                          <div className="ml-2 flex-shrink-0 text-right sm:ml-4">
                             <div className="font-bold text-base text-gray-900">
                               {formatCurrency(totalProducto)}
                             </div>
@@ -812,7 +858,7 @@ export function ProductCatalogModal({
                             </div>
                           </div>
                         </div>
-                        <div className="flex items-center justify-between pt-3 border-t border-gray-300">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-300 pt-3">
                           <div className="flex items-center gap-2">
                             <span className="text-sm text-gray-800">Cantidad:</span>
                             <div className="flex items-center gap-1">
@@ -852,7 +898,7 @@ export function ProductCatalogModal({
             </ScrollArea>
 
             {/* Resumen de totales */}
-            <div className="border-t border-gray-400 pt-6 space-y-4">
+            <div className="space-y-4 border-t border-gray-400 pt-4 sm:pt-6">
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-800">Productos seleccionados:</span>
@@ -872,7 +918,7 @@ export function ProductCatalogModal({
             </div>
 
             {/* Botones de acción */}
-            <div className="space-y-3 mt-6">
+            <div className="mt-4 space-y-3 sm:mt-6">
               <Button
                 className="w-full h-12 text-base font-medium bg-black text-white hover:bg-gray-800"
                 size="lg"
@@ -892,7 +938,7 @@ export function ProductCatalogModal({
                 )}
               </Button>
 
-              <div className="flex gap-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
                 <Button
                   variant="outline"
                   className="flex-1 h-11 border-gray-300 text-gray-800 hover:bg-gray-200 hover:text-black"

@@ -338,21 +338,21 @@ export function VentasFacturadasList() {
 
           {/* Mostrar filtros aplicados */}
           {filtersApplied && (filtersApplied.fecha_desde || filtersApplied.fecha_hasta || filtersApplied.search) && (
-            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm text-blue-800 font-medium mb-1">Filtros aplicados:</p>
+            <div className="mt-4 rounded-lg border border-gray-300 bg-gray-50 p-3">
+              <p className="mb-1 text-sm font-medium text-gray-900">Filtros aplicados:</p>
               <div className="flex flex-wrap gap-2">
                 {filtersApplied.fecha_desde && (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  <span className="inline-flex items-center rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-800">
                     Desde: {formatDate(filtersApplied.fecha_desde)}
                   </span>
                 )}
                 {filtersApplied.fecha_hasta && (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  <span className="inline-flex items-center rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-800">
                     Hasta: {formatDate(filtersApplied.fecha_hasta)}
                   </span>
                 )}
                 {filtersApplied.search && (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  <span className="inline-flex items-center rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-800">
                     Búsqueda: "{filtersApplied.search}"
                   </span>
                 )}

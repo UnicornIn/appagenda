@@ -68,7 +68,7 @@ const ClientRow = memo(function ClientRow({ cliente, onSelectClient }: ClientRow
     >
       <td className="px-3 py-2">
         <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-full bg-blue-100 flex items-center justify-center text-xs font-medium text-blue-600">
+          <div className="h-7 w-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-700">
             {cliente.nombre.charAt(0).toUpperCase()}
           </div>
           <div>
@@ -219,9 +219,8 @@ function ClientsListComponent({
           actions={
             <Button
               onClick={onAddClient}
-              variant="outline"
               size="sm"
-              className="border-gray-300 text-gray-700 hover:bg-gray-50"
+              className="bg-gray-900 text-white hover:bg-gray-800"
             >
               <Plus className="h-3 w-3 mr-1" />
               <span className="text-xs">Nuevo</span>
@@ -356,7 +355,7 @@ function ClientsListComponent({
                         disabled={isFetching}
                         className={`h-8 w-8 text-sm ${
                           pageNumber === currentPage
-                            ? "bg-blue-600 text-white hover:bg-blue-700"
+                            ? "bg-gray-900 text-white hover:bg-gray-800"
                             : "border-gray-300 text-gray-700 hover:bg-gray-50"
                         }`}
                       >

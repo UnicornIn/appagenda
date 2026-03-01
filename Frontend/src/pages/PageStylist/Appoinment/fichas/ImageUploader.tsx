@@ -82,7 +82,7 @@ export function ImageUploader({
         className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
           images.length >= maxImages 
             ? 'border-gray-300 bg-gray-50 cursor-not-allowed' 
-            : 'border-gray-300 hover:border-blue-500 bg-gray-50 hover:bg-blue-50 cursor-pointer'
+            : 'border-gray-300 hover:border-gray-500 bg-gray-50 hover:bg-gray-50 cursor-pointer'
         }`}
         onClick={() => images.length < maxImages && fileInputRef.current?.click()}
         onDragOver={handleDragOver}
@@ -115,7 +115,7 @@ export function ImageUploader({
           {images.length < maxImages && (
             <button
               type="button"
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
+              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-gray-600 hover:bg-gray-700"
             >
               <Upload className="h-4 w-4 mr-2" />
               Seleccionar imágenes

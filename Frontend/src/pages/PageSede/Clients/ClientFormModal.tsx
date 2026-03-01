@@ -132,7 +132,6 @@ export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, 
               required
               disabled={localIsSaving || isSaving}
               className="w-full h-8 text-sm border border-gray-300 rounded px-2 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50"
-              placeholder="Nombre completo"
             />
           </div>
 
@@ -148,7 +147,6 @@ export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, 
                 onChange={handleChange}
                 disabled={localIsSaving || isSaving}
                 className="w-full h-8 text-sm border border-gray-300 rounded px-2 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50"
-                placeholder="123456789"
               />
             </div>
 
@@ -163,7 +161,6 @@ export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, 
                 onChange={handleChange}
                 disabled={localIsSaving || isSaving}
                 className="w-full h-8 text-sm border border-gray-300 rounded px-2 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50"
-                placeholder="+593 987654321"
               />
             </div>
           </div>
@@ -179,7 +176,6 @@ export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, 
               onChange={handleChange}
               disabled={localIsSaving || isSaving}
               className="w-full h-8 text-sm border border-gray-300 rounded px-2 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50"
-              placeholder="cliente@email.com"
             />
           </div>
 
@@ -194,7 +190,6 @@ export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, 
               onChange={handleChange}
               disabled={localIsSaving || isSaving}
               className="w-full h-8 text-sm border border-gray-300 rounded px-2 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50"
-              placeholder="Ej: Guayaquil"
             />
           </div>
 
@@ -222,7 +217,6 @@ export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, 
               onChange={handleChange}
               disabled={localIsSaving || isSaving}
               className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50 resize-none min-h-[60px]"
-              placeholder="Observaciones, preferencias, alergias..."
               rows={3}
             />
           </div>
