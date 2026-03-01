@@ -22,6 +22,45 @@ interface EditClientModalProps {
     token: string
 }
 
+const normalizeDateForInput = (value?: string) => {
+    if (!value) return ''
+    const trimmed = value.trim()
+    if (!trimmed) return ''
+
+    // Ya está en formato de input date.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed
+
+    // Soporta fechas con slash (mm/dd/yyyy o dd/mm/yyyy).
+    const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (slashMatch) {
+        const first = Number(slashMatch[1])
+        const second = Number(slashMatch[2])
+        const year = Number(slashMatch[3])
+        let month = first
+        let day = second
+
+        // Si el primer valor supera 12, inferimos dd/mm/yyyy.
+        if (first > 12 && second <= 12) {
+            day = first
+            month = second
+        }
+
+        if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+        }
+    }
+
+    const parsed = new Date(trimmed)
+    if (!Number.isNaN(parsed.getTime())) {
+        const y = parsed.getFullYear()
+        const m = String(parsed.getMonth() + 1).padStart(2, '0')
+        const d = String(parsed.getDate()).padStart(2, '0')
+        return `${y}-${m}-${d}`
+    }
+
+    return ''
+}
+
 export function EditClientModal({ isOpen, onClose, onSuccess, cliente, token }: EditClientModalProps) {
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -53,7 +92,7 @@ export function EditClientModal({ isOpen, onClose, onSuccess, cliente, token }: 
                 telefono: cliente.telefono || '',
                 cedula: cliente.cedula || '',
                 ciudad: cliente.ciudad || '',
-                fecha_de_nacimiento: cliente.fecha_de_nacimiento || '',
+                fecha_de_nacimiento: normalizeDateForInput(cliente.fecha_de_nacimiento),
                 notas: cliente.notas || '',
                 sede_id: sedeId || ''
             })
@@ -84,19 +123,17 @@ export function EditClientModal({ isOpen, onClose, onSuccess, cliente, token }: 
                 throw new Error('El nombre es requerido')
             }
 
-            // Si hay fecha, validar formato mm/dd/aaaa
+            // Si hay fecha, validar formato aaaa-mm-dd
             if (formData.fecha_de_nacimiento && formData.fecha_de_nacimiento.trim() !== '') {
-                // Validar formato básico
-                const dateRegex = /^\d{2}\/\d{2}\/\d{4}$/
+                const dateRegex = /^\d{4}-\d{2}-\d{2}$/
                 if (!dateRegex.test(formData.fecha_de_nacimiento)) {
-                    throw new Error('La fecha debe tener el formato mm/dd/aaaa (ej: 12/25/1990)')
+                    throw new Error('La fecha debe tener el formato aaaa-mm-dd (ej: 1990-12-25)')
                 }
 
-                // Validar que los valores sean números
-                const [month, day, year] = formData.fecha_de_nacimiento.split('/')
-                const monthNum = parseInt(month)
-                const dayNum = parseInt(day)
-                const yearNum = parseInt(year)
+                const [year, month, day] = formData.fecha_de_nacimiento.split('-')
+                const monthNum = parseInt(month, 10)
+                const dayNum = parseInt(day, 10)
+                const yearNum = parseInt(year, 10)
 
                 if (monthNum < 1 || monthNum > 12) {
                     throw new Error('El mes debe estar entre 01 y 12')
@@ -176,8 +213,7 @@ export function EditClientModal({ isOpen, onClose, onSuccess, cliente, token }: 
                                         onChange={handleChange}
                                         required
                                         disabled={isLoading}
-                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
-                                        placeholder="Ej: María González"
+                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
                                     />
                                 </div>
 
@@ -191,8 +227,7 @@ export function EditClientModal({ isOpen, onClose, onSuccess, cliente, token }: 
                                         value={formData.correo || ''}
                                         onChange={handleChange}
                                         disabled={isLoading}
-                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
-                                        placeholder="cliente@email.com"
+                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
                                     />
                                 </div>
 
@@ -206,8 +241,7 @@ export function EditClientModal({ isOpen, onClose, onSuccess, cliente, token }: 
                                         value={formData.telefono || ''}
                                         onChange={handleChange}
                                         disabled={isLoading}
-                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
-                                        placeholder="+593 987654321"
+                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
                                     />
                                 </div>
 
@@ -221,8 +255,7 @@ export function EditClientModal({ isOpen, onClose, onSuccess, cliente, token }: 
                                         value={formData.cedula || ''}
                                         onChange={handleChange}
                                         disabled={isLoading}
-                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
-                                        placeholder="Número de identificación"
+                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
                                     />
                                 </div>
 
@@ -236,8 +269,7 @@ export function EditClientModal({ isOpen, onClose, onSuccess, cliente, token }: 
                                         value={formData.ciudad || ''}
                                         onChange={handleChange}
                                         disabled={isLoading}
-                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
-                                        placeholder="Ej: Guayaquil"
+                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
                                     />
                                 </div>
 
@@ -245,20 +277,14 @@ export function EditClientModal({ isOpen, onClose, onSuccess, cliente, token }: 
                                     <label className="mb-1.5 block text-sm font-medium text-gray-700">
                                         Fecha de Nacimiento
                                     </label>
-                                    <div className="relative">
-                                        <input
-                                            type="text"
-                                            name="fecha_de_nacimiento"
-                                            value={formData.fecha_de_nacimiento || ''}
-                                            onChange={handleChange}
-                                            disabled={isLoading}
-                                            placeholder="aaaa-mm-dd"
-                                            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
-                                        />
-                                    </div>
-                                    <div className="mt-1 flex items-center gap-2">
-                                        <span className="text-xs text-gray-500">Formato: aaaa-mm-dd (año-mes-día)</span>
-                                    </div>
+                                    <input
+                                        type="date"
+                                        name="fecha_de_nacimiento"
+                                        value={formData.fecha_de_nacimiento || ''}
+                                        onChange={handleChange}
+                                        disabled={isLoading}
+                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -276,8 +302,7 @@ export function EditClientModal({ isOpen, onClose, onSuccess, cliente, token }: 
                                     onChange={handleChange}
                                     disabled={isLoading}
                                     rows={4}
-                                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
-                                    placeholder="Observaciones, preferencias, alergias, historial de tratamientos..."
+                                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
                                 />
                             </div>
                         </div>

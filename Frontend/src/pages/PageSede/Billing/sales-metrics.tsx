@@ -1,7 +1,7 @@
 "use client"
 
 import { Card, CardContent } from "../../../components/ui/card"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useAuth } from "../../../components/Auth/AuthContext"
 import { getSalesMetrics, formatCurrencyMetric } from "./salesMetricsApi"
 import { Calendar, DollarSign, Package, Users } from "lucide-react"
@@ -9,28 +9,50 @@ import { Button } from "../../../components/ui/button"
 import { Skeleton } from "../../../components/ui/skeleton"
 import { formatDateDMY } from "../../../lib/dateFormat"
 import { getStoredCurrency, normalizeCurrencyCode } from "../../../lib/currency"
-import { DEFAULT_PERIOD } from "../../../lib/period"
 
 interface SalesMetricsProps {
-  initialPeriod?: string;
+  period: string;
+  dateRange: DateRange;
+  onPeriodChange: (period: string) => void;
+  onDateRangeChange: (range: DateRange) => void;
   sedeId?: string;
 }
 
-interface DateRange {
+export interface DateRange {
   start_date: string;
   end_date: string;
 }
 
-export function SalesMetrics({ 
-  initialPeriod = DEFAULT_PERIOD, 
-  sedeId 
+const getDefaultDateRange = (): DateRange => {
+  const today = new Date();
+  const last7Days = new Date();
+  last7Days.setDate(today.getDate() - 7);
+
+  return {
+    start_date: last7Days.toISOString().split("T")[0],
+    end_date: today.toISOString().split("T")[0],
+  };
+};
+
+export function SalesMetrics({
+  period,
+  dateRange,
+  onPeriodChange,
+  onDateRangeChange,
+  sedeId
 }: SalesMetricsProps) {
   const { user, isAuthenticated } = useAuth()
   const [loading, setLoading] = useState(true)
-  const [period, setPeriod] = useState(initialPeriod)
   const [showDateModal, setShowDateModal] = useState(false)
-  const [tempDateRange, setTempDateRange] = useState<DateRange>({ start_date: "", end_date: "" })
-  const [dateRange, setDateRange] = useState<DateRange>({ start_date: "", end_date: "" })
+  const defaultDateRange = useMemo(() => getDefaultDateRange(), [])
+  const effectiveDateRange = useMemo(
+    () =>
+      dateRange.start_date && dateRange.end_date
+        ? dateRange
+        : defaultDateRange,
+    [dateRange, defaultDateRange]
+  )
+  const [tempDateRange, setTempDateRange] = useState<DateRange>(effectiveDateRange)
   const [currency, setCurrency] = useState<string>(getStoredCurrency("USD")) // 🆕 NUEVO: Estado para la moneda
   const [metrics, setMetrics] = useState({
     ventas_totales: 0,
@@ -47,20 +69,15 @@ export function SalesMetrics({
     { id: "custom", label: "Rango personalizado" },
   ]
 
-  // Inicializar fechas por defecto
   useEffect(() => {
-    const today = new Date()
-    const last7Days = new Date()
-    last7Days.setDate(today.getDate() - 7)
-    
-    const defaultRange: DateRange = {
-      start_date: last7Days.toISOString().split('T')[0],
-      end_date: today.toISOString().split('T')[0]
+    setTempDateRange(effectiveDateRange)
+  }, [effectiveDateRange])
+
+  useEffect(() => {
+    if (!dateRange.start_date || !dateRange.end_date) {
+      onDateRangeChange(defaultDateRange)
     }
-    
-    setDateRange(defaultRange)
-    setTempDateRange(defaultRange)
-  }, [])
+  }, [dateRange, defaultDateRange, onDateRangeChange])
 
   const loadMetrics = async () => {
     if (!isAuthenticated || !user?.access_token) {
@@ -87,12 +104,12 @@ export function SalesMetrics({
 
       // Si es rango personalizado, agregar fechas
       if (period === "custom") {
-        if (!dateRange.start_date || !dateRange.end_date) {
+        if (!effectiveDateRange.start_date || !effectiveDateRange.end_date) {
           console.log("⚠️ Por favor selecciona un rango de fechas")
           return
         }
-        params.start_date = dateRange.start_date
-        params.end_date = dateRange.end_date
+        params.start_date = effectiveDateRange.start_date
+        params.end_date = effectiveDateRange.end_date
       }
 
       console.log('📤 Parámetros enviados a la API:', params)
@@ -186,19 +203,16 @@ export function SalesMetrics({
     if (isAuthenticated) {
       loadMetrics()
     }
-  }, [isAuthenticated, period, sedeId])
+  }, [isAuthenticated, period, effectiveDateRange.start_date, effectiveDateRange.end_date, sedeId, user?.access_token])
 
   const handlePeriodChange = (newPeriod: string) => {
-    setPeriod(newPeriod)
-    
-    // Si se selecciona "Rango personalizado", mostrar modal
     if (newPeriod === "custom") {
-      setTempDateRange(dateRange)
+      setTempDateRange(effectiveDateRange)
       setShowDateModal(true)
-    } else {
-      // Cargar métricas inmediatamente para períodos predefinidos
-      loadMetrics()
+      return
     }
+
+    onPeriodChange(newPeriod)
   }
 
   const handleApplyDateRange = () => {
@@ -212,12 +226,9 @@ export function SalesMetrics({
       return
     }
     
-    setDateRange(tempDateRange)
+    onDateRangeChange(tempDateRange)
     setShowDateModal(false)
-    setPeriod("custom")
-    setTimeout(() => {
-      loadMetrics()
-    }, 100)
+    onPeriodChange("custom")
   }
 
   const formatDateDisplay = (dateString: string) => {
@@ -227,7 +238,7 @@ export function SalesMetrics({
 
   const getPeriodDisplay = () => {
     if (period === "custom") {
-      return `${formatDateDisplay(dateRange.start_date)} - ${formatDateDisplay(dateRange.end_date)}`
+      return `${formatDateDisplay(effectiveDateRange.start_date)} - ${formatDateDisplay(effectiveDateRange.end_date)}`
     }
     return periodOptions.find(p => p.id === period)?.label || "Período"
   }

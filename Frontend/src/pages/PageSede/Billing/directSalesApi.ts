@@ -52,6 +52,13 @@ export interface DirectSaleLineItem {
   unitPrice: number;
 }
 
+export interface DirectSaleClientRef {
+  id: string;
+  nombre?: string;
+  email?: string;
+  telefono?: string;
+}
+
 export interface CreateDirectSaleInput {
   token: string;
   sedeId: string;
@@ -59,6 +66,7 @@ export interface CreateDirectSaleInput {
   paymentMethod: PaymentMethod;
   giftCardCode?: string;
   items: DirectSaleLineItem[];
+  client?: DirectSaleClientRef;
   notes?: string;
 }
 
@@ -233,6 +241,7 @@ function buildCreateSalePayload(
   includeModernFields: boolean
 ): Record<string, unknown> {
   const giftCardCode = typeof input.giftCardCode === "string" ? input.giftCardCode.trim() : "";
+  const clientId = typeof input.client?.id === "string" ? input.client.id.trim() : "";
   const payload: Record<string, unknown> = {
     sede_id: input.sedeId,
     productos: input.items.map((item) => ({
@@ -249,6 +258,10 @@ function buildCreateSalePayload(
 
   if (giftCardCode.length > 0) {
     payload.codigo_giftcard = giftCardCode;
+  }
+
+  if (clientId.length > 0) {
+    payload.cliente_id = clientId;
   }
 
   if (includeModernFields) {

@@ -128,3 +128,27 @@ body {
   background-color: var(--background);
   color: var(--foreground);
 }
+
+/* Oculta el icono nativo de los input time cuando usamos el picker custom */
+.hide-native-time-indicator::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  display: none;
+  pointer-events: none;
+}
+
+.hide-native-time-indicator::-webkit-clear-button,
+.hide-native-time-indicator::-webkit-inner-spin-button {
+  display: none;
+}
+
+/* Quita flechas/spinners nativos en campos numéricos (global) */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

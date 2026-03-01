@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Loader2,
   Plus,
@@ -13,6 +13,8 @@ import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Badge } from "../../../components/ui/badge";
 import { useAuth } from "../../../components/Auth/AuthContext";
+import { giftcardsService } from "../../GiftCards/giftcardsService";
+import type { GiftCardClientOption } from "../../GiftCards/types";
 import {
   createDirectSale,
   deleteAllDirectSaleProducts,
@@ -44,6 +46,7 @@ interface CartItem {
 }
 
 const DEFAULT_PAYMENT_METHOD: PaymentMethod = "efectivo";
+const CLIENTS_SEARCH_PAGE_SIZE = 30;
 const ALL_PAYMENT_BREAKDOWN_METHODS = [
   "efectivo",
   "transferencia",
@@ -75,6 +78,29 @@ const buildEmptyPaymentBreakdown = (): Record<PaymentBreakdownMethod, number> =>
 
 const roundMoney = (value: number): number => Math.round(value * 100) / 100;
 
+function mergeClientOptions(
+  current: GiftCardClientOption[],
+  incoming: GiftCardClientOption[]
+): GiftCardClientOption[] {
+  const byId = new Map<string, GiftCardClientOption>();
+
+  for (const client of current) {
+    byId.set(client.id, client);
+  }
+
+  for (const client of incoming) {
+    const existing = byId.get(client.id);
+    byId.set(client.id, {
+      id: client.id,
+      nombre: client.nombre || existing?.nombre || "",
+      email: client.email || existing?.email,
+      telefono: client.telefono || existing?.telefono,
+    });
+  }
+
+  return Array.from(byId.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
+}
+
 export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSaleModalProps) {
   const { user } = useAuth();
 
@@ -82,6 +108,12 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   const [cartByProductId, setCartByProductId] = useState<Record<string, CartItem>>({});
   const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState("");
+  const [buyerSearch, setBuyerSearch] = useState("");
+  const [knownClients, setKnownClients] = useState<GiftCardClientOption[]>([]);
+  const [buyerOptions, setBuyerOptions] = useState<GiftCardClientOption[]>([]);
+  const [selectedBuyerId, setSelectedBuyerId] = useState("");
+  const [isLoadingClients, setIsLoadingClients] = useState(false);
+  const [clientsError, setClientsError] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(DEFAULT_PAYMENT_METHOD);
   const [giftCardCode, setGiftCardCode] = useState("");
   const [paymentBreakdown, setPaymentBreakdown] = useState<Record<PaymentBreakdownMethod, number>>(
@@ -100,6 +132,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   const [productsError, setProductsError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const latestBuyerSearchRequestRef = useRef(0);
 
   const token =
     user?.access_token ||
@@ -112,6 +145,11 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   const isCopCurrency = currency === "COP";
 
   const cartItems = useMemo(() => Object.values(cartByProductId), [cartByProductId]);
+  const selectedBuyer = useMemo(
+    () => knownClients.find((client) => client.id === selectedBuyerId) ?? null,
+    [knownClients, selectedBuyerId]
+  );
+  const hasBuyerQuery = buyerSearch.trim().length > 0;
   const cartTotal = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [cartItems]
@@ -155,6 +193,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   }, [products, searchTerm]);
 
   const isCatalogLocked = Boolean(saleId);
+  const isClientLocked = Boolean(saleId);
   const isBusy =
     isLoadingProducts ||
     isCreatingSale ||
@@ -174,6 +213,12 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     setCartByProductId({});
     setQuantityInputs({});
     setSearchTerm("");
+    setBuyerSearch("");
+    setKnownClients([]);
+    setBuyerOptions([]);
+    setSelectedBuyerId("");
+    setIsLoadingClients(false);
+    setClientsError(null);
     setPaymentMethod(DEFAULT_PAYMENT_METHOD);
     setGiftCardCode("");
     setPaymentBreakdown(buildEmptyPaymentBreakdown());
@@ -220,6 +265,57 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     }
     void loadProducts();
   }, [isOpen, currency]);
+
+  useEffect(() => {
+    if (!isOpen || !token) return;
+
+    let cancelled = false;
+    const requestId = ++latestBuyerSearchRequestRef.current;
+    const query = buyerSearch.trim();
+
+    if (!query) {
+      setBuyerOptions([]);
+      setClientsError(null);
+      setIsLoadingClients(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadClients = async () => {
+      try {
+        setIsLoadingClients(true);
+        setClientsError(null);
+
+        const result = await giftcardsService.searchClientsForSelector(token, query, {
+          limit: CLIENTS_SEARCH_PAGE_SIZE,
+          page: 1,
+        });
+
+        if (cancelled || requestId !== latestBuyerSearchRequestRef.current) return;
+
+        setBuyerOptions(result.clients);
+        setKnownClients((prev) => mergeClientOptions(prev, result.clients));
+      } catch (error) {
+        if (cancelled || requestId !== latestBuyerSearchRequestRef.current) return;
+        setBuyerOptions([]);
+        setClientsError(error instanceof Error ? error.message : "No se pudieron cargar clientes");
+      } finally {
+        if (!cancelled && requestId === latestBuyerSearchRequestRef.current) {
+          setIsLoadingClients(false);
+        }
+      }
+    };
+
+    const timeout = setTimeout(() => {
+      void loadClients();
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [isOpen, token, buyerSearch]);
 
   useEffect(() => {
     if (!isCopCurrency && paymentMethod === "addi") {
@@ -514,6 +610,14 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
       paymentMethod: safeInitialPaymentMethod,
       giftCardCode: safeInitialPaymentMethod === "giftcard" ? codigoGiftcard : undefined,
       items: toSaleLineItems(),
+      client: selectedBuyer
+        ? {
+            id: selectedBuyer.id,
+            nombre: selectedBuyer.nombre,
+            email: selectedBuyer.email,
+            telefono: selectedBuyer.telefono,
+          }
+        : undefined,
     });
     setSaleId(created.saleId);
     setIsCreatingSale(false);
@@ -677,6 +781,105 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
             </Badge>
           </div>
         </div>
+
+          <div className="border-b border-gray-200 px-5 py-4">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600">
+              Cliente (opcional)
+            </label>
+
+            <div className="relative max-w-xl">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <Input
+                value={buyerSearch}
+                onChange={(event) => setBuyerSearch(event.target.value)}
+                placeholder="Buscar cliente por nombre..."
+                className="h-10 pl-9"
+                disabled={isBusy || isClientLocked}
+              />
+            </div>
+
+            {selectedBuyer ? (
+              <div className="mt-2 max-w-xl rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-gray-900">{selectedBuyer.nombre}</p>
+                    <p className="truncate text-xs text-gray-500">
+                      {selectedBuyer.email || selectedBuyer.telefono || "Sin datos de contacto"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBuyerId("")}
+                    className="text-xs font-medium text-gray-600 hover:text-gray-900 disabled:cursor-not-allowed disabled:text-gray-400"
+                    disabled={isBusy || isClientLocked}
+                  >
+                    Quitar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-gray-500">
+                Si no seleccionas cliente, la factura se registrará sin asociación.
+              </p>
+            )}
+
+            {hasBuyerQuery ? (
+              <div className="mt-2 max-w-xl overflow-hidden rounded-lg border border-gray-200 bg-white">
+                <div className="max-h-56 overflow-y-auto">
+                  {!isLoadingClients && buyerOptions.length === 0 ? (
+                    <p className="px-3 py-3 text-xs text-gray-500">
+                      No hay resultados para la búsqueda actual.
+                    </p>
+                  ) : (
+                    buyerOptions.map((client) => {
+                      const isSelected = client.id === selectedBuyerId;
+
+                      return (
+                        <button
+                          key={client.id}
+                          type="button"
+                          onClick={() => setSelectedBuyerId(client.id)}
+                          className={`flex w-full items-start justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 ${
+                            isSelected ? "bg-gray-100" : "hover:bg-gray-50"
+                          }`}
+                          disabled={isBusy || isClientLocked}
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-gray-900">{client.nombre}</p>
+                            <p className="truncate text-xs text-gray-500">
+                              {client.email || client.telefono || "Sin datos de contacto"}
+                            </p>
+                          </div>
+                          {isSelected ? (
+                            <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                              Seleccionado
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-gray-500">Escribe el nombre del cliente para buscar.</p>
+            )}
+
+            {hasBuyerQuery && isLoadingClients ? (
+              <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Cargando clientes...
+              </div>
+            ) : null}
+            {hasBuyerQuery && clientsError ? (
+              <p className="mt-2 text-xs text-amber-700">{clientsError}</p>
+            ) : null}
+            {isClientLocked && selectedBuyer ? (
+              <p className="mt-2 text-xs text-gray-500">
+                Cliente fijado para la venta creada: {selectedBuyer.nombre}.
+              </p>
+            ) : null}
+          </div>
 
           {requiresGiftCardInput && (
             <div className="border-b border-gray-200 px-5 py-4">

@@ -341,7 +341,7 @@ export function CreateGiftCardModal({
                   value="free"
                   checked={amountMode === "free"}
                   onChange={() => setAmountMode("free")}
-                  className="h-4 w-4 accent-indigo-600"
+                  className="h-4 w-4 accent-black"
                 />
                 Monto libre
               </label>
@@ -352,7 +352,7 @@ export function CreateGiftCardModal({
                   value="preset"
                   checked={amountMode === "preset"}
                   onChange={() => setAmountMode("preset")}
-                  className="h-4 w-4 accent-indigo-600"
+                  className="h-4 w-4 accent-black"
                 />
                 Monto predefinido
               </label>
@@ -367,8 +367,8 @@ export function CreateGiftCardModal({
                     onClick={() => setPresetAmount(value)}
                     className={`rounded-lg border px-3 py-2 text-xs font-medium ${
                       presetAmount === value
-                        ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                        : "border-gray-200 bg-white text-gray-700 hover:border-indigo-300"
+                        ? "border-gray-900 bg-gray-900 text-white"
+                        : "border-gray-200 bg-white text-gray-700 hover:border-gray-400"
                     }`}
                   >
                     {formatMoney(value, currency)}
@@ -473,7 +473,7 @@ export function CreateGiftCardModal({
                   name="beneficiary-mode"
                   checked={isForAnotherPerson}
                   onChange={() => setIsForAnotherPerson(true)}
-                  className="h-4 w-4 accent-indigo-600"
+                  className="h-4 w-4 accent-black"
                 />
                 Es para otra persona
               </label>
@@ -483,7 +483,7 @@ export function CreateGiftCardModal({
                   name="beneficiary-mode"
                   checked={!isForAnotherPerson}
                   onChange={() => setIsForAnotherPerson(false)}
-                  className="h-4 w-4 accent-indigo-600"
+                  className="h-4 w-4 accent-black"
                 />
                 Es para el comprador
               </label>
@@ -529,7 +529,7 @@ export function CreateGiftCardModal({
                   onClick={() => setValidityMode("annual")}
                   className={`rounded-lg border px-3 py-2 text-sm font-medium ${
                     validityMode === "annual"
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      ? "border-gray-900 bg-gray-900 text-white"
                       : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
                   }`}
                 >
@@ -540,7 +540,7 @@ export function CreateGiftCardModal({
                   onClick={() => setValidityMode("custom")}
                   className={`rounded-lg border px-3 py-2 text-sm font-medium ${
                     validityMode === "custom"
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      ? "border-gray-900 bg-gray-900 text-white"
                       : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
                   }`}
                 >
@@ -551,7 +551,7 @@ export function CreateGiftCardModal({
                   onClick={() => setValidityMode("no_expiry")}
                   className={`rounded-lg border px-3 py-2 text-sm font-medium ${
                     validityMode === "no_expiry"
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      ? "border-gray-900 bg-gray-900 text-white"
                       : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
                   }`}
                 >
@@ -594,7 +594,7 @@ export function CreateGiftCardModal({
                   onClick={() => setPaymentMethod(option.value)}
                   className={`flex h-10 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-medium ${
                     paymentMethod === option.value
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      ? "border-gray-900 bg-gray-900 text-white"
                       : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
                   }`}
                 >
@@ -616,7 +616,7 @@ export function CreateGiftCardModal({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={isSubmitting} className="bg-indigo-600 text-white hover:bg-indigo-500">
+            <Button type="submit" disabled={isSubmitting} className="bg-black text-white hover:bg-gray-800">
               {isSubmitting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

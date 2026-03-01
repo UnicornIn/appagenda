@@ -122,6 +122,7 @@ export default function CierreCajaPage() {
   const [egresoMonto, setEgresoMonto] = useState("");
   const [egresoMotivo, setEgresoMotivo] = useState("");
   const [egresoFecha, setEgresoFecha] = useState(getToday());
+  const [egresoMetodoPago, setEgresoMetodoPago] = useState("efectivo");
   const [egresoTipo, setEgresoTipo] = useState("gasto_operativo");
   const [egresoModalOpen, setEgresoModalOpen] = useState(false);
 
@@ -532,6 +533,7 @@ export default function CierreCajaPage() {
         monto: montoValue,
         valor: montoValue,
         efectivo: montoValue,
+        metodo_pago: egresoMetodoPago,
         motivo,
         descripcion: motivo,
         nota: motivo,
@@ -543,6 +545,7 @@ export default function CierreCajaPage() {
 
       setEgresoMonto("");
       setEgresoMotivo("");
+      setEgresoMetodoPago("efectivo");
       setEgresoTipo("gasto_operativo");
       setSuccess("Egreso registrado correctamente");
       setEgresoModalOpen(false);
@@ -783,7 +786,7 @@ export default function CierreCajaPage() {
           />
 
           {error && (
-            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-gray-900">
               {error}
             </div>
           )}
@@ -963,7 +966,7 @@ export default function CierreCajaPage() {
                         : cierreDiferencia > 0
                           ? "text-emerald-700"
                           : cierreDiferencia < 0
-                            ? "text-red-700"
+                            ? "text-gray-900"
                             : "text-gray-700"
                     }`}
                   >
@@ -1107,13 +1110,13 @@ export default function CierreCajaPage() {
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <Button
                     onClick={() => setIngresoModalOpen(true)}
-                    className="bg-emerald-700 hover:bg-emerald-600 text-white w-full"
+                    className="bg-gray-900 hover:bg-gray-800 text-white w-full"
                   >
                     Registrar ingreso
                   </Button>
                   <Button
                     onClick={() => setEgresoModalOpen(true)}
-                    className="bg-gray-900 hover:bg-gray-800 text-white w-full"
+                    className="w-full border border-black bg-white text-black hover:bg-gray-100 hover:text-black"
                   >
                     Registrar egreso
                   </Button>
@@ -1249,10 +1252,10 @@ export default function CierreCajaPage() {
 
           <Dialog open={ingresoModalOpen} onOpenChange={setIngresoModalOpen}>
             <DialogContent className="max-w-lg overflow-hidden border-gray-200 bg-white p-0">
-              <div className="bg-emerald-700 px-6 py-5 text-white">
+              <div className="bg-white px-6 py-5">
                 <DialogHeader className="space-y-1 text-left">
                   <DialogTitle className="text-lg font-semibold">Registrar ingreso</DialogTitle>
-                  <DialogDescription className="text-emerald-50">
+                  <DialogDescription className="text-gray-600">
                     Completa los datos para guardar el ingreso manual en la caja de la sede.
                   </DialogDescription>
                 </DialogHeader>
@@ -1311,7 +1314,7 @@ export default function CierreCajaPage() {
                 <Button
                   onClick={handleCreateIngreso}
                   disabled={loadingAction}
-                  className="bg-emerald-700 hover:bg-emerald-600 text-white"
+                  className="bg-gray-900 hover:bg-gray-800 text-white"
                 >
                   Guardar ingreso
                 </Button>
@@ -1321,10 +1324,10 @@ export default function CierreCajaPage() {
 
           <Dialog open={egresoModalOpen} onOpenChange={setEgresoModalOpen}>
             <DialogContent className="max-w-lg overflow-hidden border-gray-200 bg-white p-0">
-              <div className="bg-gray-900 px-6 py-5 text-white">
+              <div className="bg-white px-6 py-5">
                 <DialogHeader className="space-y-1 text-left">
                   <DialogTitle className="text-lg font-semibold">Registrar egreso</DialogTitle>
-                  <DialogDescription className="text-gray-200">
+                  <DialogDescription className="text-gray-600">
                     Completa los datos para guardar el egreso en la caja de la sede.
                   </DialogDescription>
                 </DialogHeader>
@@ -1341,7 +1344,26 @@ export default function CierreCajaPage() {
                     placeholder="0"
                   />
                 </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Método de pago</label>
+                    <select
+                      value={egresoMetodoPago}
+                      onChange={(e) => setEgresoMetodoPago(e.target.value)}
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <option value="efectivo">Efectivo</option>
+                      <option value="tarjeta_credito">Tarjeta crédito</option>
+                      <option value="tarjeta_debito">Tarjeta débito</option>
+                      <option value="pos">POS</option>
+                      <option value="transferencia">Transferencia</option>
+                      <option value="link_de_pago">Link de pago</option>
+                      <option value="giftcard">Giftcard</option>
+                      <option value="addi">Addi</option>
+                      <option value="abonos">Abonos</option>
+                      <option value="otros">Otros</option>
+                    </select>
+                  </div>
                   <div>
                     <label className="text-xs font-medium text-gray-600">Tipo</label>
                     <select
@@ -1368,7 +1390,7 @@ export default function CierreCajaPage() {
                       placeholder="Ej: compra insumos"
                     />
                     {!egresoMotivo.trim() ? (
-                      <p className="mt-1 text-xs text-red-600">El motivo del egreso es obligatorio.</p>
+                      <p className="mt-1 text-xs font-semibold text-gray-900">El motivo del egreso es obligatorio.</p>
                     ) : null}
                   </div>
                   <div>

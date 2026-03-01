@@ -1,7 +1,7 @@
 // app/(protected)/admin-sede/ventas/Billing.tsx
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Sidebar } from "../../../components/Layout/Sidebar"
 import { PageHeader } from "../../../components/Layout/PageHeader"
 import { SalesMetrics } from "./sales-metrics"
@@ -10,10 +10,12 @@ import { ServiceProtocol } from "./service-protocol"
 import { Button } from "../../../components/ui/button"
 import { ShoppingBag } from "lucide-react"
 import { DirectSaleModal } from "./DirectSaleModal"
+import { DEFAULT_PERIOD } from "../../../lib/period"
 // Asegúrate de que esta interfaz coincida con la de TodayAppointments
 interface Appointment {
   _id: string
   cliente: string
+  cliente_id?: string
   cliente_nombre?: string
   fecha: string
   hora_inicio: string
@@ -28,11 +30,19 @@ interface Appointment {
   estado_pago?: string
 }
 
+interface GlobalDateRange {
+  start_date: string
+  end_date: string
+}
+
 export default function Billing() {
   // Estado para la cita seleccionada
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null)
   const [showDirectSaleModal, setShowDirectSaleModal] = useState(false)
   const [metricsRefreshKey, setMetricsRefreshKey] = useState(0)
+  const [globalPeriod, setGlobalPeriod] = useState(DEFAULT_PERIOD)
+  const [globalDateRange, setGlobalDateRange] = useState<GlobalDateRange>({ start_date: "", end_date: "" })
+  const [visibleAppointmentIds, setVisibleAppointmentIds] = useState<string[]>([])
 
   const handleSelectAppointment = (appointment: Appointment) => {
     setSelectedAppointment(appointment)
@@ -45,6 +55,13 @@ export default function Billing() {
   const handleDirectSaleCompleted = () => {
     setMetricsRefreshKey((current) => current + 1)
   }
+
+  useEffect(() => {
+    if (!selectedAppointment?._id) return
+    if (!visibleAppointmentIds.includes(selectedAppointment._id)) {
+      setSelectedAppointment(null)
+    }
+  }, [selectedAppointment, visibleAppointmentIds])
 
   return (
     <>
@@ -72,15 +89,24 @@ export default function Billing() {
             />
 
             {/* Sales Metrics */}
-            <SalesMetrics key={metricsRefreshKey} />
+            <SalesMetrics
+              key={metricsRefreshKey}
+              period={globalPeriod}
+              dateRange={globalDateRange}
+              onPeriodChange={setGlobalPeriod}
+              onDateRangeChange={setGlobalDateRange}
+            />
 
             {/* Main Content Grid */}
             <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
               {/* Left Column */}
               <div className="space-y-6">
                 <TodayAppointments
+                  period={globalPeriod}
+                  dateRange={globalDateRange}
                   onSelectAppointment={handleSelectAppointment}
                   selectedAppointmentId={selectedAppointment?._id}
+                  onVisibleAppointmentIdsChange={setVisibleAppointmentIds}
                 />
               </div>
 

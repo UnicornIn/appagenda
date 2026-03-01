@@ -467,7 +467,7 @@ export default function GiftCardsPage() {
                         disabled={isFetching}
                         className={`h-8 min-w-8 rounded-md border px-2 text-xs font-medium transition-colors ${
                           item === currentPage
-                            ? "border-indigo-600 bg-indigo-600 text-white"
+                            ? "border-black bg-black text-white"
                             : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
                         }`}
                       >

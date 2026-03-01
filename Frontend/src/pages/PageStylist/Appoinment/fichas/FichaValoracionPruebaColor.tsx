@@ -433,7 +433,7 @@ export function FichaValoracionPruebaColor({ cita, datosIniciales, onGuardar, on
                     <button
                       type="button"
                       onClick={() => handleRemoveImage(tipo, index + 1)}
-                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600"
+                      className="absolute -top-2 -right-2 w-6 h-6 bg-gray-500 text-white rounded-full flex items-center justify-center hover:bg-gray-600"
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -557,13 +557,13 @@ export function FichaValoracionPruebaColor({ cita, datosIniciales, onGuardar, on
       </div>
 
       {/* FIRMA DEL PROFESIONAL - OBLIGATORIO */}
-      <div className="flex items-center space-x-2 p-4 border rounded-lg bg-blue-50">
+      <div className="flex items-center space-x-2 p-4 border rounded-lg bg-gray-50">
         <input
           type="checkbox"
           id="firma"
           checked={formData.firma_profesional}
           onChange={(e) => handleInputChange('firma_profesional', e.target.checked)}
-          className="w-5 h-5 text-blue-600"
+          className="w-5 h-5 text-gray-600"
           required
         />
         <label htmlFor="firma" className="text-sm font-medium flex-1">
@@ -593,7 +593,7 @@ export function FichaValoracionPruebaColor({ cita, datosIniciales, onGuardar, on
           className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center ${loading || !formData.firma_profesional || 
               !formData.servicio_valorado.trim() || !formData.acuerdos.trim() || !formData.recomendaciones.trim()
                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                : 'bg-green-600 text-white hover:bg-green-700'
+                : 'bg-gray-600 text-white hover:bg-gray-700'
             }`}
         >
           {loading ? (
@@ -612,40 +612,40 @@ export function FichaValoracionPruebaColor({ cita, datosIniciales, onGuardar, on
 
       {/* Mensajes de validación */}
       {!formData.firma_profesional && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-red-700 text-sm">
+        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+          <p className="text-gray-700 text-sm">
             ⚠️ Debe incluir su firma como profesional para crear la ficha.
           </p>
         </div>
       )}
 
       {!formData.servicio_valorado.trim() && (
-        <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <p className="text-yellow-700 text-sm">
+        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+          <p className="text-gray-700 text-sm">
             ⚠️ Debe especificar el servicio valorado.
           </p>
         </div>
       )}
 
       {!formData.acuerdos.trim() && (
-        <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <p className="text-yellow-700 text-sm">
+        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+          <p className="text-gray-700 text-sm">
             ⚠️ Debe describir los acuerdos con el cliente.
           </p>
         </div>
       )}
 
       {!formData.recomendaciones.trim() && (
-        <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <p className="text-yellow-700 text-sm">
+        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+          <p className="text-gray-700 text-sm">
             ⚠️ Debe incluir recomendaciones basadas en la valoración.
           </p>
         </div>
       )}
 
       {/* Nota sobre guardado automático */}
-      <div className="p-2 bg-blue-50 border border-blue-200 rounded text-center">
-        <p className="text-xs text-blue-600">
+      <div className="p-2 bg-gray-50 border border-gray-200 rounded text-center">
+        <p className="text-xs text-gray-600">
           💾 Los datos se guardan automáticamente (excepto las imágenes).
           Puedes cerrar y continuar más tarde.
         </p>
