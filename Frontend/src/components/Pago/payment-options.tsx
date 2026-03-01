@@ -82,10 +82,10 @@ export function PaymentOptions({
             case "COP":
                 return `$${amount.toLocaleString("es-CO", { maximumFractionDigits: 0 })}${showCurrency ? ' COP' : ''}`
             case "MXN":
-                return `$${amount.toLocaleString("es-MX", { minimumFractionDigits: 2 })}${showCurrency ? ' MXN' : ''}`
+                return `$${amount.toLocaleString("es-MX", { maximumFractionDigits: 0 })}${showCurrency ? ' MXN' : ''}`
             case "USD":
             default:
-                return `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}${showCurrency ? ' USD' : ''}`
+                return `$${amount.toLocaleString("en-US", { maximumFractionDigits: 0 })}${showCurrency ? ' USD' : ''}`
         }
     }
 

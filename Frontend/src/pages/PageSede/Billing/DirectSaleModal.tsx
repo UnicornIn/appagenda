@@ -248,14 +248,14 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
         style: "currency",
         currency,
         minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
+        maximumFractionDigits: 0,
       }).format(value);
     } catch {
       return new Intl.NumberFormat("es-CO", {
         style: "currency",
         currency: "USD",
         minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
+        maximumFractionDigits: 0,
       }).format(value);
     }
   };

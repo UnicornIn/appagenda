@@ -1,25 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "../../../components/ui/dialog";
-import { Button } from "../../../components/ui/button";
-import { Input } from "../../../components/ui/input";
-import { Textarea } from "../../../components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../../../components/ui/select";
-import { Switch } from "../../../components/ui/switch";
-import { Loader } from "lucide-react";
+import { X, Loader } from "lucide-react";
 import type { Service } from "../../../types/service";
 
 interface ServiceFormModalProps {
@@ -85,197 +67,196 @@ export function ServiceFormModal({
     onSave(formData as Service);
   };
 
+  if (!isOpen) return null;
+
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl p-6 shadow-lg bg-white border">
-        <DialogHeader className="border-b pb-4">
-          <DialogTitle className="text-2xl font-semibold">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg bg-white p-6">
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="text-2xl font-bold">
             {service ? "Editar servicio" : "Nuevo servicio"}
-          </DialogTitle>
-        </DialogHeader>
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSaving}
+            className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        </div>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-6">
-          <div className="grid gap-6 sm:grid-cols-2">
-            {/* Nombre */}
-            <div className="sm:col-span-2">
-              <label htmlFor="nombre" className="block text-sm font-medium text-gray-700">
-                Nombre del servicio *
-              </label>
-              <Input
-                id="nombre"
-                value={formData.nombre}
-                onChange={(e) =>
-                  setFormData({ ...formData, nombre: e.target.value })
-                }
-                placeholder="Ej: Corte de cabello"
-                required
-                className="mt-1"
-                disabled={isSaving}
-              />
-            </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="nombre" className="mb-1 block text-sm font-medium text-gray-700">
+              Nombre *
+            </label>
+            <input
+              id="nombre"
+              type="text"
+              value={formData.nombre || ""}
+              onChange={(e) =>
+                setFormData({ ...formData, nombre: e.target.value })
+              }
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
+              required
+              disabled={isSaving}
+              placeholder="Ej: Corte de cabello"
+            />
+          </div>
 
-            {/* Descripción */}
-            <div className="sm:col-span-2">
-              <label htmlFor="descripcion" className="block text-sm font-medium text-gray-700">
-                Descripción
-              </label>
-              <Textarea
-                id="descripcion"
-                value={formData.descripcion}
-                onChange={(e) =>
-                  setFormData({ ...formData, descripcion: e.target.value })
-                }
-                placeholder="Describe el servicio..."
-                rows={3}
-                className="mt-1"
-                disabled={isSaving}
-              />
-            </div>
+          <div>
+            <label htmlFor="descripcion" className="mb-1 block text-sm font-medium text-gray-700">
+              Descripción
+            </label>
+            <textarea
+              id="descripcion"
+              value={formData.descripcion || ""}
+              onChange={(e) =>
+                setFormData({ ...formData, descripcion: e.target.value })
+              }
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
+              rows={3}
+              disabled={isSaving}
+            />
+          </div>
 
-            {/* Precio */}
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label htmlFor="precio" className="block text-sm font-medium text-gray-700">
-                Precio ($) *
+              <label htmlFor="precio" className="mb-1 block text-sm font-medium text-gray-700">
+                Precio *
               </label>
-              <Input
+              <input
                 id="precio"
                 type="number"
                 min="0"
                 step="0.01"
-                value={formData.precio}
+                value={formData.precio ?? 0}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
                     precio: parseFloat(e.target.value || "0"),
                   })
                 }
+                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
                 required
-                className="mt-1"
                 disabled={isSaving}
               />
             </div>
 
-            {/* Duración */}
             <div>
-              <label htmlFor="duracion" className="block text-sm font-medium text-gray-700">
-                Duración (minutos) *
+              <label htmlFor="duracion" className="mb-1 block text-sm font-medium text-gray-700">
+                Duración (min) *
               </label>
-              <Input
+              <input
                 id="duracion"
                 type="number"
                 min="5"
                 step="5"
-                value={formData.duracion}
+                value={formData.duracion ?? 0}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    duracion: parseInt(e.target.value || "0"),
+                    duracion: parseInt(e.target.value || "0", 10),
                   })
                 }
+                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
                 required
-                className="mt-1"
-                disabled={isSaving}
-              />
-            </div>
-
-            {/* Categoría */}
-            <div>
-              <label htmlFor="categoria" className="block text-sm font-medium text-gray-700">
-                Categoría *
-              </label>
-              <Select
-                value={formData.categoria}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, categoria: value })
-                }
-                disabled={isSaving}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Seleccione categoría" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Cortes">Cortes</SelectItem>
-                  <SelectItem value="Coloración">Coloración</SelectItem>
-                  <SelectItem value="Barba">Barba</SelectItem>
-                  <SelectItem value="Tratamientos">Tratamientos</SelectItem>
-                  <SelectItem value="Peinados">Peinados</SelectItem>
-                  <SelectItem value="Manicura">Manicura</SelectItem>
-                  <SelectItem value="Pedicura">Pedicura</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Comisión */}
-            <div>
-              <label htmlFor="comision" className="block text-sm font-medium text-gray-700">
-                Comisión estilista (%) *
-              </label>
-              <Input
-                id="comision"
-                type="number"
-                min="0"
-                max="100"
-                value={formData.comision_porcentaje}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    comision_porcentaje: parseFloat(e.target.value || "0"),
-                  })
-                }
-                required
-                className="mt-1"
-                disabled={isSaving}
-              />
-            </div>
-
-            {/* Estado */}
-            <div className="sm:col-span-2 flex items-center justify-between rounded-lg border p-4 bg-white">
-              <div>
-                <label htmlFor="activo" className="block text-base font-medium text-gray-700">
-                  Servicio activo
-                </label>
-                <p className="text-sm text-gray-500">
-                  El servicio estará disponible para agendar
-                </p>
-              </div>
-
-              <Switch
-                id="activo"
-                checked={formData.activo}
-                onCheckedChange={(checked) =>
-                  setFormData({ ...formData, activo: checked })
-                }
                 disabled={isSaving}
               />
             </div>
           </div>
 
-          <DialogFooter className="pt-4 border-t">
-            <Button 
-              type="button" 
-              variant="outline" 
-              onClick={onClose}
+          <div>
+            <label htmlFor="categoria" className="mb-1 block text-sm font-medium text-gray-700">
+              Categoría *
+            </label>
+            <select
+              id="categoria"
+              value={formData.categoria || "Cortes"}
+              onChange={(e) =>
+                setFormData({ ...formData, categoria: e.target.value })
+              }
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
               disabled={isSaving}
             >
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              className="bg-[oklch(0.55_0.25_280)] hover:bg-[oklch(0.50_0.25_280)]"
+              <option value="Cortes">Cortes</option>
+              <option value="Coloración">Coloración</option>
+              <option value="Barba">Barba</option>
+              <option value="Tratamientos">Tratamientos</option>
+              <option value="Peinados">Peinados</option>
+              <option value="Manicura">Manicura</option>
+              <option value="Pedicura">Pedicura</option>
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="comision" className="mb-1 block text-sm font-medium text-gray-700">
+              Comisión (%) *
+            </label>
+            <input
+              id="comision"
+              type="number"
+              min="0"
+              max="100"
+              value={formData.comision_porcentaje ?? 0}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  comision_porcentaje: parseFloat(e.target.value || "0"),
+                })
+              }
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
+              required
               disabled={isSaving}
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+            <div>
+              <label htmlFor="activo" className="block text-base font-medium text-gray-700">
+                Activo
+              </label>
+              <p className="text-sm text-gray-500">Disponible para agendar</p>
+            </div>
+            <input
+              id="activo"
+              type="checkbox"
+              checked={!!formData.activo}
+              onChange={(e) =>
+                setFormData({ ...formData, activo: e.target.checked })
+              }
+              className="h-4 w-4 rounded border-gray-300 text-[oklch(0.55_0.25_280)] focus:ring-[oklch(0.55_0.25_280)]"
+              disabled={isSaving}
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSaving}
+              className="rounded-lg border border-gray-300 px-6 py-2 font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="flex items-center gap-2 rounded-lg bg-gray-900 px-6 py-2 font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
             >
               {isSaving ? (
                 <>
-                  <Loader className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader className="h-4 w-4 animate-spin" />
                   Guardando...
                 </>
               ) : (
                 service ? "Guardar cambios" : "Crear servicio"
               )}
-            </Button>
-          </DialogFooter>
+            </button>
+          </div>
         </form>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }

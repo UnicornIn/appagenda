@@ -8,6 +8,8 @@ import { Calendar, DollarSign, Package, Users } from "lucide-react"
 import { Button } from "../../../components/ui/button"
 import { Skeleton } from "../../../components/ui/skeleton"
 import { formatDateDMY } from "../../../lib/dateFormat"
+import { getStoredCurrency, normalizeCurrencyCode } from "../../../lib/currency"
+import { DEFAULT_PERIOD } from "../../../lib/period"
 
 interface SalesMetricsProps {
   initialPeriod?: string;
@@ -20,7 +22,7 @@ interface DateRange {
 }
 
 export function SalesMetrics({ 
-  initialPeriod = "last_7_days", 
+  initialPeriod = DEFAULT_PERIOD, 
   sedeId 
 }: SalesMetricsProps) {
   const { user, isAuthenticated } = useAuth()
@@ -29,7 +31,7 @@ export function SalesMetrics({
   const [showDateModal, setShowDateModal] = useState(false)
   const [tempDateRange, setTempDateRange] = useState<DateRange>({ start_date: "", end_date: "" })
   const [dateRange, setDateRange] = useState<DateRange>({ start_date: "", end_date: "" })
-  const [currency, setCurrency] = useState<string>('USD') // 🆕 NUEVO: Estado para la moneda
+  const [currency, setCurrency] = useState<string>(getStoredCurrency("USD")) // 🆕 NUEVO: Estado para la moneda
   const [metrics, setMetrics] = useState({
     ventas_totales: 0,
     ventas_servicios: 0,
@@ -105,7 +107,7 @@ export function SalesMetrics({
       }
 
       // 🆕 NUEVO: Extraer la moneda de la sede desde la respuesta
-      const sedeCurrency = data.moneda_sede || 'USD'
+      const sedeCurrency = normalizeCurrencyCode(data.moneda_sede || getStoredCurrency("USD"))
       console.log('💰 Moneda de la sede:', sedeCurrency)
       setCurrency(sedeCurrency)
 
@@ -133,7 +135,7 @@ export function SalesMetrics({
           const metricas = data.metricas_por_moneda[primeraMoneda]
           
           console.log(`⚠️ Usando moneda alternativa: ${primeraMoneda}`, metricas)
-          setCurrency(primeraMoneda)
+          setCurrency(normalizeCurrencyCode(primeraMoneda))
           
           ventasTotales = metricas.ventas_totales || 0
           ventasServicios = metricas.ventas_servicios || 0

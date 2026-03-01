@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react"
 import { X, ArrowLeft, CheckCircle, CreditCard, DollarSign, Calendar, Clock, User, Scissors, Link as LinkIcon, Wallet, Gift } from "lucide-react"
 import { crearCita } from '../../../../components/Quotes/citasApi'
 import { useAuth } from '../../../../components/Auth/AuthContext'
+import { getStoredCurrency, normalizeCurrencyCode } from "../../../../lib/currency"
 
 // 🔥 INTERFAZ PARA LOS DATOS DE LA CITA
 interface CitaParaPago {
@@ -71,7 +72,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     const [selectedPaymentType, setSelectedPaymentType] = useState<"deposit" | "full">("full");
     const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("sin_pago");
     const [giftCardCode, setGiftCardCode] = useState("");
-    const [userCurrency, setUserCurrency] = useState<string>("USD");
+    const [userCurrency, setUserCurrency] = useState<string>(getStoredCurrency("USD"));
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const isCopCurrency = userCurrency.toUpperCase() === "COP";
@@ -95,19 +96,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     // 🔥 EFECTO PARA OBTENER MONEDA
     useEffect(() => {
         const getCurrency = () => {
-            if (typeof window === 'undefined') return "USD";
-            
-            const storedCurrency = sessionStorage.getItem("beaux-moneda");
-            if (storedCurrency) return storedCurrency;
-
-            const pais = sessionStorage.getItem("beaux-pais");
-            if (pais === "Colombia") return "COP";
-            if (pais === "México" || pais === "Mexico") return "MXN";
-
-            return "USD";
+            return normalizeCurrencyCode(user?.moneda || getStoredCurrency("USD"));
         };
         setUserCurrency(getCurrency());
-    }, []);
+    }, [user?.moneda]);
 
     // 🔥 INICIALIZAR MÉTODO DE PAGO SEGÚN TIPO DE PROCESO
     useEffect(() => {
@@ -140,12 +132,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     const formatAmount = (amount: number) => {
         switch (userCurrency) {
             case "COP":
-                return `$${amount.toLocaleString("es-CO")} COP`;
+                return `$${Math.round(amount).toLocaleString("es-CO", { maximumFractionDigits: 0 })} COP`;
             case "MXN":
-                return `$${amount.toLocaleString("es-MX")} MXN`;
+                return `$${Math.round(amount).toLocaleString("es-MX", { maximumFractionDigits: 0 })} MXN`;
             case "USD":
             default:
-                return `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2 })} USD`;
+                return `$${Math.round(amount).toLocaleString("en-US", { maximumFractionDigits: 0 })} USD`;
         }
     };
 
@@ -466,15 +458,15 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                     {selectedProcessType === "reserva"
                                         ? "Reserva directa sin pago"
                                         : selectedPaymentType === "deposit" && canHaveDeposit && !requiresFullPaymentNow
-                                        ? `Abono de ${FIXED_DEPOSIT.toLocaleString()} ${userCurrency}`
-                                        : `Pago completo de ${citaData.monto_total.toLocaleString()} ${userCurrency}`
+                                        ? `Abono de ${formatAmount(FIXED_DEPOSIT)}`
+                                        : `Pago completo de ${formatAmount(citaData.monto_total)}`
                                     }
                                 </div>
                                 <div className="text-xs text-gray-700">
                                     {selectedProcessType === "reserva"
                                         ? "La cita se confirmará sin procesar ningún pago."
                                         : selectedPaymentType === "deposit" && canHaveDeposit && !requiresFullPaymentNow
-                                        ? `El cliente deberá abonar ${FIXED_DEPOSIT.toLocaleString()} ${userCurrency}`
+                                        ? `El cliente deberá abonar ${formatAmount(FIXED_DEPOSIT)}`
                                         : `El cliente pagará el total del servicio.`
                                     }
                                 </div>

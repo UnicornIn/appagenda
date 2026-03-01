@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "../../../types/config";
 import { Cliente } from "../../../types/cliente";
 import { calcularDiasSinVenir } from "../../../lib/clientMetrics";
+import { formatCurrencyNoDecimals } from "../../../lib/currency";
 
 export interface CreateClienteData {
   nombre: string;
@@ -177,12 +178,35 @@ const fixS3Url = (url: string): string => {
   return url;
 };
 
+const firstNonEmptyString = (...values: unknown[]): string => {
+  for (const value of values) {
+    if (typeof value === "string" || typeof value === "number") {
+      const normalized = String(value).trim()
+      if (normalized) {
+        return normalized
+      }
+    }
+  }
+  return ""
+}
+
+const extractCedula = (cliente: any): string =>
+  firstNonEmptyString(
+    cliente?.cedula,
+    cliente?.numero_cedula,
+    cliente?.numeroDocumento,
+    cliente?.numero_documento,
+    cliente?.documento,
+    cliente?.identificacion,
+    cliente?.dni
+  )
+
 const mapCliente = (cliente: any): Cliente => ({
   id: cliente.cliente_id || cliente.id || cliente._id || '',
   nombre: cliente.nombre || '',
   telefono: cliente.telefono || 'No disponible',
   email: cliente.correo || cliente.email || 'No disponible',
-  cedula: cliente.cedula || '',
+  cedula: extractCedula(cliente),
   ciudad: cliente.ciudad || '',
   diasSinVenir: calcularDiasSinVenir(cliente),
   diasSinComprar: cliente.dias_sin_visitar || 0,
@@ -195,6 +219,31 @@ const mapCliente = (cliente: any): Cliente => ({
   historialCabello: [],
   historialProductos: []
 });
+
+const CLIENTES_FETCH_TIMEOUT_MS = 20000;
+
+const fetchWithTimeout = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs: number = CLIENTES_FETCH_TIMEOUT_MS
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Tiempo de espera agotado al obtener clientes");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
 
 export const clientesService = {
   async getClientesPaginados(
@@ -213,7 +262,7 @@ export const clientesService = {
       url.searchParams.set("filtro", filtro);
     }
 
-    const response = await fetch(url.toString(), {
+    const response = await fetchWithTimeout(url.toString(), {
       method: "GET",
       headers: {
         accept: "application/json",
@@ -354,6 +403,27 @@ export const clientesService = {
     }
   },
 
+  async getClienteCedula(token: string, clienteId: string): Promise<string> {
+    try {
+      const response = await fetch(`${API_BASE_URL}clientes/${clienteId}`, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (!response.ok) {
+        return ''
+      }
+
+      const cliente = await response.json()
+      return extractCedula(cliente)
+    } catch {
+      return ''
+    }
+  },
+
 
   async getClienteById(token: string, clienteId: string): Promise<Cliente> {
     const response = await fetch(`${API_BASE_URL}clientes/${clienteId}`, {
@@ -382,7 +452,7 @@ export const clientesService = {
       nombre: cliente.nombre,
       telefono: cliente.telefono || 'No disponible',
       email: cliente.correo || 'No disponible',
-      cedula: cliente.cedula || '',
+      cedula: extractCedula(cliente),
       ciudad: cliente.ciudad || '',
       diasSinVenir: calcularDiasSinVenir(cliente),
       diasSinComprar: cliente.dias_sin_visitar || 0,
@@ -846,11 +916,8 @@ export const clientesService = {
         const valorTotal = cita.valor_total || 0;
         const moneda = cita.moneda || 'USD';
 
-        const valorFormateado = moneda === 'COP'
-          ? `$${valorTotal.toLocaleString('es-CO')} COP`
-          : moneda === 'USD'
-            ? `$${valorTotal.toFixed(2)} USD`
-            : `$${valorTotal} ${moneda}`;
+        const locale = moneda === "USD" ? "en-US" : moneda === "MXN" ? "es-MX" : "es-CO";
+        const valorFormateado = `${formatCurrencyNoDecimals(valorTotal, moneda, locale)} ${moneda}`;
 
         return {
           fecha: cita.fecha,

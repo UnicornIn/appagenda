@@ -13,6 +13,12 @@ interface ServicesListProps {
 }
 
 export function ServicesList({ services, onEdit, onDelete }: ServicesListProps) {
+  const formatAmountNoDecimals = (value: number, currency: string = "USD") => {
+    const safeValue = Number.isFinite(value) ? value : 0;
+    const locale = currency === "USD" ? "en-US" : currency === "MXN" ? "es-MX" : "es-CO";
+    return Math.round(safeValue).toLocaleString(locale, { maximumFractionDigits: 0 });
+  };
+
   if (services.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-white">
@@ -63,7 +69,7 @@ export function ServicesList({ services, onEdit, onDelete }: ServicesListProps) 
                 Precio ({service.moneda_local || 'USD'})
               </span>
               <span className="font-semibold text-gray-900">
-                ${service.precio_local || service.precio}
+                ${formatAmountNoDecimals(service.precio_local || service.precio, service.moneda_local || "USD")}
                 <span className="ml-1 text-xs text-gray-500">
                   {service.moneda_local || 'USD'}
                 </span>
@@ -106,19 +112,19 @@ export function ServicesList({ services, onEdit, onDelete }: ServicesListProps) 
                   {service.precios_completos.USD && (
                     <div className="flex justify-between">
                       <span>USD:</span>
-                      <span>${service.precios_completos.USD}</span>
+                      <span>${formatAmountNoDecimals(service.precios_completos.USD, "USD")}</span>
                     </div>
                   )}
                   {service.precios_completos.COP && (
                     <div className="flex justify-between">
                       <span>COP:</span>
-                      <span>${service.precios_completos.COP.toLocaleString()}</span>
+                      <span>${formatAmountNoDecimals(service.precios_completos.COP, "COP")}</span>
                     </div>
                   )}
                   {service.precios_completos.MXN && (
                     <div className="flex justify-between">
                       <span>MXN:</span>
-                      <span>${service.precios_completos.MXN.toLocaleString()}</span>
+                      <span>${formatAmountNoDecimals(service.precios_completos.MXN, "MXN")}</span>
                     </div>
                   )}
                 </div>

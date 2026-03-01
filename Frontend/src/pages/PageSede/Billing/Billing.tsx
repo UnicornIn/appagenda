@@ -3,6 +3,7 @@
 
 import { useState } from "react"
 import { Sidebar } from "../../../components/Layout/Sidebar"
+import { PageHeader } from "../../../components/Layout/PageHeader"
 import { SalesMetrics } from "./sales-metrics"
 import { TodayAppointments } from "./today-appointments"
 import { ServiceProtocol } from "./service-protocol"
@@ -57,10 +58,9 @@ export default function Billing() {
         <Sidebar />
         <main className="flex-1 overflow-auto">
           <div className="p-8">
-            {/* Header */}
-            <div className="mb-8 flex items-center justify-between">
-              <h1 className="text-3xl font-bold">Ventas</h1>
-              <div className="flex items-center gap-2">
+            <PageHeader
+              title="Facturación"
+              actions={
                 <Button
                   className="bg-black text-white hover:bg-gray-800"
                   onClick={() => setShowDirectSaleModal(true)}
@@ -68,8 +68,8 @@ export default function Billing() {
                   <ShoppingBag className="mr-2 h-4 w-4" />
                   Venta directa
                 </Button>
-              </div>
-            </div>
+              }
+            />
 
             {/* Sales Metrics */}
             <SalesMetrics key={metricsRefreshKey} />

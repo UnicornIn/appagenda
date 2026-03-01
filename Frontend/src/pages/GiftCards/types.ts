@@ -79,14 +79,14 @@ export interface GiftCardCreatePayload {
   beneficiario_nombre?: string;
   valor: number;
   moneda?: string;
-  dias_vigencia?: number;
+  dias_vigencia?: number | null;
   notas?: string;
 }
 
 export interface GiftCardUpdatePayload {
   beneficiario_cliente_id?: string;
   beneficiario_nombre?: string;
-  dias_vigencia?: number;
+  dias_vigencia?: number | null;
   notas?: string;
   estado?: string;
 }

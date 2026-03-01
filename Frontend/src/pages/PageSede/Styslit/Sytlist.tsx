@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Sidebar } from "../../../components/Layout/Sidebar"
+import { PageHeader } from "../../../components/Layout/PageHeader"
 import { EstilistasList } from "./estilistas-list"
 import { EstilistaFormModal } from "./estilista-form-modal"
 import { Plus, Loader } from 'lucide-react'
@@ -186,25 +187,22 @@ export default function EstilistasPage() {
 
       {/* Solo la lista de estilistas */}
       <div className="flex-1 overflow-y-auto bg-white">
-        <div className="max-w-6xl mx-auto p-6">
-          {/* Encabezado */}
-          <div className="mb-8">
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Gestión de Estilistas</h1>
-            <p className="text-gray-700">
-            </p>
-          </div>
-
-          {/* Botón de añadir y estadísticas */}
-          <div className="flex items-center justify-between mb-6">
-            
-            {estilistas.length > 0 && (
-              <div className="text-sm text-gray-700">
-              </div>
-            )}
-          </div>
+        <div className="max-w-5xl mx-auto p-4">
+          <PageHeader
+            title="Estilistas"
+            actions={
+              <button
+                onClick={handleAddEstilista}
+                className="flex items-center justify-center gap-2 bg-black text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-800 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                Añadir estilista
+              </button>
+            }
+          />
 
           {error && (
-            <div className="p-4 text-gray-900 text-sm bg-gray-100 border border-gray-300 rounded mb-6">
+            <div className="p-3 text-gray-900 text-sm bg-gray-100 border border-gray-300 rounded mb-4">
               Error: {error}
               <button
                 onClick={loadEstilistas}

@@ -1,4 +1,4 @@
-import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, CreditCard, Landmark, Loader2, Search, Wallet } from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import {
@@ -15,9 +15,10 @@ import type { GiftCardClientOption, GiftCardCreatePayload } from "../types";
 import { formatMoney, toPositiveNumber } from "./utils";
 
 const PRESET_AMOUNTS = [50000, 100000, 150000, 200000, 300000];
+const CLIENTS_SEARCH_PAGE_SIZE = 30;
 
 type AmountMode = "free" | "preset";
-type ValidityMode = "annual" | "custom";
+type ValidityMode = "annual" | "custom" | "no_expiry";
 type PaymentMethod = "efectivo" | "transferencia" | "tarjeta_credito" | "tarjeta_debito";
 
 const PAYMENT_OPTIONS: Array<{ label: string; value: PaymentMethod; icon: ReactNode }> = [
@@ -45,6 +46,34 @@ interface CreateGiftCardModalProps {
   isSubmitting: boolean;
 }
 
+function formatAmountInput(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return Math.round(value).toLocaleString("es-CO");
+}
+
+function mergeClientOptions(
+  current: GiftCardClientOption[],
+  incoming: GiftCardClientOption[]
+): GiftCardClientOption[] {
+  const byId = new Map<string, GiftCardClientOption>();
+
+  for (const client of current) {
+    byId.set(client.id, client);
+  }
+
+  for (const client of incoming) {
+    const existing = byId.get(client.id);
+    byId.set(client.id, {
+      id: client.id,
+      nombre: client.nombre || existing?.nombre || "",
+      email: client.email || existing?.email,
+      telefono: client.telefono || existing?.telefono,
+    });
+  }
+
+  return Array.from(byId.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
+}
+
 function getDateInputFromToday(days: number): string {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -66,13 +95,9 @@ function calculateDaysBetweenToday(endDate: string): number {
   const today = new Date(getTodayDateInput());
   const target = new Date(endDate);
   if (Number.isNaN(target.getTime())) return 0;
+
   const milliseconds = target.getTime() - today.getTime();
   return Math.ceil(milliseconds / (1000 * 60 * 60 * 24));
-}
-
-function formatAmountInput(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "";
-  return Math.round(value).toLocaleString("es-CO");
 }
 
 export function CreateGiftCardModal({
@@ -85,10 +110,10 @@ export function CreateGiftCardModal({
   onCreate,
   isSubmitting,
 }: CreateGiftCardModalProps) {
-  const [clients, setClients] = useState<GiftCardClientOption[]>([]);
+  const [knownClients, setKnownClients] = useState<GiftCardClientOption[]>([]);
+  const [buyerOptions, setBuyerOptions] = useState<GiftCardClientOption[]>([]);
   const [isLoadingClients, setIsLoadingClients] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
-  const [hasLoadedClients, setHasLoadedClients] = useState(false);
 
   const [amountMode, setAmountMode] = useState<AmountMode>("free");
   const [presetAmount, setPresetAmount] = useState<number>(150000);
@@ -102,60 +127,72 @@ export function CreateGiftCardModal({
   const [beneficiaryPhone, setBeneficiaryPhone] = useState("");
   const [beneficiaryEmail, setBeneficiaryEmail] = useState("");
   const [optionalMessage, setOptionalMessage] = useState("");
-
   const [validityMode, setValidityMode] = useState<ValidityMode>("annual");
   const [customExpiryDate, setCustomExpiryDate] = useState(getDateInputFromToday(365));
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [formError, setFormError] = useState<string | null>(null);
+  const latestBuyerSearchRequestRef = useRef(0);
 
   const selectedBuyer = useMemo(
-    () => clients.find((client) => client.id === selectedBuyerId) ?? null,
-    [clients, selectedBuyerId]
+    () => knownClients.find((client) => client.id === selectedBuyerId) ?? null,
+    [knownClients, selectedBuyerId]
   );
-
-  const buyerOptions = useMemo(() => {
-    const term = buyerSearch.trim().toLowerCase();
-    if (!term) return clients.slice(0, 80);
-
-    return clients
-      .filter((client) => {
-        const value = `${client.nombre} ${client.email ?? ""} ${client.id}`.toLowerCase();
-        return value.includes(term);
-      });
-  }, [buyerSearch, clients]);
+  const hasBuyerQuery = buyerSearch.trim().length > 0;
 
   const totalAmount = amountMode === "preset" ? presetAmount : toPositiveNumber(freeAmountInput);
 
   useEffect(() => {
-    if (!open || !token || hasLoadedClients) return;
+    if (!open || !token) return;
 
-    let isMounted = true;
+    let cancelled = false;
+    const requestId = ++latestBuyerSearchRequestRef.current;
+    const query = buyerSearch.trim();
+
+    if (!query) {
+      setBuyerOptions([]);
+      setClientsError(null);
+      setIsLoadingClients(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const loadClients = async () => {
       try {
         setIsLoadingClients(true);
         setClientsError(null);
-        const list = await giftcardsService.fetchClientsForSelector(token);
-        if (!isMounted) return;
-        setClients(list);
-        setHasLoadedClients(true);
+
+        const result = await giftcardsService.searchClientsForSelector(token, query, {
+          limit: CLIENTS_SEARCH_PAGE_SIZE,
+          page: 1,
+        });
+
+        if (cancelled || requestId !== latestBuyerSearchRequestRef.current) return;
+
+        setBuyerOptions(result.clients);
+        setKnownClients((prev) => mergeClientOptions(prev, result.clients));
       } catch (error) {
-        if (!isMounted) return;
+        if (cancelled || requestId !== latestBuyerSearchRequestRef.current) return;
+        setBuyerOptions([]);
         setClientsError(error instanceof Error ? error.message : "No se pudieron cargar clientes");
       } finally {
-        if (isMounted) {
+        if (!cancelled && requestId === latestBuyerSearchRequestRef.current) {
           setIsLoadingClients(false);
         }
       }
     };
 
-    void loadClients();
+    const debounceMs = query ? 250 : 0;
+    const timeout = setTimeout(() => {
+      void loadClients();
+    }, debounceMs);
 
     return () => {
-      isMounted = false;
+      cancelled = true;
+      clearTimeout(timeout);
     };
-  }, [open, token, hasLoadedClients]);
+  }, [open, token, buyerSearch]);
 
   useEffect(() => {
     if (!open) {
@@ -202,12 +239,6 @@ export function CreateGiftCardModal({
       return;
     }
 
-    const customDays = validityMode === "custom" ? calculateDaysBetweenToday(customExpiryDate) : 365;
-    if (validityMode === "custom" && customDays <= 0) {
-      setFormError("La fecha de vigencia personalizada debe ser posterior a hoy.");
-      return;
-    }
-
     const finalBeneficiaryName = isForAnotherPerson ? beneficiaryName.trim() : selectedBuyer.nombre;
     const finalBeneficiaryPhone = isForAnotherPerson
       ? beneficiaryPhone.trim()
@@ -220,6 +251,15 @@ export function CreateGiftCardModal({
       setFormError("Debes ingresar el nombre del beneficiario.");
       return;
     }
+
+    const customDays = validityMode === "custom" ? calculateDaysBetweenToday(customExpiryDate) : null;
+    if (validityMode === "custom" && (!customDays || customDays <= 0)) {
+      setFormError("La vigencia personalizada debe ser una fecha posterior a hoy.");
+      return;
+    }
+
+    const diasVigencia: number | null =
+      validityMode === "annual" ? 365 : validityMode === "custom" ? customDays : null;
 
     const notesParts: string[] = [];
     if (optionalMessage.trim()) {
@@ -237,7 +277,7 @@ export function CreateGiftCardModal({
       sede_id: sedeId,
       valor: totalAmount,
       moneda: currency,
-      dias_vigencia: validityMode === "custom" ? customDays : 365,
+      dias_vigencia: diasVigencia,
       comprador_cliente_id: selectedBuyer.id,
       comprador_nombre: selectedBuyer.nombre,
       beneficiario_cliente_id: isForAnotherPerson ? undefined : selectedBuyer.id,
@@ -351,27 +391,76 @@ export function CreateGiftCardModal({
               />
             </div>
 
-            <select
-              value={selectedBuyerId}
-              onChange={(event) => setSelectedBuyerId(event.target.value)}
-              className="h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700"
-              disabled={isLoadingClients}
-            >
-              <option value="">Selecciona cliente comprador</option>
-              {buyerOptions.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.nombre} {client.email ? `(${client.email})` : ""}
-                </option>
-              ))}
-            </select>
+            {selectedBuyer ? (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-gray-900">{selectedBuyer.nombre}</p>
+                    <p className="truncate text-xs text-gray-500">
+                      {selectedBuyer.email || selectedBuyer.telefono || "Sin datos de contacto"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBuyerId("")}
+                    className="text-xs font-medium text-gray-600 hover:text-gray-900"
+                  >
+                    Quitar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500">Selecciona un cliente comprador de la lista.</p>
+            )}
 
-            {isLoadingClients ? (
+            {hasBuyerQuery ? (
+              <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                <div className="max-h-56 overflow-y-auto">
+                  {!isLoadingClients && buyerOptions.length === 0 ? (
+                    <p className="px-3 py-3 text-xs text-gray-500">
+                      No hay resultados para la búsqueda actual.
+                    </p>
+                  ) : (
+                    buyerOptions.map((client) => {
+                      const isSelected = client.id === selectedBuyerId;
+
+                      return (
+                        <button
+                          key={client.id}
+                          type="button"
+                          onClick={() => setSelectedBuyerId(client.id)}
+                          className={`flex w-full items-start justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 ${
+                            isSelected ? "bg-gray-100" : "hover:bg-gray-50"
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-gray-900">{client.nombre}</p>
+                            <p className="truncate text-xs text-gray-500">
+                              {client.email || client.telefono || "Sin datos de contacto"}
+                            </p>
+                          </div>
+                          {isSelected ? (
+                            <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                              Seleccionado
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500">Escribe el nombre del cliente para buscar.</p>
+            )}
+
+            {hasBuyerQuery && isLoadingClients ? (
               <div className="flex items-center gap-2 text-xs text-gray-500">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Cargando clientes...
               </div>
             ) : null}
-            {clientsError ? <p className="text-xs text-amber-700">{clientsError}</p> : null}
+            {hasBuyerQuery && clientsError ? <p className="text-xs text-amber-700">{clientsError}</p> : null}
           </section>
 
           <section className="space-y-3">
@@ -434,43 +523,63 @@ export function CreateGiftCardModal({
           <section className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <div className="space-y-3">
               <h3 className="text-base font-semibold text-gray-900">Vigencia</h3>
-              <div className="space-y-2">
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="radio"
-                    name="validity-mode"
-                    checked={validityMode === "annual"}
-                    onChange={() => setValidityMode("annual")}
-                    className="h-4 w-4 accent-indigo-600"
-                  />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setValidityMode("annual")}
+                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                    validityMode === "annual"
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                  }`}
+                >
                   12 meses
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="radio"
-                    name="validity-mode"
-                    checked={validityMode === "custom"}
-                    onChange={() => setValidityMode("custom")}
-                    className="h-4 w-4 accent-indigo-600"
-                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setValidityMode("custom")}
+                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                    validityMode === "custom"
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                  }`}
+                >
                   Personalizada
-                </label>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setValidityMode("no_expiry")}
+                  className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                    validityMode === "no_expiry"
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                  }`}
+                >
+                  No tiene vencimiento
+                </button>
               </div>
 
               {validityMode === "custom" ? (
-                <Input
-                  type="date"
-                  value={customExpiryDate}
-                  min={getTodayDateInput()}
-                  onChange={(event) => setCustomExpiryDate(event.target.value)}
-                  className="h-11"
-                />
-              ) : null}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">Fecha de vencimiento</label>
+                  <Input
+                    type="date"
+                    value={customExpiryDate}
+                    min={getTodayDateInput()}
+                    onChange={(event) => setCustomExpiryDate(event.target.value)}
+                    className="h-11"
+                  />
+                </div>
+              ) : validityMode === "annual" ? (
+                <p className="text-xs text-gray-500">Vencimiento automático a 12 meses desde emisión.</p>
+              ) : (
+                <p className="text-xs text-gray-500">Esta Gift Card no tendrá fecha de vencimiento.</p>
+              )}
             </div>
 
             <div className="space-y-3">
-              <h3 className="text-base font-semibold text-gray-900">Sede</h3>
-              <Input value={sedeName?.trim() || sedeId} readOnly className="h-11 bg-gray-50" />
+              <h3 className="text-base font-semibold text-gray-900">Nombre Sede</h3>
+              <Input value={sedeName?.trim() || "—"} readOnly className="h-11 bg-gray-50" />
               <p className="text-xs text-gray-500">Total a emitir: {formatMoney(totalAmount, currency)}</p>
             </div>
           </section>

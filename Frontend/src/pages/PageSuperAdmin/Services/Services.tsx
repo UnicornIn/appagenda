@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Sidebar } from "../../../components/Layout/Sidebar";
+import { PageHeader } from "../../../components/Layout/PageHeader";
 import { ServicesList } from "./services-list";
 import { ServiceFormModal } from "./service-form-modal";
 import { ServiceFilters } from "./service-filters";
@@ -169,22 +170,19 @@ export default function ServicesPage() {
       <main className="flex-1 overflow-auto">
         <div className="mx-auto max-w-6xl px-4 py-8">
           {/* Header */}
-          <div className="mb-8 flex items-center justify-between">
-            <div>
-              <h1 className="text-xl font-medium">Servicios</h1>
-              <p className="mt-1 text-sm text-gray-600">
-                {filteredServices.length} de {services.length} servicios
-              </p>
-            </div>
-
-            <button
-              onClick={handleAddService}
-              className="flex items-center gap-1 px-3 py-1.5 border border-black text-sm hover:bg-gray-50"
-            >
-              <Plus className="w-4 h-4" />
-              Añadir servicio
-            </button>
-          </div>
+          <PageHeader
+            title="Servicios"
+            subtitle={`${filteredServices.length} de ${services.length} servicios`}
+            actions={
+              <button
+                onClick={handleAddService}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-gray-900 text-sm text-white hover:bg-gray-800"
+              >
+                <Plus className="w-4 h-4" />
+                Añadir servicio
+              </button>
+            }
+          />
 
           {/* Error Message */}
           {error && (

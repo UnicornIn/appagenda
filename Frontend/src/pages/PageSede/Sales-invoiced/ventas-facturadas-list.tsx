@@ -1,13 +1,31 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Search, Loader2, Calendar, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
 import { Button } from "../../../components/ui/button"
 import { Input } from "../../../components/ui/input"
+import { PageHeader } from "../../../components/Layout/PageHeader"
 import { FacturaDetailModal } from "./factura-detail-modal"
 import type { Factura } from "../../../types/factura"
 import { facturaService } from "./facturas"
 import { formatDateDMY } from "../../../lib/dateFormat"
+import { PaymentMethodsSummary } from "../../../components/SalesInvoiced/payment-methods-summary"
+import {
+  calculatePaymentMethodTotals,
+  type PaymentMethodTotals,
+} from "../../../lib/payment-methods-summary"
+
+type FacturaFilters = {
+  searchTerm: string
+  fecha_desde: string
+  fecha_hasta: string
+}
+
+const EMPTY_FACTURA_FILTERS: FacturaFilters = {
+  searchTerm: "",
+  fecha_desde: "",
+  fecha_hasta: "",
+}
 
 export function VentasFacturadasList() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -21,14 +39,13 @@ export function VentasFacturadasList() {
   const [pagination, setPagination] = useState<any>(null)
   const [filtersApplied, setFiltersApplied] = useState<any>(null)
   const [currentPage, setCurrentPage] = useState(1)
+  const [appliedFilters, setAppliedFilters] = useState<FacturaFilters>(EMPTY_FACTURA_FILTERS)
   const [limit, ] = useState(50)
-
-  // Obtener datos de la sede desde sessionStorage
-  const sedeId = sessionStorage.getItem("beaux-sede_id")
+  const [paymentSummary, setPaymentSummary] = useState<PaymentMethodTotals | null>(null)
 
   // Cargar facturas al montar el componente
   useEffect(() => {
-    cargarFacturas(false)
+    cargarFacturas(1, EMPTY_FACTURA_FILTERS)
   }, [])
 
   // Formatear fecha actual para usar como valor por defecto
@@ -44,27 +61,16 @@ export function VentasFacturadasList() {
     return date.toISOString().split('T')[0]
   }
 
-  const cargarFacturas = async (useFilters: boolean = false, page: number = 1) => {
+  const cargarFacturas = async (page: number = 1, filtros: FacturaFilters = appliedFilters) => {
     try {
       setIsLoading(true)
       setError(null)
-      
-      let fechaDesdeParam = fechaDesde
-      let fechaHastaParam = fechaHasta
-      let searchParam = searchTerm
-      
-      // Si no estamos usando filtros específicos, limpiar los parámetros
-      if (!useFilters) {
-        fechaDesdeParam = ""
-        fechaHastaParam = ""
-        searchParam = ""
-      }
-      
+
       // Obtener ventas con filtros
       const result = await facturaService.buscarFacturas({
-        searchTerm: searchParam,
-        fecha_desde: fechaDesdeParam,
-        fecha_hasta: fechaHastaParam,
+        searchTerm: filtros.searchTerm,
+        fecha_desde: filtros.fecha_desde,
+        fecha_hasta: filtros.fecha_hasta,
         page: page,
         limit: limit
       })
@@ -72,7 +78,13 @@ export function VentasFacturadasList() {
       // Actualizar el estado con las facturas
       setFacturas(result.facturas as Factura[])
       setPagination(result.pagination)
-      setFiltersApplied(result.filters_applied)
+      setPaymentSummary(result.paymentSummary || null)
+      setFiltersApplied({
+        ...(result.filters_applied || {}),
+        fecha_desde: filtros.fecha_desde || null,
+        fecha_hasta: filtros.fecha_hasta || null,
+        search: filtros.searchTerm || null,
+      })
       setCurrentPage(page)
       
     } catch (err) {
@@ -80,6 +92,7 @@ export function VentasFacturadasList() {
       setError("Error al cargar las facturas. Por favor, intenta nuevamente.")
       setFacturas([])
       setPagination(null)
+      setPaymentSummary(null)
     } finally {
       setIsLoading(false)
     }
@@ -87,7 +100,13 @@ export function VentasFacturadasList() {
 
   // Función para aplicar filtros
   const aplicarFiltros = async () => {
-    await cargarFacturas(true, 1) // Siempre volver a la primera página
+    const filtros = {
+      searchTerm: searchTerm.trim(),
+      fecha_desde: fechaDesde,
+      fecha_hasta: fechaHasta,
+    }
+    setAppliedFilters(filtros)
+    await cargarFacturas(1, filtros)
   }
 
   // Función para limpiar filtros
@@ -95,7 +114,8 @@ export function VentasFacturadasList() {
     setSearchTerm("")
     setFechaDesde("")
     setFechaHasta("")
-    cargarFacturas(false, 1)
+    setAppliedFilters(EMPTY_FACTURA_FILTERS)
+    cargarFacturas(1, EMPTY_FACTURA_FILTERS)
   }
 
   // Función para aplicar filtro del último mes
@@ -116,7 +136,7 @@ export function VentasFacturadasList() {
   // Navegación de páginas
   const irAPagina = (pagina: number) => {
     if (pagina >= 1 && pagina <= (pagination?.total_pages || 1)) {
-      cargarFacturas(true, pagina)
+      cargarFacturas(pagina, appliedFilters)
     }
   }
 
@@ -147,9 +167,33 @@ export function VentasFacturadasList() {
 
   const formatDate = (dateString: string) => formatDateDMY(dateString, dateString)
 
-  const formatCurrency = (amount: number, currency: string) => {
-    return `${currency} ${(amount || 0).toFixed(2)}`
+  const getCurrencyLocale = (currency: string) => {
+    if (currency === "USD") return "en-US"
+    if (currency === "MXN") return "es-MX"
+    return "es-CO"
   }
+
+  const formatCurrency = (amount: number, currency: string) => {
+    const safeCurrency = (currency || "COP").toUpperCase()
+    const safeAmount = Number.isFinite(amount) ? amount : 0
+    return `${safeCurrency} ${Math.round(safeAmount).toLocaleString(getCurrencyLocale(safeCurrency))}`
+  }
+
+  const summaryCurrency = (facturas[0]?.moneda || "COP").toUpperCase()
+
+  const formatSummaryCurrency = (amount: number) => {
+    const safeAmount = Number.isFinite(amount) ? amount : 0
+    return `$ ${Math.round(safeAmount).toLocaleString(getCurrencyLocale(summaryCurrency))}`
+  }
+
+  const paymentTotals = useMemo(() => {
+    if (paymentSummary) {
+      return paymentSummary
+    }
+
+    // TODO: Sin agregados del backend, estos totales reflejan las filas cargadas en la página actual.
+    return calculatePaymentMethodTotals(facturas)
+  }, [paymentSummary, facturas])
 
   // Generar array de números de página para mostrar
   const getPaginasParaMostrar = () => {
@@ -184,31 +228,23 @@ export function VentasFacturadasList() {
     <>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">Ventas facturadas</h1>
-            {sedeId && (
-              <p className="text-sm text-gray-600 mt-1">
-              </p>
-            )}
-          </div>  
-        </div>
+        <PageHeader title="Ventas Facturadas" />
 
         {/* Filtros */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-4">
             {/* Campo de búsqueda */}
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="mb-1 block text-xs font-medium text-gray-700">
                 Buscar cliente/comprobante
               </label>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
                 <Input
                   placeholder="Nombre, cédula, email o número de comprobante..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
+                  className="h-9 pl-8 text-sm"
                   disabled={isLoading}
                 />
               </div>
@@ -216,16 +252,16 @@ export function VentasFacturadasList() {
 
             {/* Fecha desde */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="mb-1 block text-xs font-medium text-gray-700">
                 Fecha desde
               </label>
               <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
                 <Input
                   type="date"
                   value={fechaDesde}
                   onChange={(e) => setFechaDesde(e.target.value)}
-                  className="pl-10"
+                  className="h-9 pl-8 text-sm"
                   disabled={isLoading}
                 />
               </div>
@@ -233,16 +269,16 @@ export function VentasFacturadasList() {
 
             {/* Fecha hasta */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="mb-1 block text-xs font-medium text-gray-700">
                 Fecha hasta
               </label>
               <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
                 <Input
                   type="date"
                   value={fechaHasta}
                   onChange={(e) => setFechaHasta(e.target.value)}
-                  className="pl-10"
+                  className="h-9 pl-8 text-sm"
                   disabled={isLoading}
                 />
               </div>
@@ -257,6 +293,7 @@ export function VentasFacturadasList() {
                 size="sm"
                 onClick={filtrarHoy}
                 disabled={isLoading}
+                className="h-9 px-3 text-xs"
               >
                 Hoy
               </Button>
@@ -265,6 +302,7 @@ export function VentasFacturadasList() {
                 size="sm"
                 onClick={filtrarUltimoMes}
                 disabled={isLoading}
+                className="h-9 px-3 text-xs"
               >
                 Últimos 30 días
               </Button>
@@ -273,6 +311,7 @@ export function VentasFacturadasList() {
                 size="sm"
                 onClick={limpiarFiltros}
                 disabled={isLoading}
+                className="h-9 px-3 text-xs"
               >
                 Limpiar filtros
               </Button>
@@ -283,11 +322,11 @@ export function VentasFacturadasList() {
                 variant="default"
                 onClick={aplicarFiltros}
                 disabled={isLoading}
-                className="bg-gray-900 hover:bg-gray-800 text-white"
+                className="h-9 bg-gray-900 px-3 text-xs text-white hover:bg-gray-800"
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                     Aplicando...
                   </>
                 ) : (
@@ -322,6 +361,12 @@ export function VentasFacturadasList() {
           )}
         </div>
 
+        <PaymentMethodsSummary
+          totals={paymentTotals}
+          loading={isLoading}
+          formatAmount={formatSummaryCurrency}
+        />
+
         {/* Estado de carga/error */}
         {isLoading && (
           <div className="flex items-center justify-center py-12">
@@ -337,7 +382,7 @@ export function VentasFacturadasList() {
               variant="outline" 
               size="sm" 
               className="mt-2"
-              onClick={() => cargarFacturas(false, 1)}
+              onClick={() => cargarFacturas(currentPage, appliedFilters)}
             >
               Reintentar
             </Button>
@@ -489,10 +534,10 @@ export function VentasFacturadasList() {
             </div>
             
             {/* Información de fechas del rango */}
-            {(fechaDesde || fechaHasta) && (
+            {(appliedFilters.fecha_desde || appliedFilters.fecha_hasta) && (
               <div className="text-sm text-gray-500">
-                {fechaDesde && `Desde: ${formatDate(fechaDesde)} `}
-                {fechaHasta && `Hasta: ${formatDate(fechaHasta)}`}
+                {appliedFilters.fecha_desde && `Desde: ${formatDate(appliedFilters.fecha_desde)} `}
+                {appliedFilters.fecha_hasta && `Hasta: ${formatDate(appliedFilters.fecha_hasta)}`}
               </div>
             )}
           </div>

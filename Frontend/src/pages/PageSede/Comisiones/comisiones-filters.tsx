@@ -116,9 +116,9 @@ export function ComisionesFilters({ onFiltersChange }: ComisionesFiltersProps) {
   return (
     <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:flex-wrap">
       {/* Estado fijo - Pendiente */}
-      <div className="flex items-center gap-2 rounded-lg border border-gray-300 bg-green-50 px-4 py-2.5 min-w-[150px]">
+      <div className="flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-100 px-4 py-2.5 min-w-[150px]">
         <span className="text-sm font-medium text-gray-900">Estado:</span>
-        <span className="text-sm font-semibold text-green-600">Pendiente</span>
+        <span className="text-sm font-semibold text-gray-700">Pendiente</span>
       </div>
 
       {/* Selector de estilista - CORREGIDO */}

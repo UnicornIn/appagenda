@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Sidebar } from "../../../components/Layout/Sidebar"
 import { ClientsList } from "./clients-list"
 import { ClientDetail } from "./client-detail"
@@ -11,7 +11,7 @@ import { sedeService } from "../../PageSuperAdmin/Sedes/sedeService"
 import { useAuth } from "../../../components/Auth/AuthContext"
 import { Loader } from "lucide-react"
 
-const SEARCH_DEBOUNCE_MS = 400
+const SEARCH_DEBOUNCE_MS = 300
 
 const normalizarFichas = (raw: any): any[] | undefined => {
   if (Array.isArray(raw)) return raw
@@ -20,6 +20,29 @@ const normalizarFichas = (raw: any): any[] | undefined => {
   if (Array.isArray(raw?.items)) return raw.items
   return undefined
 }
+
+const firstNonEmptyString = (...values: unknown[]): string => {
+  for (const value of values) {
+    if (typeof value === "string" || typeof value === "number") {
+      const normalized = String(value).trim()
+      if (normalized) {
+        return normalized
+      }
+    }
+  }
+  return ""
+}
+
+const extractCedula = (clienteData: any): string =>
+  firstNonEmptyString(
+    clienteData?.cedula,
+    clienteData?.numero_cedula,
+    clienteData?.numeroDocumento,
+    clienteData?.numero_documento,
+    clienteData?.documento,
+    clienteData?.identificacion,
+    clienteData?.dni
+  )
 
 // Función para asegurar que un objeto cumpla con la interfaz Cliente
 const asegurarClienteCompleto = (clienteData: any): Cliente => {
@@ -33,7 +56,7 @@ const asegurarClienteCompleto = (clienteData: any): Cliente => {
     nombre: clienteData.nombre || "",
     email: clienteData.email || clienteData.correo || "No disponible",
     telefono: clienteData.telefono || "No disponible",
-    cedula: clienteData.cedula || "",
+    cedula: extractCedula(clienteData),
     ciudad: clienteData.ciudad || "",
     sede_id: clienteData.sede_id || "",
     diasSinVenir: clienteData.diasSinVenir ?? clienteData.dias_sin_visitar ?? 0,
@@ -60,30 +83,52 @@ export default function ClientsPage() {
   const [error, setError] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [sedes, setSedes] = useState<any[]>([])
-  const [itemsPorPagina, setItemsPorPagina] = useState(10)
+  const [itemsPorPagina] = useState(10)
   const hasLoadedInitialRef = useRef(false)
   const latestRequestIdRef = useRef(0)
+  const latestCedulaHydrationRef = useRef(0)
+  const cedulaCacheRef = useRef<Map<string, string | null>>(new Map())
 
   const { user, isLoading: authLoading } = useAuth()
+  const getAccessToken = useCallback((): string => {
+    if (user?.access_token) return user.access_token
+    return (
+      sessionStorage.getItem("access_token") ||
+      localStorage.getItem("access_token") ||
+      ""
+    )
+  }, [user?.access_token])
 
-  const loadSedes = async () => {
-    if (!user?.access_token) return
+  const loadSedes = useCallback(async () => {
+    const token = getAccessToken()
+    if (!token) return
     try {
-      const sedesData = await sedeService.getSedes(user.access_token)
+      const sedesData = await sedeService.getSedes(token)
       setSedes(sedesData)
     } catch (err) {
       console.error("Error cargando sedes:", err)
     }
-  }
+  }, [getAccessToken])
 
-  const loadClientes = async (
+  const applyCedulaCache = useCallback((listado: Cliente[]): Cliente[] => {
+    return listado.map((cliente) => {
+      const cachedCedula = cedulaCacheRef.current.get(cliente.id)
+      if (!cachedCedula || cliente.cedula?.trim()) {
+        return cliente
+      }
+      return { ...cliente, cedula: cachedCedula }
+    })
+  }, [])
+
+  const loadClientes = useCallback(async (
     pagina: number = 1,
-    filtro: string = searchTerm,
+    filtro: string = "",
     options: { initial?: boolean } = {}
   ) => {
     const isInitialRequest = options.initial ?? false
+    const token = getAccessToken()
 
-    if (!user?.access_token) {
+    if (!token) {
       setError("No hay token de autenticación disponible")
       setIsInitialLoading(false)
       setIsFetching(false)
@@ -101,7 +146,7 @@ export default function ClientsPage() {
 
       setError(null)
 
-      const result = await clientesService.getClientesPaginados(user.access_token, {
+      const result = await clientesService.getClientesPaginados(token, {
         pagina,
         limite: itemsPorPagina,
         filtro
@@ -109,7 +154,8 @@ export default function ClientsPage() {
 
       if (requestId !== latestRequestIdRef.current) return
 
-      setClientes(result.clientes.map(asegurarClienteCompleto))
+      const clientesNormalizados = result.clientes.map(asegurarClienteCompleto)
+      setClientes(applyCedulaCache(clientesNormalizados))
       setMetadata(result.metadata)
 
     } catch (err) {
@@ -117,24 +163,30 @@ export default function ClientsPage() {
       console.error("❌ Error cargando clientes:", err)
       setError(err instanceof Error ? err.message : "Error al cargar los clientes")
     } finally {
-      if (requestId !== latestRequestIdRef.current) return
-
       if (isInitialRequest) {
+        // Evita quedarse bloqueado en loading si la request inicial queda obsoleta
         setIsInitialLoading(false)
-      } else {
-        setIsFetching(false)
+        return
       }
+
+      if (requestId !== latestRequestIdRef.current) return
+      setIsFetching(false)
     }
-  }
+  }, [getAccessToken, itemsPorPagina, applyCedulaCache])
 
   useEffect(() => {
     if (!authLoading && user) {
       loadSedes()
     }
-  }, [user, authLoading])
+  }, [user, authLoading, loadSedes])
 
   useEffect(() => {
-    if (!user?.access_token) return
+    const token = getAccessToken()
+    if (!token) {
+      setError((prev) => prev || "No hay token de autenticación disponible")
+      setIsInitialLoading(false)
+      return
+    }
 
     if (!hasLoadedInitialRef.current) {
       hasLoadedInitialRef.current = true
@@ -147,7 +199,7 @@ export default function ClientsPage() {
     }, SEARCH_DEBOUNCE_MS)
 
     return () => clearTimeout(timeout)
-  }, [user?.access_token, searchTerm, itemsPorPagina])
+  }, [getAccessToken, searchTerm, itemsPorPagina, loadClientes])
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -155,29 +207,93 @@ export default function ClientsPage() {
     }
   }, [authLoading, user])
 
-  const handlePageChange = (pagina: number, filtro: string = searchTerm) => {
+  useEffect(() => {
+    const token = getAccessToken()
+    if (!token || clientes.length === 0) return
+
+    const idsSinCedula = clientes
+      .filter((cliente) => !cliente.cedula?.trim() && !cedulaCacheRef.current.has(cliente.id))
+      .map((cliente) => cliente.id)
+
+    if (idsSinCedula.length === 0) return
+
+    let cancelled = false
+    const hydrationRequestId = ++latestCedulaHydrationRef.current
+
+    const hydrateCedulas = async () => {
+      const updates = new Map<string, string>()
+
+      const results = await Promise.allSettled(
+        idsSinCedula.map(async (clienteId) => {
+          const cedula = await clientesService.getClienteCedula(token, clienteId)
+          return { clienteId, cedula: cedula.trim() }
+        })
+      )
+
+      if (cancelled || hydrationRequestId !== latestCedulaHydrationRef.current) {
+        return
+      }
+
+      for (const result of results) {
+        if (result.status !== "fulfilled") continue
+        const { clienteId, cedula } = result.value
+        cedulaCacheRef.current.set(clienteId, cedula || null)
+        if (cedula) {
+          updates.set(clienteId, cedula)
+        }
+      }
+
+      if (updates.size === 0) return
+
+      setClientes((prev) =>
+        prev.map((cliente) => {
+          const updatedCedula = updates.get(cliente.id)
+          if (!updatedCedula || cliente.cedula?.trim() === updatedCedula) {
+            return cliente
+          }
+          return { ...cliente, cedula: updatedCedula }
+        })
+      )
+    }
+
+    void hydrateCedulas()
+
+    return () => {
+      cancelled = true
+    }
+  }, [clientes, getAccessToken])
+
+  const handlePageChange = useCallback((pagina: number, filtro: string = "") => {
     loadClientes(pagina, filtro)
-  }
+  }, [loadClientes])
 
-  const handleSearch = (value: string) => {
+  const handleSearch = useCallback((value: string) => {
     setSearchTerm(value)
-  }
+  }, [])
 
-  const handleSelectClient = async (client: Cliente) => {
-    if (!user?.access_token) return
+  const handleSelectClient = useCallback(async (client: Cliente) => {
+    const token = getAccessToken()
+    if (!token) return
     try {
-      const clienteCompleto = await clientesService.getClienteById(user.access_token, client.id)
+      const clienteCompleto = await clientesService.getClienteById(token, client.id)
       setSelectedClient(asegurarClienteCompleto(clienteCompleto))
     } catch (err) {
       console.error("Error cargando detalles:", err)
       setSelectedClient(client)
     }
-  }
+  }, [getAccessToken])
 
-  const handleAddClient = () => setIsModalOpen(true)
+  const handleAddClient = useCallback(() => {
+    setIsModalOpen(true)
+  }, [])
 
-  const handleSaveClient = async () => {
-    if (!user?.access_token) return
+  const handleCloseModal = useCallback(() => {
+    setIsModalOpen(false)
+  }, [])
+
+  const handleSaveClient = useCallback(async () => {
+    const token = getAccessToken()
+    if (!token) return
     try {
       setIsSaving(true)
       setError(null)
@@ -189,9 +305,24 @@ export default function ClientsPage() {
     } finally {
       setIsSaving(false)
     }
-  }
+  }, [getAccessToken, loadClientes, searchTerm])
 
-  const handleBack = () => setSelectedClient(null)
+  const handleBack = useCallback(() => {
+    setSelectedClient(null)
+  }, [])
+
+  const handleClientUpdated = useCallback(async () => {
+    const token = getAccessToken()
+    if (!token || !selectedClient) return
+
+    try {
+      const clienteActualizado = await clientesService.getClienteById(token, selectedClient.id)
+      setSelectedClient(asegurarClienteCompleto(clienteActualizado))
+      await loadClientes(metadata?.pagina ?? 1, searchTerm)
+    } catch (err) {
+      console.error("Error refrescando cliente actualizado:", err)
+    }
+  }, [getAccessToken, selectedClient, loadClientes, metadata?.pagina, searchTerm])
 
   if (authLoading || (Boolean(user) && isInitialLoading)) {
     return (
@@ -220,63 +351,29 @@ export default function ClientsPage() {
       <Sidebar />
       <div className="flex-1 overflow-auto">
         {selectedClient ? (
-          <ClientDetail client={selectedClient} onBack={handleBack} />
+          <ClientDetail
+            client={selectedClient}
+            onBack={handleBack}
+            onClientUpdated={handleClientUpdated}
+          />
         ) : (
-          <>
-            {/* Controles de cantidad por página */}
-            <div className="border-b border-gray-100 p-4 bg-white">
-              <div className="max-w-6xl mx-auto flex items-center justify-between">
-                <div>
-                  <h1 className="text-lg font-medium text-gray-900">Clientes</h1>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {metadata
-                      ? `Mostrando ${clientes.length} de ${metadata.total} clientes`
-                      : `${clientes.length} clientes`}
-                  </p>
-                </div>
-                
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-700">Mostrar:</span>
-                    <select
-                      value={itemsPorPagina}
-                      onChange={(e) => setItemsPorPagina(Number(e.target.value))}
-                      className="h-8 text-sm border border-gray-300 rounded px-2 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-                    >
-                      <option value="10">10</option>
-                      <option value="25">25</option>
-                      <option value="50">50</option>
-                      <option value="100">100</option>
-                    </select>
-                    <span className="text-xs text-gray-500">por página</span>
-                  </div>
-                </div>
-              </div>
-              {error && (
-                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-600">
-                  Error: {error}
-                </div>
-              )}
-            </div>
-            
-            <ClientsList
-              onSelectClient={handleSelectClient}
-              onAddClient={handleAddClient}
-              clientes={clientes}
-              metadata={metadata || undefined}
-              error={error}
-              isFetching={isFetching}
-              onPageChange={handlePageChange}
-              onSearch={handleSearch}
-              searchValue={searchTerm}
-            />
-          </>
+          <ClientsList
+            onSelectClient={handleSelectClient}
+            onAddClient={handleAddClient}
+            clientes={clientes}
+            metadata={metadata || undefined}
+            error={error}
+            isFetching={isFetching}
+            onPageChange={handlePageChange}
+            onSearch={handleSearch}
+            searchValue={searchTerm}
+          />
         )}
       </div>
 
       <ClientFormModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={handleCloseModal}
         onSuccess={handleSaveClient}
         isSaving={isSaving}
         sedeId={sedes.length > 0 ? (sedes[0].id || sedes[0]._id || "") : ""}

@@ -6,6 +6,7 @@ import type { Sede } from "../../../types/sede";
 import { sedeService } from "./sedeService";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import { Sidebar } from "../../../components/Layout/Sidebar";
+import { PageHeader } from "../../../components/Layout/PageHeader";
 
 export default function SedesPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -171,22 +172,19 @@ export default function SedesPage() {
             </div>
           ) : (
             <div className="mx-auto max-w-4xl px-4 py-8">
-              <div className="w-full flex items-center justify-between mb-8">
-                <div>
-                  <h1 className="text-xl font-medium">Sedes</h1>
-                  <p className="text-sm text-gray-600 mt-1">
-                    {sedes.length} sedes en total
-                  </p>
-                </div>
-
-                <button
-                  onClick={handleAddSede}
-                  className="flex items-center gap-1 px-3 py-1.5 border border-black text-sm hover:bg-gray-50"
-                >
-                  <Plus className="w-4 h-4" />
-                  Añadir sede
-                </button>
-              </div>
+              <PageHeader
+                title="Sedes"
+                subtitle={`${sedes.length} sedes en total`}
+                actions={
+                  <button
+                    onClick={handleAddSede}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-gray-900 text-white text-sm hover:bg-gray-800"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Añadir sede
+                  </button>
+                }
+              />
 
               <SedesList 
                 sedes={sedes} 

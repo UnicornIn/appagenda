@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts"
 import { ChartContainer } from "../../../components/ui/chart"
 import { formatMoney } from "./formatMoney"
+import { getStoredCurrency, resolveCurrencyLocale } from "../../../lib/currency"
 
 // INTERFAZ CORREGIDA - acepta cualquier clave string
 interface SalesDataPoint {
@@ -25,19 +26,21 @@ interface SalesChartProps {
 export function SalesChart({ 
   salesData, 
   formatCurrency, 
-  title = "Tendencia de Ventas (USD)",
+  title = "Tendencia de Ventas",
   xAxisKey = "label", // Valor por defecto más genérico
   yAxisLabel = "Ventas",
   color = "oklch(0.65 0.25 280)",
   height = 200
 }: SalesChartProps) {
+  const fallbackCurrency = getStoredCurrency("USD");
+  const fallbackLocale = resolveCurrencyLocale(fallbackCurrency, "es-CO");
   
   // Función para formatear valores del eje Y
   const formatYAxis = (value: number) => {
     if (value >= 1000000) {
-      return `$${(value / 1000000).toFixed(1)}M`;
+      return `$${Math.round(value / 1000000)}M`;
     } else if (value >= 1000) {
-      return `$${(value / 1000).toFixed(1)}K`;
+      return `$${Math.round(value / 1000)}K`;
     }
     return `$${value}`;
   };
@@ -48,7 +51,7 @@ export function SalesChart({
       const value = payload[0].value;
       const formattedValue = formatCurrency 
         ? formatCurrency(value)
-        : formatMoney(value, 'USD', 'es-CO');
+        : formatMoney(value, fallbackCurrency, fallbackLocale);
       
       return (
         <div className="bg-white p-3 border rounded-lg shadow-lg">

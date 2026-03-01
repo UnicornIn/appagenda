@@ -1,5 +1,9 @@
 // src/api/facturas.ts
 import { API_BASE_URL } from "../../../types/config";
+import {
+  extractPaymentMethodTotalsFromApiSummary,
+  type PaymentMethodTotals,
+} from "../../../lib/payment-methods-summary";
 
 export interface FacturaAPI {
   _id: string;
@@ -58,6 +62,24 @@ export interface DesglosePagos {
 export interface FacturaResponse {
   success: boolean;
   total: number;
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+    showing: number;
+    from: number;
+    to: number;
+  };
+  filters_applied?: {
+    sede_id: string;
+    fecha_desde: string | null;
+    fecha_hasta: string | null;
+    profesional_id: string | null;
+    search: string | null;
+  };
   ventas: FacturaAPI[];
 }
 
@@ -85,14 +107,43 @@ export interface FacturaConverted {
   estado: string;
   items?: ItemFactura[];
   historial_pagos?: HistorialPago[];
+  desglose_pagos?: DesglosePagos;
 }
 
 export class FacturaService {
+  private static readonly DEFAULT_FULL_FROM = "1900-01-01";
+  private static readonly DEFAULT_FULL_TO = "2999-12-31";
+
   private getAuthToken(): string | null {
     return (
       sessionStorage.getItem("access_token") ||
       localStorage.getItem("access_token")
     );
+  }
+
+  private normalizeDateRange(
+    fecha_desde?: string,
+    fecha_hasta?: string
+  ): { fecha_desde: string; fecha_hasta: string } {
+    const desde = String(fecha_desde || "").trim();
+    const hasta = String(fecha_hasta || "").trim();
+
+    if (desde && hasta) {
+      return { fecha_desde: desde, fecha_hasta: hasta };
+    }
+
+    if (desde && !hasta) {
+      return { fecha_desde: desde, fecha_hasta: FacturaService.DEFAULT_FULL_TO };
+    }
+
+    if (!desde && hasta) {
+      return { fecha_desde: FacturaService.DEFAULT_FULL_FROM, fecha_hasta: hasta };
+    }
+
+    return {
+      fecha_desde: FacturaService.DEFAULT_FULL_FROM,
+      fecha_hasta: FacturaService.DEFAULT_FULL_TO,
+    };
   }
 
   private getHeaders() {
@@ -121,16 +172,38 @@ export class FacturaService {
       search?: string;
     }
   ): Promise<FacturaConverted[]> {
+    const result = await this.getVentasBySedePaginadas(sede_id, params);
+    return result.facturas;
+  }
+
+  async getVentasBySedePaginadas(
+    sede_id: string,
+    params?: {
+      page?: number;
+      limit?: number;
+      fecha_desde?: string;
+      fecha_hasta?: string;
+      profesional_id?: string;
+      search?: string;
+    }
+  ): Promise<{
+    facturas: FacturaConverted[];
+    pagination?: FacturaResponse["pagination"];
+    filters_applied?: FacturaResponse["filters_applied"];
+    paymentSummary?: PaymentMethodTotals | null;
+  }> {
     try {
       const queryParams = new URLSearchParams();
+      const normalizedRange = this.normalizeDateRange(params?.fecha_desde, params?.fecha_hasta);
       
       // Agregar parámetros básicos con valores por defecto
       queryParams.append('page', (params?.page || 1).toString());
       queryParams.append('limit', (params?.limit || 100).toString());
       queryParams.append('sort_order', 'desc');
       
-      if (params?.fecha_desde) queryParams.append('fecha_desde', params.fecha_desde);
-      if (params?.fecha_hasta) queryParams.append('fecha_hasta', params.fecha_hasta);
+      // Forzar rango explícito para evitar filtros implícitos del backend.
+      queryParams.append('fecha_desde', normalizedRange.fecha_desde);
+      queryParams.append('fecha_hasta', normalizedRange.fecha_hasta);
       if (params?.profesional_id) queryParams.append('profesional_id', params.profesional_id);
       if (params?.search) queryParams.append('search', params.search);
 
@@ -160,15 +233,65 @@ export class FacturaService {
       }
 
       const data: FacturaResponse = await response.json();
-      console.log(`✅ Facturas obtenidas: ${data.ventas.length} registros`);
+      const ventas = Array.isArray(data.ventas) ? data.ventas : [];
+      const paymentSummary = extractPaymentMethodTotalsFromApiSummary(data);
+      console.log(`✅ Facturas obtenidas: ${ventas.length} registros`);
       
       // Convertir los datos de la API al formato que usa nuestra aplicación
-      return data.ventas.map(factura => this.convertToAppFormat(factura));
+      return {
+        facturas: ventas.map(factura => this.convertToAppFormat(factura)),
+        pagination: data.pagination,
+        filters_applied: data.filters_applied,
+        paymentSummary,
+      };
       
     } catch (error) {
       console.error("Error obteniendo ventas de la sede:", error);
       throw error;
     }
+  }
+
+  async getTodasVentasBySede(
+    sede_id: string,
+    params?: {
+      fecha_desde?: string;
+      fecha_hasta?: string;
+      profesional_id?: string;
+      search?: string;
+      pageSize?: number;
+      maxPages?: number;
+    }
+  ): Promise<FacturaConverted[]> {
+    const pageSize = Math.max(1, params?.pageSize || 200);
+    const maxPages = Math.max(1, params?.maxPages || 500);
+    const allFacturas: FacturaConverted[] = [];
+
+    let page = 1;
+    let hasNext = true;
+    let pagesLoaded = 0;
+
+    while (hasNext && pagesLoaded < maxPages) {
+      const result = await this.getVentasBySedePaginadas(sede_id, {
+        page,
+        limit: pageSize,
+        fecha_desde: params?.fecha_desde,
+        fecha_hasta: params?.fecha_hasta,
+        profesional_id: params?.profesional_id,
+        search: params?.search,
+      });
+
+      allFacturas.push(...result.facturas);
+      pagesLoaded += 1;
+
+      if (!result.pagination) {
+        break;
+      }
+
+      hasNext = Boolean(result.pagination.has_next);
+      page += 1;
+    }
+
+    return allFacturas;
   }
 
   // Obtener detalle de una venta específica
@@ -211,7 +334,8 @@ export class FacturaService {
       }
 
       const data: FacturaResponse = await response.json();
-      return data.ventas.map(factura => this.convertToAppFormat(factura));
+      const ventas = Array.isArray(data.ventas) ? data.ventas : [];
+      return ventas.map(factura => this.convertToAppFormat(factura));
       
     } catch (error) {
       console.error("Error obteniendo facturas del cliente:", error);
@@ -239,18 +363,21 @@ export class FacturaService {
 
   // Convertir datos de API al formato de la aplicación
   private convertToAppFormat(factura: FacturaAPI): FacturaConverted {
+    const historial = Array.isArray(factura.historial_pagos) ? factura.historial_pagos : [];
+    const items = Array.isArray(factura.items) ? factura.items : [];
+
     // Determinar el método de pago principal (el que tenga mayor monto)
-    const metodoPago = this.getMetodoPagoPrincipal(factura.historial_pagos);
+    const metodoPago = this.getMetodoPagoPrincipal(historial, factura.desglose_pagos);
     
     // Determinar el estado basado en el historial de pagos
-    const estado = this.getEstadoFactura(factura.historial_pagos);
+    const estado = this.getEstadoFactura(historial);
     
     // Obtener el total del desglose de pagos
     const total = factura.desglose_pagos?.total || 0;
     
     // Obtener fecha comprobante (usar la primera fecha del historial)
-    const fechaComprobante = factura.historial_pagos.length > 0 
-      ? factura.historial_pagos[0].fecha 
+    const fechaComprobante = historial.length > 0 
+      ? historial[0].fecha 
       : factura.fecha_pago;
 
     // Obtener el tipo de comprobante basado en el identificador
@@ -264,7 +391,7 @@ export class FacturaService {
       moneda: factura.moneda,
       tipo_comision: factura.tipo_comision,
       cliente_id: factura.cliente_id,
-      nombre_cliente: factura.nombre_cliente.trim(),
+      nombre_cliente: (factura.nombre_cliente || "").trim(),
       cedula_cliente: factura.cedula_cliente,
       email_cliente: factura.email_cliente,
       telefono_cliente: factura.telefono_cliente,
@@ -278,17 +405,36 @@ export class FacturaService {
       metodo_pago: metodoPago,
       facturado_por: factura.facturado_por,
       estado: estado,
-      items: factura.items,
-      historial_pagos: factura.historial_pagos
+      items: items,
+      historial_pagos: historial,
+      desglose_pagos: factura.desglose_pagos,
     };
   }
 
-  private getMetodoPagoPrincipal(historial: HistorialPago[]): string {
-    if (historial.length === 0) return "efectivo";
+  private getMetodoPagoPrincipal(historial?: HistorialPago[], desglose?: DesglosePagos): string {
+    const historialSeguro = Array.isArray(historial) ? historial : [];
+    if (historialSeguro.length === 0) {
+      if (!desglose) return "efectivo";
+
+      const metodos = [
+        { metodo: "efectivo", monto: desglose.efectivo || 0 },
+        { metodo: "tarjeta_credito", monto: desglose.tarjeta_credito || 0 },
+        { metodo: "tarjeta_debito", monto: desglose.tarjeta_debito || 0 },
+        { metodo: "addi", monto: desglose.addi || 0 },
+        { metodo: "tarjeta", monto: desglose.tarjeta || 0 },
+        { metodo: "transferencia", monto: desglose.transferencia || 0 },
+      ];
+
+      const metodoPrincipal = metodos.reduce((prev, current) =>
+        prev.monto > current.monto ? prev : current
+      );
+
+      return metodoPrincipal.monto > 0 ? metodoPrincipal.metodo : "efectivo";
+    }
     
     // Contar montos totales por método de pago
     const montosPorMetodo: Record<string, number> = {};
-    historial.forEach(pago => {
+    historialSeguro.forEach(pago => {
       montosPorMetodo[pago.metodo] = (montosPorMetodo[pago.metodo] || 0) + pago.monto;
     });
     
@@ -297,11 +443,12 @@ export class FacturaService {
       .sort((a, b) => b[1] - a[1])[0][0] || "efectivo";
   }
 
-  private getEstadoFactura(historial: HistorialPago[]): string {
-    if (historial.length === 0) return "pendiente";
+  private getEstadoFactura(historial?: HistorialPago[]): string {
+    const historialSeguro = Array.isArray(historial) ? historial : [];
+    if (historialSeguro.length === 0) return "pagado";
     
     // Verificar el último pago para determinar el estado
-    const ultimoPago = historial[historial.length - 1];
+    const ultimoPago = historialSeguro[historialSeguro.length - 1];
     return ultimoPago.saldo_despues === 0 ? "pagado" : "pendiente";
   }
 
@@ -396,7 +543,7 @@ export class FacturaService {
         factura.numero_comprobante,
         factura.metodo_pago,
         factura.moneda,
-        factura.total.toFixed(2),
+        Math.round(factura.total).toString(),
         factura.estado,
         factura.facturado_por
       ]);

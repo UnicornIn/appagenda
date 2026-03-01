@@ -37,13 +37,23 @@ interface ClientsResponse {
 }
 
 type GiftCardClientSelectorOption = { id: string; nombre: string; email?: string; telefono?: string };
+type GiftCardClientSearchResult = {
+  clients: GiftCardClientSelectorOption[];
+  hasNext: boolean;
+  page: number;
+  limit: number;
+  totalPages: number | null;
+};
 
 const CLIENTS_PAGE_LIMIT = 100;
 const CLIENTS_CACHE_TTL_MS = 5 * 60 * 1000;
+const CLIENTS_SEARCH_DEFAULT_LIMIT = 80;
+const CLIENTS_SEARCH_CACHE_TTL_MS = 60 * 1000;
 
 let clientsCache: GiftCardClientSelectorOption[] | null = null;
 let clientsCacheAt = 0;
 let clientsInflightPromise: Promise<GiftCardClientSelectorOption[]> | null = null;
+const clientsSearchCache = new Map<string, { data: GiftCardClientSearchResult; at: number }>();
 
 function buildHeaders(token: string, hasJsonBody = false): HeadersInit {
   return {
@@ -199,6 +209,10 @@ async function fetchClientsPage(token: string, page: number): Promise<{
     records,
     totalPages: pageInfo.totalPages,
   };
+}
+
+function getClientsSearchCacheKey(query: string, limit: number, page: number): string {
+  return `${query.trim().toLowerCase()}::${limit}::${page}`;
 }
 
 export const giftcardsService = {
@@ -425,6 +439,61 @@ export const giftcardsService = {
     if (!result) {
       throw new Error("No se pudo obtener el historial de la gift card");
     }
+
+    return result;
+  },
+
+  async searchClientsForSelector(
+    token: string,
+    query: string,
+    options?: { limit?: number; page?: number; forceRefresh?: boolean }
+  ): Promise<GiftCardClientSearchResult> {
+    const normalizedQuery = String(query || "").trim();
+    const limit = Math.min(Math.max(options?.limit ?? CLIENTS_SEARCH_DEFAULT_LIMIT, 1), 200);
+    const page = Math.max(1, options?.page ?? 1);
+    const cacheKey = getClientsSearchCacheKey(normalizedQuery, limit, page);
+    const now = Date.now();
+
+    if (!options?.forceRefresh) {
+      const cached = clientsSearchCache.get(cacheKey);
+      if (cached && now - cached.at < CLIENTS_SEARCH_CACHE_TTL_MS) {
+        return cached.data;
+      }
+    }
+
+    const queryParams = new URLSearchParams({
+      pagina: String(page),
+      limite: String(limit),
+    });
+
+    if (normalizedQuery) {
+      queryParams.set("filtro", normalizedQuery);
+    }
+
+    const response = await fetch(`${API_BASE_URL}clientes/todos?${queryParams.toString()}`, {
+      method: "GET",
+      headers: buildHeaders(token),
+    });
+
+    if (!response.ok) {
+      throw new Error(await parseApiError(response));
+    }
+
+    const payload = await parseJsonSafely<ClientsResponse | Array<Record<string, unknown>>>(response);
+    const normalized = normalizeClientOptions(getClientRecords(payload));
+    const pageInfo = getPaginationInfo(payload);
+    const hasNext =
+      pageInfo.hasNext ?? (pageInfo.totalPages ? page < pageInfo.totalPages : normalized.length >= limit);
+
+    const result: GiftCardClientSearchResult = {
+      clients: normalized,
+      hasNext,
+      page,
+      limit,
+      totalPages: pageInfo.totalPages,
+    };
+
+    clientsSearchCache.set(cacheKey, { data: result, at: now });
 
     return result;
   },

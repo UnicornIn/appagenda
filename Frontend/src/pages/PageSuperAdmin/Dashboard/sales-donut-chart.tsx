@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts"
 import { formatMoney } from "./Api/formatMoney"
 import { memo, useMemo } from "react"
+import { getStoredCurrency, resolveCurrencyLocale } from "../../../lib/currency"
 
 interface DonutDataItem {
   name: string;
@@ -29,13 +30,15 @@ export const SalesDonutChart = memo(function SalesDonutChart({
   formatCurrency,
   title = "Distribución de Ventas"
 }: SalesDonutChartProps) {
+  const fallbackCurrency = getStoredCurrency("USD");
+  const fallbackLocale = resolveCurrencyLocale(fallbackCurrency, "es-CO");
   
   const formatValue = useMemo(() => (value: number) => {
     if (formatCurrency) {
       return formatCurrency(value);
     }
-    return formatMoney(value, 'USD', 'es-CO');
-  }, [formatCurrency]);
+    return formatMoney(value, fallbackCurrency, fallbackLocale);
+  }, [fallbackCurrency, fallbackLocale, formatCurrency]);
 
   const { total, enhancedData } = useMemo(() => {
     const totalValue = donutData.reduce((sum, item) => sum + item.value, 0);

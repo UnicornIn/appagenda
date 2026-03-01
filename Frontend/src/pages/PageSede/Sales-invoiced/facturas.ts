@@ -1,5 +1,9 @@
 // src/api/facturas.ts
 import { API_BASE_URL } from "../../../types/config";
+import {
+  extractPaymentMethodTotalsFromApiSummary,
+  type PaymentMethodTotals,
+} from "../../../lib/payment-methods-summary";
 
 export interface FacturaAPI {
   _id: string;
@@ -111,11 +115,39 @@ export interface FacturaConverted {
 }
 
 export class FacturaService {
+  private static readonly DEFAULT_FULL_FROM = "1900-01-01";
+  private static readonly DEFAULT_FULL_TO = "2999-12-31";
+
   private getAuthToken(): string | null {
     return (
       sessionStorage.getItem("access_token") ||
       localStorage.getItem("access_token")
     );
+  }
+
+  private normalizeDateRange(
+    fecha_desde?: string,
+    fecha_hasta?: string
+  ): { fecha_desde: string; fecha_hasta: string } {
+    const desde = String(fecha_desde || "").trim();
+    const hasta = String(fecha_hasta || "").trim();
+
+    if (desde && hasta) {
+      return { fecha_desde: desde, fecha_hasta: hasta };
+    }
+
+    if (desde && !hasta) {
+      return { fecha_desde: desde, fecha_hasta: FacturaService.DEFAULT_FULL_TO };
+    }
+
+    if (!desde && hasta) {
+      return { fecha_desde: FacturaService.DEFAULT_FULL_FROM, fecha_hasta: hasta };
+    }
+
+    return {
+      fecha_desde: FacturaService.DEFAULT_FULL_FROM,
+      fecha_hasta: FacturaService.DEFAULT_FULL_TO,
+    };
   }
 
   private getHeaders() {
@@ -142,17 +174,14 @@ export class FacturaService {
     search?: string
   ): Promise<FacturaConverted[]> {
     try {
+      const normalizedRange = this.normalizeDateRange(fecha_desde, fecha_hasta);
+
       // Construir URL con parámetros
       let url = `${API_BASE_URL}api/billing/sales/${sede_id}?page=${page}&limit=${limit}&sort_order=desc`;
       
-      // Agregar filtros si existen
-      if (fecha_desde) {
-        url += `&fecha_desde=${fecha_desde}`;
-      }
-      
-      if (fecha_hasta) {
-        url += `&fecha_hasta=${fecha_hasta}`;
-      }
+      // Forzar rango explícito para evitar filtros implícitos del backend.
+      url += `&fecha_desde=${normalizedRange.fecha_desde}`;
+      url += `&fecha_hasta=${normalizedRange.fecha_hasta}`;
       
       if (search) {
         url += `&search=${encodeURIComponent(search)}`;
@@ -318,7 +347,12 @@ export class FacturaService {
     fecha_hasta?: string;
     page?: number;
     limit?: number;
-  }): Promise<{ facturas: FacturaConverted[]; pagination?: any; filters_applied?: any }> {
+  }): Promise<{
+    facturas: FacturaConverted[];
+    pagination?: any;
+    filters_applied?: any;
+    paymentSummary?: PaymentMethodTotals | null;
+  }> {
     try {
       // Obtener el sede_id del usuario
       const sede_id = sessionStorage.getItem("beaux-sede_id");
@@ -331,6 +365,7 @@ export class FacturaService {
       // Construir URL con filtros
       let url = `${API_BASE_URL}api/billing/sales/${sede_id}`;
       const params = new URLSearchParams();
+      const normalizedRange = this.normalizeDateRange(filtros.fecha_desde, filtros.fecha_hasta);
       
       params.append('page', (filtros.page || 1).toString());
       params.append('limit', (filtros.limit || 50).toString());
@@ -340,13 +375,9 @@ export class FacturaService {
         params.append('search', filtros.searchTerm);
       }
       
-      if (filtros.fecha_desde) {
-        params.append('fecha_desde', filtros.fecha_desde);
-      }
-      
-      if (filtros.fecha_hasta) {
-        params.append('fecha_hasta', filtros.fecha_hasta);
-      }
+      // Forzar rango explícito para evitar filtros implícitos del backend.
+      params.append('fecha_desde', normalizedRange.fecha_desde);
+      params.append('fecha_hasta', normalizedRange.fecha_hasta);
       
       url += `?${params.toString()}`;
       
@@ -360,6 +391,7 @@ export class FacturaService {
       }
 
       const data: FacturaResponse = await response.json();
+      const paymentSummary = extractPaymentMethodTotalsFromApiSummary(data);
       
       // Validar y convertir datos
       const facturas = data.ventas
@@ -371,7 +403,8 @@ export class FacturaService {
       return {
         facturas: facturas,
         pagination: data.pagination,
-        filters_applied: data.filters_applied
+        filters_applied: data.filters_applied,
+        paymentSummary,
       };
       
     } catch (error) {

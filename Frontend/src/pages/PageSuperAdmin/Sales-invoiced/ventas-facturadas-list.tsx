@@ -1,14 +1,29 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Search, Download, Loader2, Building } from "lucide-react"
+import { useState, useEffect, useMemo } from "react"
+import {
+  Search,
+  Download,
+  Loader2,
+  Building,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from "lucide-react"
 import { FacturaDetailModal } from "./factura-detail-modal"
+import { PageHeader } from "../../../components/Layout/PageHeader"
 import type { Factura } from "../../../types/factura"
 import { facturaService } from "./facturas"
 import { sedeService } from "../Sedes/sedeService"
 import type { Sede } from "../../../types/sede"
 import { formatSedeNombre } from "../../../lib/sede"
 import { formatDateDMY } from "../../../lib/dateFormat"
+import { PaymentMethodsSummary } from "../../../components/SalesInvoiced/payment-methods-summary"
+import {
+  calculatePaymentMethodTotals,
+  type PaymentMethodTotals,
+} from "../../../lib/payment-methods-summary"
 
 export function VentasFacturadasList() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -22,20 +37,35 @@ export function VentasFacturadasList() {
   const [error, setError] = useState<string | null>(null)
   const [sedes, setSedes] = useState<Sede[]>([])
   const [sedeIdMap, setSedeIdMap] = useState<Record<string, string>>({}) // Mapa de _id a sede_id
+  const [pagination, setPagination] = useState<any>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [limit] = useState(50)
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
+  const [paymentSummary, setPaymentSummary] = useState<PaymentMethodTotals | null>(null)
 
   // Cargar sedes disponibles
   useEffect(() => {
     cargarSedes()
   }, [])
 
-  // Cargar facturas cuando se selecciona una sede
+  // Aplicar debounce al término de búsqueda para no disparar requests por tecla
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim())
+    }, 300)
+    return () => clearTimeout(timeout)
+  }, [searchTerm])
+
+  // Cargar facturas cuando se selecciona una sede o cambia la búsqueda
   useEffect(() => {
     if (selectedSede && sedeIdMap[selectedSede]) {
-      cargarFacturas()
+      cargarFacturas(1)
     } else {
       setFacturas([])
+      setPagination(null)
+      setPaymentSummary(null)
     }
-  }, [selectedSede, sedeIdMap])
+  }, [selectedSede, sedeIdMap, debouncedSearchTerm])
 
   const cargarSedes = async () => {
     try {
@@ -56,11 +86,9 @@ export function VentasFacturadasList() {
         }
       })
       setSedeIdMap(idMap)
-      
-      // Si solo hay una sede, seleccionarla automáticamente
-      if (sedesData.length === 1) {
-        setSelectedSede(sedesData[0]._id)
-      }
+
+      // Mantener el selector sin sede por defecto al entrar.
+      setSelectedSede((actual) => (actual && idMap[actual] ? actual : ""))
     } catch (err) {
       console.error("Error cargando sedes:", err)
       setError("Error al cargar las sedes disponibles")
@@ -69,11 +97,11 @@ export function VentasFacturadasList() {
     }
   }
 
-  const cargarFacturas = async () => {
+  const cargarFacturas = async (page: number = 1) => {
     try {
       setIsLoading(true)
       setError(null)
-      
+
       // Usar el sede_id correcto (SD-XXXXX)
       const sedeId = sedeIdMap[selectedSede]
       if (!sedeId) {
@@ -82,18 +110,27 @@ export function VentasFacturadasList() {
       
       console.log("Cargando facturas para sede:", sedeId)
       
-      // Usar el servicio existente que obtiene ventas por sede
-      const ventas = await facturaService.getVentasBySede(sedeId)
+      // Usar el servicio existente con paginación backend
+      const result = await facturaService.getVentasBySedePaginadas(sedeId, {
+        page,
+        limit,
+        search: debouncedSearchTerm || undefined,
+      })
       
-      console.log("Facturas cargadas:", ventas.length)
+      console.log("Facturas cargadas:", result.facturas.length)
       
       // Actualizar el estado con las facturas
-      setFacturas(ventas as Factura[])
+      setFacturas(result.facturas as Factura[])
+      setPagination(result.pagination || null)
+      setPaymentSummary(result.paymentSummary || null)
+      setCurrentPage(page)
       
     } catch (err: any) {
       console.error("Error cargando facturas:", err)
       setError(err.message || "Error al cargar las facturas. Por favor, intenta nuevamente.")
       setFacturas([])
+      setPagination(null)
+      setPaymentSummary(null)
     } finally {
       setIsLoading(false)
     }
@@ -101,17 +138,6 @@ export function VentasFacturadasList() {
 
   // Filtrar facturas basado en los criterios
   const facturasFiltradas = facturas.filter(factura => {
-    // Filtro por término de búsqueda
-    if (searchTerm) {
-      const termino = searchTerm.toLowerCase()
-      const cumpleBusqueda = 
-        factura.identificador?.toLowerCase().includes(termino) ||
-        factura.nombre_cliente?.toLowerCase().includes(termino) ||
-        factura.numero_comprobante?.toLowerCase().includes(termino)
-      
-      if (!cumpleBusqueda) return false
-    }
-    
     // Filtro por estado
     if (selectedEstado !== "all" && factura.estado !== selectedEstado) {
       return false
@@ -120,6 +146,28 @@ export function VentasFacturadasList() {
     return true
   })
 
+  const irAPagina = (pagina: number) => {
+    if (pagina >= 1 && pagina <= (pagination?.total_pages || 1)) {
+      cargarFacturas(pagina)
+    }
+  }
+
+  const irPrimeraPagina = () => {
+    irAPagina(1)
+  }
+
+  const irUltimaPagina = () => {
+    irAPagina(pagination?.total_pages || 1)
+  }
+
+  const irPaginaAnterior = () => {
+    irAPagina(currentPage - 1)
+  }
+
+  const irPaginaSiguiente = () => {
+    irAPagina(currentPage + 1)
+  }
+
   const handleRowClick = (factura: Factura) => {
     setSelectedFactura(factura)
     setIsModalOpen(true)
@@ -127,14 +175,41 @@ export function VentasFacturadasList() {
 
   const formatDate = (dateString: string) => formatDateDMY(dateString, dateString)
 
+  const getCurrencyLocale = (currency: string) => {
+    if (currency === "USD") return "en-US"
+    if (currency === "MXN") return "es-MX"
+    return "es-CO"
+  }
+
   const formatCurrency = (amount: number, currency: string) => {
-    return `${currency} ${amount?.toFixed(2) || '0.00'}`
+    const safeCurrency = (currency || "COP").toUpperCase()
+    const safeAmount = Number.isFinite(amount) ? amount : 0
+    return `${safeCurrency} ${Math.round(safeAmount).toLocaleString(getCurrencyLocale(safeCurrency))}`
+  }
+
+  const summaryCurrency = (facturasFiltradas[0]?.moneda || facturas[0]?.moneda || "COP").toUpperCase()
+
+  const formatSummaryCurrency = (amount: number) => {
+    const safeAmount = Number.isFinite(amount) ? amount : 0
+    return `$ ${Math.round(safeAmount).toLocaleString(getCurrencyLocale(summaryCurrency))}`
   }
 
   const selectedSedeNombre = formatSedeNombre(
     sedes.find(s => s._id === selectedSede)?.nombre,
     "Sede seleccionada"
   )
+
+  const shouldUseBackendPaymentSummary =
+    selectedEstado === "all" && Boolean(paymentSummary)
+
+  const paymentTotals = useMemo(() => {
+    if (shouldUseBackendPaymentSummary && paymentSummary) {
+      return paymentSummary
+    }
+
+    // TODO: Sin agregados del backend para este filtro, estos totales reflejan las filas cargadas en la página actual.
+    return calculatePaymentMethodTotals(facturasFiltradas)
+  }, [shouldUseBackendPaymentSummary, paymentSummary, facturasFiltradas])
 
   const handleExportCSV = () => {
     try {
@@ -195,35 +270,34 @@ export function VentasFacturadasList() {
     <>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-medium">Ventas facturadas</h1>
-            <p className="text-sm text-gray-600 mt-1">
-              {selectedSede 
-                ? `Sede: ${selectedSedeNombre}`
-                : "Selecciona una sede para ver las facturas"}
-            </p>
-          </div>
-          
-          {selectedSede && facturasFiltradas.length > 0 && (
-            <button
-              onClick={handleExportCSV}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm border border-black hover:bg-gray-50"
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
-              )}
-              Exportar CSV
-            </button>
-          )}
-        </div>
+        <PageHeader
+          title="Ventas Facturadas"
+          subtitle={
+            selectedSede
+              ? `Sede: ${selectedSedeNombre}`
+              : "Selecciona una sede para ver las facturas"
+          }
+          actions={
+            selectedSede && facturasFiltradas.length > 0 ? (
+              <button
+                onClick={handleExportCSV}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm border border-black hover:bg-gray-50"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )}
+                Exportar CSV
+              </button>
+            ) : null
+          }
+        />
 
         {/* Selector de Sede */}
         <div className="mb-6">
-          <label className="block text-sm mb-2">Seleccionar sede</label>
+          <label className="mb-1.5 block text-xs font-medium">Seleccionar sede</label>
           {isLoadingSedes ? (
             <div className="flex items-center gap-2">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -235,7 +309,7 @@ export function VentasFacturadasList() {
             <select
               value={selectedSede}
               onChange={(e) => setSelectedSede(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm border focus:outline-none focus:border-gray-400"
+              className="h-9 w-full border px-3 text-sm focus:border-gray-400 focus:outline-none"
               disabled={isLoadingSedes}
             >
               <option value="">-- Seleccionar sede --</option>
@@ -253,13 +327,13 @@ export function VentasFacturadasList() {
           <>
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1">
-                <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
                   placeholder="Buscar facturas..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 text-sm border focus:outline-none focus:border-gray-400"
+                  className="h-9 w-full border pl-8 pr-3 text-sm focus:border-gray-400 focus:outline-none"
                   disabled={isLoading}
                 />
               </div>
@@ -267,7 +341,7 @@ export function VentasFacturadasList() {
               <select
                 value={selectedEstado}
                 onChange={(e) => setSelectedEstado(e.target.value)}
-                className="px-3 py-1.5 text-sm border focus:outline-none focus:border-gray-400"
+                className="h-9 min-w-[180px] border px-3 text-sm focus:border-gray-400 focus:outline-none"
                 disabled={isLoading}
               >
                 <option value="all">Todos los estados</option>
@@ -275,6 +349,12 @@ export function VentasFacturadasList() {
                 <option value="pendiente">Pendiente</option>
               </select>
             </div>
+
+            <PaymentMethodsSummary
+              totals={paymentTotals}
+              loading={isLoading}
+              formatAmount={formatSummaryCurrency}
+            />
 
             {/* Estado de carga/error */}
             {isLoading && (
@@ -288,7 +368,7 @@ export function VentasFacturadasList() {
               <div className="p-3 border border-red-300 bg-red-50">
                 <p className="text-sm text-red-800">{error}</p>
                 <button 
-                  onClick={cargarFacturas}
+                  onClick={() => cargarFacturas(currentPage)}
                   className="mt-2 text-sm underline"
                 >
                   Reintentar
@@ -316,7 +396,7 @@ export function VentasFacturadasList() {
                       {facturasFiltradas.length === 0 ? (
                         <tr>
                           <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                            {searchTerm || selectedEstado !== "all"
+                            {debouncedSearchTerm || selectedEstado !== "all"
                               ? "No se encontraron facturas con los filtros aplicados"
                               : "No hay facturas registradas en esta sede"}
                           </td>
@@ -357,7 +437,50 @@ export function VentasFacturadasList() {
             {/* Resumen */}
             {!isLoading && !error && facturasFiltradas.length > 0 && (
               <div className="text-sm text-gray-600">
-                Mostrando {facturasFiltradas.length} de {facturas.length} facturas
+                {pagination
+                  ? `Mostrando ${pagination.from} a ${pagination.to} de ${pagination.total} facturas`
+                  : `Mostrando ${facturasFiltradas.length} de ${facturas.length} facturas`}
+              </div>
+            )}
+
+            {/* Controles de paginación */}
+            {!isLoading && !error && pagination && pagination.total_pages > 1 && (
+              <div className="flex flex-wrap items-center justify-end gap-1 pt-2">
+                <button
+                  onClick={irPrimeraPagina}
+                  disabled={currentPage === 1 || isLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center border disabled:opacity-50"
+                  aria-label="Primera página"
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={irPaginaAnterior}
+                  disabled={!pagination.has_prev || isLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center border disabled:opacity-50"
+                  aria-label="Página anterior"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="px-2 text-sm text-gray-600">
+                  Página {currentPage} de {pagination.total_pages}
+                </span>
+                <button
+                  onClick={irPaginaSiguiente}
+                  disabled={!pagination.has_next || isLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center border disabled:opacity-50"
+                  aria-label="Página siguiente"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={irUltimaPagina}
+                  disabled={currentPage === pagination.total_pages || isLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center border disabled:opacity-50"
+                  aria-label="Última página"
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </button>
               </div>
             )}
           </>

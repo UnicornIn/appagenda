@@ -482,16 +482,17 @@ export async function getServicioPorCodigo(token: string, codigoRef: string): Pr
 // 🔥 FORMATEAR PRECIO
 export function formatPrice(price: number, currency: string): string {
   if (!price && price !== 0) return 'Precio no disponible';
+  const safePrice = Math.round(Number.isFinite(price) ? price : 0);
   
   switch (currency) {
     case 'COP':
-      return `$${price.toLocaleString('es-CO')} COP`;
+      return `$${safePrice.toLocaleString('es-CO', { maximumFractionDigits: 0 })} COP`;
     case 'MXN':
-      return `$${price.toLocaleString('es-MX')} MXN`;
+      return `$${safePrice.toLocaleString('es-MX', { maximumFractionDigits: 0 })} MXN`;
     case 'USD':
-      return `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+      return `$${safePrice.toLocaleString('en-US', { maximumFractionDigits: 0 })} USD`;
     default:
-      return `$${price.toLocaleString()} ${currency}`;
+      return `$${safePrice.toLocaleString('es-CO', { maximumFractionDigits: 0 })} ${currency}`;
   }
 }
 

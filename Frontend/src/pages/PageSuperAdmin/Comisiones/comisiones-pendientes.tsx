@@ -7,33 +7,11 @@ import { PendientesResumen } from "../../../types/commissions";
 import { sedeService } from "../Sedes/sedeService";
 import type { Sede } from "../../../types/sede";
 import { formatSedeNombre } from "../../../lib/sede";
+import { formatCurrencyNoDecimals, getStoredCurrency } from "../../../lib/currency";
 
 // Función para formatear moneda
-const formatMoneda = (monto: number, moneda: string = 'USD'): string => {
-  if (!monto) return `${moneda} 0.00`;
-  
-  const currencyConfig: Record<string, any> = {
-    'USD': { 
-      currency: 'USD', 
-      style: 'currency', 
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2 
-    },
-    'COP': { 
-      currency: 'COP', 
-      style: 'currency', 
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0 
-    }
-  };
-
-  const config = currencyConfig[moneda] || currencyConfig.USD;
-  
-  try {
-    return new Intl.NumberFormat('es-ES', config).format(monto);
-  } catch (error) {
-    return `${config.currency} ${monto.toFixed(2)}`;
-  }
+const formatMoneda = (monto: number, moneda: string = getStoredCurrency("USD")): string => {
+  return formatCurrencyNoDecimals(monto, moneda);
 };
 
 export function ComisionesPendientes() {
@@ -106,9 +84,9 @@ export function ComisionesPendientes() {
   // ✅ ESTADO INICIAL: Cuando no hay sede seleccionada
   if (!selectedSede && sedes.length > 0) {
     return (
-      <div className="rounded-lg border border-gray-300 bg-blue-50 p-8 text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100">
-          <Building className="h-8 w-8 text-blue-600" />
+      <div className="rounded-lg border border-gray-300 bg-gray-100 p-8 text-center">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-200">
+          <Building className="h-8 w-8 text-gray-600" />
         </div>
         <h3 className="mb-2 text-lg font-medium text-gray-900">
           Selecciona una sede
@@ -124,7 +102,7 @@ export function ComisionesPendientes() {
           <select
             value={selectedSede}
             onChange={(e) => setSelectedSede(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400"
             disabled={cargandoSedes}
           >
             <option value="">-- Selecciona una sede --</option>
@@ -198,7 +176,7 @@ export function ComisionesPendientes() {
             <select
               value={selectedSede}
               onChange={(e) => setSelectedSede(e.target.value)}
-              className="px-3 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="px-3 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400"
               disabled={cargandoSedes}
             >
               {sedes.map((sede) => (
@@ -226,8 +204,8 @@ export function ComisionesPendientes() {
                 {total_comisiones_pendientes}
               </p>
             </div>
-            <div className="rounded-full bg-blue-100 p-3">
-              <DollarSign className="h-6 w-6 text-blue-600" />
+            <div className="rounded-full bg-gray-200 p-3">
+              <DollarSign className="h-6 w-6 text-gray-700" />
             </div>
           </div>
           <div className="mt-4 text-sm text-gray-500">
@@ -244,8 +222,8 @@ export function ComisionesPendientes() {
                 {formatMoneda(monto_total_pendiente, moneda)}
               </p>
             </div>
-            <div className="rounded-full bg-green-100 p-3">
-              <DollarSign className="h-6 w-6 text-green-600" />
+            <div className="rounded-full bg-gray-200 p-3">
+              <DollarSign className="h-6 w-6 text-gray-700" />
             </div>
           </div>
           <div className="mt-4 text-sm text-gray-500">
@@ -262,8 +240,8 @@ export function ComisionesPendientes() {
                 {formatMoneda(total_comisiones_servicios, moneda)}
               </p>
             </div>
-            <div className="rounded-full bg-purple-100 p-3">
-              <Scissors className="h-6 w-6 text-purple-600" />
+            <div className="rounded-full bg-gray-200 p-3">
+              <Scissors className="h-6 w-6 text-gray-700" />
             </div>
           </div>
           <div className="mt-4 text-sm text-gray-500">
@@ -280,8 +258,8 @@ export function ComisionesPendientes() {
                 {formatMoneda(total_comisiones_productos, moneda)}
               </p>
             </div>
-            <div className="rounded-full bg-orange-100 p-3">
-              <Package className="h-6 w-6 text-orange-600" />
+            <div className="rounded-full bg-gray-200 p-3">
+              <Package className="h-6 w-6 text-gray-700" />
             </div>
           </div>
           <div className="mt-4 text-sm text-gray-500">
@@ -335,18 +313,12 @@ export function ComisionesPendientes() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-200 text-gray-800">
                         {prof.cantidad_periodos} períodos
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                        prof.tipo_comision === 'servicios' 
-                          ? 'bg-purple-100 text-purple-800'
-                          : prof.tipo_comision === 'productos'
-                          ? 'bg-orange-100 text-orange-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-200 text-gray-800">
                         {prof.tipo_comision || 'mixto'}
                       </span>
                     </td>

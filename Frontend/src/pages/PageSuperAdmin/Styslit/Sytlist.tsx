@@ -179,14 +179,14 @@ export default function EstilistasPage() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Lista lateral de estilistas */}
-        <div className="w-96 border-r border-gray-100 bg-white overflow-y-auto">
+        <div className="w-80 lg:w-[22rem] border-r border-gray-100 bg-white overflow-y-auto">
           {/* Header de la lista */}
-          <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-6 py-4">
+          <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Users className="h-5 w-5 text-gray-900" />
-                <h1 className="text-xl font-semibold text-gray-900">Estilistas</h1>
-                <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                <h1 className="text-lg font-semibold text-gray-900">Estilistas</h1>
+                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
                   {estilistas.length}
                 </span>
               </div>
@@ -202,7 +202,7 @@ export default function EstilistasPage() {
           </div>
 
           {error && (
-            <div className="mx-6 my-4 p-3 bg-red-50 border border-red-100 rounded-lg">
+            <div className="mx-4 my-3 p-3 bg-red-50 border border-red-100 rounded-lg">
               <div className="flex items-start justify-between">
                 <div className="text-sm text-red-800">
                   {error}
@@ -218,7 +218,7 @@ export default function EstilistasPage() {
           )}
 
           {/* Lista de estilistas */}
-          <div className="p-2">
+          <div className="p-1.5">
             <EstilistasList
               estilistas={estilistas}
               selectedEstilista={selectedEstilista}
