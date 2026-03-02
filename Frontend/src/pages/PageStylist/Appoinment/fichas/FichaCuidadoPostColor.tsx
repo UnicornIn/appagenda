@@ -296,7 +296,7 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
       formDataToSend.append('data', JSON.stringify(fichaData));
 
       // 7. Enviar petición
-      const response = await fetch(`${API_BASE_URL}create-ficha`, {
+      const response = await fetch(`${API_BASE_URL}scheduling/quotes/create-ficha`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

@@ -95,7 +95,7 @@ export function useFichaCreator({ onSuccess, onError }: UseFichaCreatorProps = {
       formData.append('data', JSON.stringify(dataToSend));
 
       // 5. Enviar la petición
-      const response = await fetch(`${API_BASE_URL}create-ficha`, {
+      const response = await fetch(`${API_BASE_URL}scheduling/quotes/create-ficha`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

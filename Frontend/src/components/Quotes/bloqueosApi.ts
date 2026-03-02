@@ -67,11 +67,12 @@ const normalizeTimeValue = (value: unknown): string => {
   const raw = String(value).trim();
   if (!raw) return "";
 
-  const hhmmss = raw.match(/^(\d{2}):(\d{2}):(\d{2})$/);
-  if (hhmmss) return `${hhmmss[1]}:${hhmmss[2]}`;
-
-  const hhmm = raw.match(/^(\d{2}):(\d{2})/);
-  if (hhmm) return `${hhmm[1]}:${hhmm[2]}`;
+  const hhmmOrHhmmss = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (hhmmOrHhmmss) {
+    const hours = Math.min(23, Math.max(0, Number(hhmmOrHhmmss[1])));
+    const minutes = Math.min(59, Math.max(0, Number(hhmmOrHhmmss[2])));
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  }
 
   const ampm = raw.match(/^(\d{1,2}):(\d{2})\s*([ap]\.?m\.?)$/i);
   if (ampm) {
@@ -142,21 +143,31 @@ const toBloqueoApiPayload = (data: BloqueoCreatePayload) => {
   const providedDays = normalizeDays(data.dias_semana);
   const fallbackDay = getDayFromIsoDate(startDate);
   const daysOfWeek = providedDays.length > 0 ? providedDays : [fallbackDay];
-
-  return {
+  const horaInicio = normalizeTimeValue(data.hora_inicio);
+  const horaFin = normalizeTimeValue(data.hora_fin);
+  const motivo = data.motivo?.trim() || "Bloqueo de agenda";
+  const payloadBase = {
     profesional_id: data.profesional_id,
     sede_id: data.sede_id,
-    start_date: startDate,
-    start_time: normalizeTimeValue(data.hora_inicio),
-    end_time: normalizeTimeValue(data.hora_fin),
-    motivo: data.motivo?.trim() || "Bloqueo de agenda",
-    repeat: {
-      type: "weekly",
-      days_of_week: daysOfWeek,
-      until: untilDate || null,
-      exclude_dates: [],
-      include_dates: [],
-    },
+    hora_inicio: horaInicio,
+    hora_fin: horaFin,
+    motivo,
+  };
+
+  if (!data.recurrente) {
+    return {
+      ...payloadBase,
+      recurrente: false,
+      fecha: startDate,
+    };
+  }
+
+  return {
+    ...payloadBase,
+    recurrente: true,
+    dias_semana: daysOfWeek,
+    fecha_inicio: startDate,
+    fecha_fin: untilDate || startDate,
   };
 };
 
@@ -290,15 +301,25 @@ export async function createBloqueo(data: BloqueoCreatePayload, token: string) {
       bloqueo: toBloqueoUi(raw.bloqueo),
     };
   }
+  if (isRecord(raw) && Array.isArray(raw.bloqueos)) {
+    return {
+      ...raw,
+      bloqueos: raw.bloqueos.map(toBloqueoUi),
+    };
+  }
+  if (isRecord(raw)) {
+    return toBloqueoUi(raw);
+  }
   return toBloqueoUi(raw);
 }
 
 export async function updateBloqueo(id: string, data: BloqueoUpdatePayload, token: string) {
   const url = `${API_BASE_URL}scheduling/block/${id}`;
-  const payload = {
+  const payload: BloqueoUpdatePayload = {
     ...data,
-    ...(data.hora_inicio ? { start_time: normalizeTimeValue(data.hora_inicio) } : {}),
-    ...(data.hora_fin ? { end_time: normalizeTimeValue(data.hora_fin) } : {}),
+    ...(data.hora_inicio ? { hora_inicio: normalizeTimeValue(data.hora_inicio) } : {}),
+    ...(data.hora_fin ? { hora_fin: normalizeTimeValue(data.hora_fin) } : {}),
+    ...(typeof data.motivo === "string" ? { motivo: data.motivo.trim() || "Bloqueo de agenda" } : {}),
   };
 
   const buildRequest = (method: "PATCH" | "PUT") => ({
@@ -343,6 +364,21 @@ export async function deleteBloqueo(id: string, token: string) {
   });
   if (!res.ok) {
     throw new Error(await readApiError(res, "Error al eliminar bloqueo"));
+  }
+  return res.json();
+}
+
+export async function excludeDayBloqueo(id: string, fecha: string, token: string) {
+  const normalizedDate = normalizeIsoDate(fecha);
+  const query = new URLSearchParams({ fecha: normalizedDate }).toString();
+  const res = await fetch(`${API_BASE_URL}scheduling/block/${id}/exclude-day?${query}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(await readApiError(res, "Error al excluir día del bloqueo"));
   }
   return res.json();
 }
