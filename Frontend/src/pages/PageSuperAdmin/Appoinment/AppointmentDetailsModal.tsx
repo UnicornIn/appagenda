@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import Modal from '../../../components/ui/modal';
 import { useAuth } from '../../../components/Auth/AuthContext';
-import { updateCita, registrarPagoCita } from './citasApi';
+import { updateQuote, registrarPagoCita, ApiRequestError } from './citasApi';
 import { formatDateDMY } from '../../../lib/dateFormat';
 import { getServicios, type Servicio as ServicioCatalogo } from '../../../components/Quotes/serviciosApi';
 import { getEstilistas, type Estilista } from '../../../components/Professionales/estilistasApi';
@@ -79,6 +79,8 @@ interface ProductoDisponible {
 interface ProfesionalDisponible {
   profesional_id: string;
   nombre: string;
+  hasSchedule: boolean | null;
+  invalidAgendaId: boolean;
 }
 
 const ESTADOS_NO_EDITABLES_SERVICIOS = new Set([
@@ -124,6 +126,98 @@ const extraerMensajeError = (error: any, fallback: string): string => {
   }
 
   return fallback;
+};
+
+const HORARIO_FLAG_KEYS = [
+  'horario_configurado',
+  'tiene_horario',
+  'has_schedule',
+  'tiene_disponibilidad',
+  'disponible_para_agenda'
+];
+
+const normalizarTexto = (value: string): string => {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+};
+
+const parseBooleanLike = (value: unknown): boolean | null => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value > 0;
+  if (typeof value === 'string') {
+    const normalizado = normalizarTexto(value);
+    if (['true', 'si', 'sí', '1', 'activo', 'disponible'].includes(normalizado)) return true;
+    if (['false', 'no', '0', 'inactivo', 'sin horario'].includes(normalizado)) return false;
+  }
+  return null;
+};
+
+const isMongoObjectIdLike = (value: string): boolean => /^[a-fA-F0-9]{24}$/.test(String(value || '').trim());
+
+const inferirSiTieneHorario = (profesional: Record<string, unknown>): boolean | null => {
+  for (const key of HORARIO_FLAG_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(profesional, key)) {
+      return parseBooleanLike(profesional[key]);
+    }
+  }
+  return null;
+};
+
+const esErrorSinHorarioConfigurado = (mensaje: string): boolean => {
+  const normalizado = normalizarTexto(mensaje);
+  return normalizado.includes('no tiene horario configurado');
+};
+
+const esErrorDisponibilidadHorario = (mensaje: string): boolean => {
+  const normalizado = normalizarTexto(mensaje);
+  return (
+    normalizado.includes('no tiene disponibilidad para esa fecha') ||
+    normalizado.includes('fuera del horario laboral del profesional')
+  );
+};
+
+const construirMensajeErrorCita = (error: unknown, fallback: string): { mensaje: string; sinHorario: boolean } => {
+  const mensajeOriginal = extraerMensajeError(error, fallback);
+
+  if (esErrorSinHorarioConfigurado(mensajeOriginal)) {
+    return {
+      mensaje: 'No se puede asignar esta cita: el profesional seleccionado no tiene horario configurado. Configura su horario o selecciona otro.',
+      sinHorario: true
+    };
+  }
+
+  if (esErrorDisponibilidadHorario(mensajeOriginal)) {
+    return {
+      mensaje: 'No se puede asignar esta cita en la fecha/hora actual para el profesional seleccionado. Ajusta la fecha u hora, o elige otro profesional.',
+      sinHorario: false
+    };
+  }
+
+  if (error instanceof ApiRequestError) {
+    if (error.status === 409) {
+      return {
+        mensaje: mensajeOriginal || 'Existe un conflicto de agenda para la cita seleccionada.',
+        sinHorario: false
+      };
+    }
+    if (error.status === 400 || error.status === 422) {
+      return {
+        mensaje: mensajeOriginal || 'Hay datos inválidos en la edición de la cita. Revisa los campos e intenta de nuevo.',
+        sinHorario: false
+      };
+    }
+    if (error.status >= 500) {
+      return {
+        mensaje: 'Ocurrió un error interno al guardar la cita. Intenta nuevamente en unos minutos.',
+        sinHorario: false
+      };
+    }
+  }
+
+  return { mensaje: mensajeOriginal, sinHorario: false };
 };
 
 const normalizarServiciosCita = (servicios: any[] | undefined): ServicioSeleccionado[] => {
@@ -493,10 +587,17 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         const sedeId = appointmentDetails?.rawData?.sede_id || user?.sede_id;
         const estilistas: Estilista[] = await getEstilistas(user.access_token, sedeId);
         const profesionales = (Array.isArray(estilistas) ? estilistas : [])
-          .map((estilista) => ({
-            profesional_id: String(estilista.profesional_id || estilista._id || '').trim(),
-            nombre: String(estilista.nombre || 'Profesional')
-          }))
+          .map((estilista) => {
+            const estilistaRaw = estilista as unknown as Record<string, unknown>;
+            const agendaId = String(estilista.profesional_id || '').trim();
+            const mongoId = String(estilista._id || '').trim();
+            return {
+              profesional_id: agendaId || `invalid:${mongoId || String(estilista.nombre || '').trim()}`,
+              nombre: String(estilista.nombre || 'Profesional'),
+              hasSchedule: inferirSiTieneHorario(estilistaRaw),
+              invalidAgendaId: !agendaId
+            };
+          })
           .filter((estilista) => estilista.profesional_id)
           .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
@@ -569,6 +670,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     profesionalEditadoId !== horarioOriginal.profesional_id
   );
   const hasUnsavedChanges = hasUnsavedServiceChanges || hasUnsavedProductChanges || hasUnsavedScheduleChanges;
+  const tieneOpcionesSinHorario = profesionalesDisponibles.some((profesional) => profesional.hasSchedule === false);
+  const tieneOpcionesSinIdAgenda = profesionalesDisponibles.some((profesional) => profesional.invalidAgendaId);
 
   const isServiceActionsDisabled = updating || savingServicios || isEstadoNoEditableServicios;
   const notasAdicionales = extractAgendaAdditionalNotes(appointmentDetails);
@@ -706,7 +809,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
     setUpdating(true);
     try {
-      await updateCita(
+      await updateQuote(
         appointmentDetails.id,
         { estado: nuevoEstado },
         user.access_token
@@ -996,6 +1099,15 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       return;
     }
 
+    const profesionalSeleccionado = profesionalesDisponibles.find(
+      (profesional) => profesional.profesional_id === profesionalEditadoId
+    );
+
+    if (profesionalSeleccionado?.invalidAgendaId || isMongoObjectIdLike(profesionalEditadoId)) {
+      setServiceError('El profesional seleccionado no tiene un ID de agenda válido. Verifica su configuración antes de asignar la cita.');
+      return;
+    }
+
     const horaInicioMinutos = convertirHoraAMinutos(horaInicioEditada);
     const horaFinMinutos = convertirHoraAMinutos(horaFinEditada);
     if (!Number.isFinite(horaInicioMinutos) || !Number.isFinite(horaFinMinutos) || horaFinMinutos <= horaInicioMinutos) {
@@ -1029,7 +1141,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       }));
       const notasActuales = extractAgendaAdditionalNotes(appointmentDetails);
 
-      const response = await updateCita(
+      const response = await updateQuote(
         appointmentDetails.id,
         {
           fecha: fechaEditada,
@@ -1092,12 +1204,21 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         }
       }));
 
-      alert('Cambios de la cita actualizados correctamente.');
+      alert('Cita actualizada correctamente.');
+      onClose();
       if (onRefresh) {
-        setTimeout(() => onRefresh(), 400);
+        setTimeout(() => onRefresh(), 200);
       }
     } catch (error: any) {
-      const mensaje = extraerMensajeError(error, 'No se pudieron guardar los cambios de la cita.');
+      const { mensaje, sinHorario } = construirMensajeErrorCita(
+        error,
+        'No se pudieron guardar los cambios de la cita.'
+      );
+
+      if (sinHorario && profesionalEditadoId !== horarioOriginal.profesional_id) {
+        setProfesionalEditadoId(horarioOriginal.profesional_id);
+      }
+
       setServiceError(mensaje);
       alert(`Error al guardar cambios: ${mensaje}`);
     } finally {
@@ -1816,7 +1937,10 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                         <label className="text-xs text-gray-500 font-medium mb-0.5 block">Profesional</label>
                         <select
                           value={profesionalEditadoId}
-                          onChange={(e) => setProfesionalEditadoId(e.target.value)}
+                          onChange={(e) => {
+                            setProfesionalEditadoId(e.target.value);
+                            setServiceError(null);
+                          }}
                           disabled={isServiceActionsDisabled || loadingProfesionales}
                           className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
                         >
@@ -1824,11 +1948,28 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                             {loadingProfesionales ? 'Cargando profesionales...' : 'Seleccionar profesional'}
                           </option>
                           {profesionalesDisponibles.map((profesional) => (
-                            <option key={profesional.profesional_id} value={profesional.profesional_id}>
+                            <option
+                              key={profesional.profesional_id}
+                              value={profesional.profesional_id}
+                              disabled={profesional.hasSchedule === false || profesional.invalidAgendaId}
+                            >
                               {profesional.nombre}
+                              {profesional.invalidAgendaId
+                                ? ' (Sin ID agenda)'
+                                : (profesional.hasSchedule === false ? ' (Sin horario)' : '')}
                             </option>
                           ))}
                         </select>
+                        {tieneOpcionesSinHorario && (
+                          <p className="mt-0.5 text-[10px] text-gray-500">
+                            Los profesionales marcados como "Sin horario" no se pueden asignar a una cita.
+                          </p>
+                        )}
+                        {tieneOpcionesSinIdAgenda && (
+                          <p className="mt-0.5 text-[10px] text-gray-500">
+                            Los profesionales marcados como "Sin ID agenda" requieren configuración del campo profesional_id.
+                          </p>
+                        )}
                       </div>
                     </div>
 

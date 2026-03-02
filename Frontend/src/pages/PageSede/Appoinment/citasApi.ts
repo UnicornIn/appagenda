@@ -1,6 +1,18 @@
 // components/Quotes/citasApi.ts - Agrega esta función
 import { API_BASE_URL } from '../../../types/config'; // Ajusta la ruta según tu estructura
 
+export class ApiRequestError extends Error {
+  status: number;
+  payload: unknown;
+
+  constructor(message: string, status: number, payload: unknown) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 const parseApiDetail = (detail: unknown, fallback: string): string => {
   if (!detail) return fallback;
   if (typeof detail === 'string') return detail;
@@ -34,7 +46,13 @@ const parseApiDetail = (detail: unknown, fallback: string): string => {
   return fallback;
 };
 
-export const updateCita = async (citaId: string, cambios: any, token: string) => {
+const buildApiRequestError = async (response: Response, fallback: string): Promise<ApiRequestError> => {
+  const errorData = await response.json().catch(() => null);
+  const message = parseApiDetail(errorData?.detail ?? errorData, fallback);
+  return new ApiRequestError(message, response.status, errorData);
+};
+
+export const updateQuote = async (citaId: string, cambios: any, token: string) => {
   try {
     const response = await fetch(`${API_BASE_URL}scheduling/quotes/${citaId}`, {
       method: 'PUT',
@@ -46,18 +64,19 @@ export const updateCita = async (citaId: string, cambios: any, token: string) =>
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
       const fallback = `Error ${response.status}: ${response.statusText}`;
-      throw new Error(parseApiDetail(errorData?.detail ?? errorData, fallback));
+      throw await buildApiRequestError(response, fallback);
     }
 
     return await response.json();
   } catch (error) {
-    console.error('Error en updateCita:', error);
+    console.error('Error en updateQuote:', error);
     throw error;
   }
 
 };
+
+export const updateCita = updateQuote;
 // En tu archivo citasApi.ts
 export const registrarPagoCita = async (
   citaId: string,
@@ -82,8 +101,7 @@ export const registrarPagoCita = async (
   );
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => null);
-    throw new Error(parseApiDetail(errorData?.detail ?? errorData, 'Error al registrar pago'));
+    throw await buildApiRequestError(response, 'Error al registrar pago');
   }
 
   return await response.json();
