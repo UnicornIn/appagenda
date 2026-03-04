@@ -760,7 +760,128 @@ async def crear_cita(
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Confirmación de Cita - Rizos Felices</title>
-        {estilo}
+        <style>
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background-color: #f4f4f4;
+                margin: 0;
+                padding: 0;
+            }}
+            .email-container {{
+                max-width: 600px;
+                margin: 20px auto;
+                background-color: #ffffff;
+                border-radius: 15px;
+                overflow: hidden;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+                border: 1px solid #f198c0;
+            }}
+            .email-header {{
+                background-color: #000000; /* Fondo Negro */
+                color: #ffffff;
+                padding: 40px 20px;
+                text-align: center;
+            }}
+            .logo {{
+                max-width: 180px;
+                margin-bottom: 20px;
+            }}
+            .header-title {{
+                color: #f198c0; /* Rosa solicitado */
+                margin: 0;
+                font-size: 28px;
+                text-transform: uppercase;
+                letter-spacing: 2px;
+            }}
+            .header-subtitle {{
+                margin: 10px 0 0;
+                font-size: 16px;
+                opacity: 0.9;
+            }}
+            .email-body {{
+                padding: 30px;
+            }}
+            .section-title {{
+                color: #333;
+                font-size: 18px;
+                font-weight: bold;
+                margin-bottom: 20px;
+                padding-bottom: 10px;
+                border-bottom: 2px solid #f198c0; /* Borde rosa */
+            }}
+            .info-grid {{
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 15px;
+                margin-bottom: 30px;
+            }}
+            .info-card {{
+                background-color: #fff;
+                padding: 15px;
+                border-radius: 10px;
+                border: 1px solid #f198c0; /* Bordes rosa */
+            }}
+            .info-label {{
+                color: #f198c0; /* Texto rosa */
+                font-size: 12px;
+                text-transform: uppercase;
+                font-weight: bold;
+                margin-bottom: 5px;
+            }}
+            .info-value {{
+                color: #333;
+                font-size: 15px;
+                font-weight: 600;
+            }}
+            .instrucciones {{
+                background-color: #fff0f6; /* Fondo rosado muy clarito */
+                padding: 20px;
+                border-radius: 12px;
+                border-left: 5px solid #f198c0;
+            }}
+            .instrucciones-title {{
+                color: #f198c0;
+                font-weight: bold;
+                margin-bottom: 10px;
+            }}
+            .instrucciones-list {{
+                margin: 0;
+                padding-left: 20px;
+                color: #555;
+                font-size: 14px;
+            }}
+            .instrucciones-list li {{
+                margin-bottom: 8px;
+            }}
+            .email-footer {{
+                background-color: #f9f9f9;
+                padding: 30px;
+                text-align: center;
+                color: #777;
+                font-size: 13px;
+            }}
+            .footer-links a {{
+                color: #f198c0;
+                text-decoration: none;
+                margin: 0 10px;
+            }}
+            .social-icons {{
+                margin-top: 20px;
+            }}
+            .social-icon {{
+                display: inline-block;
+                width: 30px;
+                height: 30px;
+                background: #f198c0;
+                color: white;
+                border-radius: 50%;
+                line-height: 30px;
+                margin: 0 5px;
+                text-decoration: none;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+        </style>
     </head>
     <body>
         <div class="email-container">
@@ -768,108 +889,73 @@ async def crear_cita(
                 <img class="logo" src="https://rizosfelicesdata.s3.us-east-2.amazonaws.com/logo+principal+rosado+letra+blanco_Mesa+de+tra+(1).png" alt="Rizos Felices">
                 <h1 class="header-title">¡Cita Confirmada!</h1>
                 <p class="header-subtitle">Tu reserva ha sido agendada exitosamente</p>
-                <div class="cita-id">ID de cita: {cita_id[:8].upper()}</div>
             </div>
-            
+        
             <div class="email-body">
                 <div class="section-title">
                     <span>📅 Detalles de la cita</span>
                 </div>
-                
+            
                 <div class="info-grid">
                     <div class="info-card">
                         <div class="info-label">Cliente</div>
                         <div class="info-value">{cliente.get('nombre')}</div>
                     </div>
-                    
+                
                     <div class="info-card">
                         <div class="info-label">Servicio(s)</div>
                         <div class="info-value">{nombres_concatenados}</div>
-                        <small>{duracion_total} minutos</small>
+                        <small style="color:#888;">{duracion_total} minutos</small>
                     </div>
-                    
+                
                     <div class="info-card">
                         <div class="info-label">Profesional</div>
                         <div class="info-value">{profesional.get('nombre')}</div>
                     </div>
-                    
+                
                     <div class="info-card">
                         <div class="info-label">Sede</div>
                         <div class="info-value">{sede.get('nombre')}</div>
-                        <small>{sede.get('direccion', '')}</small>
+                        <small style="color:#888;">{sede.get('direccion', '')}</small>
                     </div>
-                    
+                
                     <div class="info-card">
                         <div class="info-label">Fecha</div>
                         <div class="info-value">{fecha_str}</div>
                     </div>
-                    
+                
                     <div class="info-card">
                         <div class="info-label">Horario</div>
                         <div class="info-value">{cita.hora_inicio} - {cita.hora_fin}</div>
                     </div>
                 </div>
-                
-                <div class="section-title">
-                    <span>💰 Información de pago</span>
-                </div>
-                
-                <div class="pago-section">
-                    <div class="pago-grid">
-                        <div class="pago-item">
-                            <span>Precio total:</span>
-                            <span><strong>{moneda_info['simbolo']}{valor_total:,.2f} {moneda_info['nombre']}</strong></span>
-                        </div>
-                        
-                        <div class="pago-item">
-                            <span>Abono realizado:</span>
-                            <span>{moneda_info['simbolo']}{abono:,.2f}</span>
-                        </div>
-                        
-                        <div class="pago-item">
-                            <span>Saldo pendiente:</span>
-                            <span>{moneda_info['simbolo']}{saldo_pendiente:,.2f}</span>
-                        </div>
-                        
-                        <div class="pago-item total">
-                            <span>Estado:</span>
-                            <span>
-                                <span class="estado-pago {estado_pago_class}">
-                                    {estado_pago.upper()}
-                                </span>
-                            </span>
-                        </div>
-                    </div>
-                    
-                    {f'<p style="margin-top: 15px; font-size: 14px; color: #4a5568;">Saldo pendiente por pagar al momento del servicio.</p>' if saldo_pendiente > 0 else ''}
-                </div>
-                
+            
                 <div class="instrucciones">
                     <div class="instrucciones-title">
                         <span>📋 Recomendaciones importantes</span>
                     </div>
                     <ul class="instrucciones-list">
                         <li>Llega 10 minutos antes de tu cita</li>
-                        <li>Trae tu identificación para confirmar la reserva</li>
+                        <li>En caso de servicio completo, traer cabello desenredado</li>
                         <li>Notifica cualquier cancelación con al menos 24 horas de anticipación</li>
-                        <li>Usa mascarilla si lo consideras necesario</li>
                         <li>Consulta nuestras políticas en nuestro sitio web</li>
+                        <li>En caso de corte de cabello, traer el cabello limpio y desenredado</li>
                     </ul>
                 </div>
-                
-                <div style="margin-top: 30px; padding: 20px; background: #fff7ed; border-radius: 12px; border-left: 4px solid #ed8936;">
+            
+                <div style="margin-top: 30px; padding: 20px; background: #fff; border-radius: 12px; border: 1px solid #f198c0;">
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                        <span style="font-size: 16px; font-weight: 600; color: #9c4221;">📞 ¿Necesitas ayuda?</span>
+                        <span style="font-size: 16px; font-weight: 600; color: #f198c0;">📞 ¿Necesitas ayuda?</span>
                     </div>
-                    <p style="color: #744210; margin-bottom: 5px;">
+                    <p style="color: #333; margin-bottom: 5px;">
                         <strong>{sede.get('nombre')}:</strong> {sede.get('telefono', 'No disponible')}
                     </p>
-                    <p style="color: #744210; font-size: 14px;">
+                    <p style="color: #666; font-size: 14px;">
                         Horario de atención: {dia_info['hora_inicio']} - {dia_info['hora_fin']}
                     </p>
                 </div>
             </div>
-            
+        
             <div class="email-footer">
                 <p>© {datetime.now().year} Rizos Felices. Todos los derechos reservados.</p>
                 <div class="footer-links">
@@ -1390,7 +1476,7 @@ async def editar_cita(
         ):
             raise HTTPException(status_code=400, detail="La cita está fuera del horario laboral del profesional")
 
-        bloqueo = await collection_block.find_one({
+        """bloqueo = await collection_block.find_one({
             "profesional_id": profesional_id_final,
             "fecha": fecha_final,
             "hora_inicio": {"$lt": hora_fin_final},
@@ -1415,7 +1501,7 @@ async def editar_cita(
             raise HTTPException(
                 status_code=400,
                 detail=f"El profesional ya tiene una cita con {cliente_solape} en ese horario"
-            )
+            )"""
 
     # ====================================
     # ⭐ RECÁLCULO DE TOTALES
