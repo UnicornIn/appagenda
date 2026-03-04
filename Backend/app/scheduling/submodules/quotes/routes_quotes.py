@@ -2103,7 +2103,13 @@ async def get_citas_sede(current_user: dict = Depends(get_current_user)):
             detail="El administrador no tiene asignada una sede"
         )
 
-    citas = await collection_citas.find({"sede_id": sede_id}).to_list(None)
+    # 🔥 Filtrar directamente en MongoDB solo las citas finalizadas
+    query = {
+        "sede_id": sede_id,
+        "estado": "finalizado"
+    }
+
+    citas = await collection_citas.find(query).to_list(None)
 
     # 🔥 Convertir todos los ObjectId a string
     citas = [fix_mongo_id(c) for c in citas]
