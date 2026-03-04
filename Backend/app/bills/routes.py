@@ -179,11 +179,19 @@ async def facturar_cita_o_venta(
         if not servicio:
             raise HTTPException(status_code=404, detail="Servicio no encontrado")
 
+        # ⭐ PRIORIDAD DE PRECIO:
+        # 1. precio_personalizado explícito
+        # 2. valor_total de la cita (citas migradas/antiguas) ← NUEVO
+        # 3. precio del servicio en BD (fallback)
         precio_personalizado = documento.get("precio_fue_personalizado", False)
         precio_custom = documento.get("precio_personalizado", 0)
 
         if precio_personalizado and precio_custom > 0:
             precio_servicio = precio_custom
+            print(f"  💰 Precio personalizado: {precio_servicio}")
+        elif documento.get("valor_total", 0) > 0:
+            precio_servicio = documento["valor_total"]   # ← usa lo que se cobró realmente
+            print(f"  💰 Precio desde valor_total (estructura migrada): {precio_servicio}")
         else:
             precios_servicio = servicio.get("precios", {})
             if moneda_sede not in precios_servicio:
