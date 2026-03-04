@@ -76,7 +76,7 @@ async def obtener_fichas_por_cliente(
     cliente_id: str = Query(...),
     cita_id: str = Query(None, description="Filtrar por cita específica (para facturación)"),
     fecha: str = Query(None, description="Filtrar por fecha (YYYY-MM-DD)"),
-    solo_hoy: bool = Query(False, description="Solo fichas de hoy"),
+    solo_hoy: bool = Query(True, description="Solo fichas de hoy"),
     limit: int = Query(10, description="Límite de resultados"),
     current_user: dict = Depends(get_current_user)
 ):

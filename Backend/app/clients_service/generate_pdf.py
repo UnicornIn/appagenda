@@ -15,124 +15,112 @@ router = APIRouter()
 # ============================================
 @router.get("/generar-pdf/{cliente_id}/{cita_id}", response_class=StreamingResponse)
 async def generar_pdf_especifico(
-    cliente_id: str,  # Esto es "CL-34933", NO un ObjectId
-    cita_id: str,     # Esto es "6967fc0e48d56a6891afb599" (ObjectId string)
+    cliente_id: str,
+    cita_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Genera un PDF específico para un cliente y cita.
-    Solo necesita cliente_id (como "CL-XXXXX") y cita_id (como ObjectId string).
-    """
     try:
         print(f"🔍 [PDF ENDPOINT] Buscando cliente: {cliente_id}")
         print(f"🔍 [PDF ENDPOINT] Buscando cita: {cita_id}")
-        
-        # Verificar permisos
+
         if current_user["rol"] not in ["admin_sede", "estilista", "admin"]:
-            raise HTTPException(
-                status_code=403,
-                detail="No tienes permisos para generar PDFs"
-            )
-        
-        # 🔥 CORRECCIÓN: Buscar cliente por "cliente_id" no por "_id"
-        # Porque cliente_id es "CL-34933", no un ObjectId
+            raise HTTPException(status_code=403, detail="No tienes permisos para generar PDFs")
+
+        # Buscar cliente por cliente_id string
         cliente = await collection_clients.find_one({"cliente_id": cliente_id})
-        
         if not cliente:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Cliente no encontrado con ID: {cliente_id}"
-            )
-        
+            raise HTTPException(status_code=404, detail=f"Cliente no encontrado: {cliente_id}")
+
+        cliente_db_id = cliente.get('cliente_id')        # "CL-30549"
+        cliente_object_id = str(cliente.get('_id'))      # ObjectId como string
+
         print(f"✅ Cliente encontrado: {cliente.get('nombre')} {cliente.get('apellido', '')}")
-        print(f"📊 Cliente DB ID: {cliente.get('_id')}")
-        print(f"📊 Cliente ID: {cliente.get('cliente_id')}")
-        
-        # Buscar la cita por ObjectId (cita_id sí es un ObjectId string)
+
+        # Buscar cita por ObjectId
         try:
             cita = await collection_citas.find_one({"_id": ObjectId(cita_id)})
-        except:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Cita ID no válido: {cita_id}"
-            )
-        
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Cita ID no válido: {cita_id}")
+
         if not cita:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Cita no encontrada: {cita_id}"
-            )
-        
-        print(f"✅ Cita encontrada: {cita_id}")
-        print(f"📊 Cita datos: servicio={cita.get('servicio_nombre')}, cliente_id={cita.get('cliente_id')}")
-        
-        # 🔥 IMPORTANTE: Verificar compatibilidad de IDs
-        # El cliente en la colección clients tiene campo "cliente_id" = "CL-34933"
-        # La cita en collection_citas tiene campo "cliente_id" que podría ser:
-        # 1. El mismo "CL-34933"
-        # 2. El ObjectId del cliente (de la colección clients)
-        # 3. Otro formato
-        
-        cita_cliente_id = cita.get('cliente_id')
-        cliente_db_id = cliente.get('cliente_id')  # "CL-34933"
-        cliente_object_id = str(cliente.get('_id'))  # ObjectId como string
-        
-        print(f"📊 IDs para comparar:")
-        print(f"  - Cliente DB ID (cliente_id): {cliente_db_id}")
-        print(f"  - Cliente ObjectId: {cliente_object_id}")
-        print(f"  - Cita cliente_id: {cita_cliente_id}")
-        
-        # Verificar si la cita pertenece al cliente
-        ids_coinciden = (
-            cita_cliente_id == cliente_db_id or
-            cita_cliente_id == cliente_object_id or
-            str(cita_cliente_id) == cliente_object_id
-        )
-        
-        if not ids_coinciden:
-            print(f"⚠️ Advertencia: La cita podría no pertenecer al cliente")
-            print(f"   Cita cliente_id: {cita_cliente_id}")
-            print(f"   Cliente IDs: {cliente_db_id}, {cliente_object_id}")
-            # Continuamos de todas formas, ya que la ficha puede tener otra referencia
-        
-        # 🔥 Buscar la ficha técnica asociada
-        # Primero: buscar por cita_id en datos_especificos (más directo)
+            raise HTTPException(status_code=404, detail=f"Cita no encontrada: {cita_id}")
+
+        print(f"✅ Cita encontrada: servicio={cita.get('servicio_nombre')}, sede={cita.get('sede_id')}")
+
+        # ============================================================
+        # 🔥 BÚSQUEDA DE FICHA - ESTRATEGIA MÚLTIPLE
+        # Soporta fichas nuevas (ObjectId) y fichas migradas (string ID)
+        # ============================================================
+        ficha = None
+
+        # 1. Por cita_id en datos_especificos (fichas nuevas)
         ficha = await collection_card.find_one({"datos_especificos.cita_id": cita_id})
-        
+        print(f"{'✅' if ficha else '⚠️'} Estrategia 1 (cita_id): {'ok' if ficha else 'miss'}")
+
+        # 2. Por ObjectId del cliente + servicio_id
         if not ficha:
-            print("⚠️ Ficha no encontrada por cita_id, buscando por cliente...")
-            # Segundo: buscar por cliente (usando ObjectId del cliente)
-            ficha = await collection_card.find_one({"cliente_id": ObjectId(cliente.get('_id'))})
-        
-        if not ficha:
-            print("⚠️ Ficha no encontrada por cliente_id, buscando por servicio...")
-            # Tercero: buscar por servicio
-            if cita.get('servicio_id'):
+            try:
                 ficha = await collection_card.find_one({
                     "cliente_id": ObjectId(cliente.get('_id')),
                     "servicio_id": cita.get('servicio_id')
                 })
-        
+                print(f"{'✅' if ficha else '⚠️'} Estrategia 2 (ObjectId + servicio_id): {'ok' if ficha else 'miss'}")
+            except Exception:
+                pass
+
+        # 3. Por cliente_id STRING + servicio_id (fichas migradas)
+        if not ficha and cita.get('servicio_id'):
+            ficha = await collection_card.find_one({
+                "cliente_id": cliente_db_id,
+                "servicio_id": cita.get('servicio_id')
+            })
+            print(f"{'✅' if ficha else '⚠️'} Estrategia 3 (string + servicio_id): {'ok' if ficha else 'miss'}")
+
+        # 4. Por cliente_id STRING + servicio_nombre (fichas migradas)
+        if not ficha and cita.get('servicio_nombre'):
+            ficha = await collection_card.find_one({
+                "cliente_id": cliente_db_id,
+                "servicio_nombre": cita.get('servicio_nombre')
+            })
+            print(f"{'✅' if ficha else '⚠️'} Estrategia 4 (string + servicio_nombre): {'ok' if ficha else 'miss'}")
+
+        # 5. Por cliente_id STRING + sede_id → la más reciente con mejor match
+        if not ficha:
+            fichas_candidatas = await collection_card.find({
+                "cliente_id": cliente_db_id,
+                "sede_id": cita.get('sede_id')
+            }).sort("fecha_ficha", -1).to_list(5)
+
+            print(f"{'✅' if fichas_candidatas else '⚠️'} Estrategia 5 (string + sede): {len(fichas_candidatas)} candidatas")
+
+            if fichas_candidatas:
+                ficha = next(
+                    (f for f in fichas_candidatas if f.get('servicio_nombre') == cita.get('servicio_nombre')),
+                    fichas_candidatas[0]
+                )
+
+        # 6. Solo por cliente_id STRING → ficha más reciente (último recurso)
+        if not ficha:
+            ficha = await collection_card.find_one(
+                {"cliente_id": cliente_db_id},
+                sort=[("fecha_ficha", -1)]
+            )
+            print(f"{'✅' if ficha else '❌'} Estrategia 6 (solo cliente): {'ok' if ficha else 'miss'}")
+
         if not ficha:
             raise HTTPException(
                 status_code=404,
-                detail="No se encontró ficha técnica asociada"
+                detail=f"No se encontró ficha técnica para cliente {cliente_db_id}, cita {cita_id}"
             )
-        
-        print(f"✅ Ficha encontrada: ID {ficha.get('_id')}")
-        print(f"📊 Ficha datos:")
-        print(f"  - Servicio: {ficha.get('servicio_nombre')}")
-        print(f"  - Profesional: {ficha.get('profesional_nombre')}")
-        print(f"  - Cliente en ficha: {ficha.get('cliente_id')}")
-        print(f"  - Cita en ficha: {ficha.get('datos_especificos', {}).get('cita_id')}")
-        
+
+        print(f"✅ Ficha encontrada: {ficha.get('_id')} | {ficha.get('tipo_ficha')} | {ficha.get('servicio_nombre')}")
+
         # Preparar datos de la cita para el PDF
         cita_data_for_pdf = {
             "cita_id": cita_id,
             "estado": cita.get("estado", "finalizado"),
             "fecha_finalizacion": cita.get("fecha_finalizacion", datetime.now()),
             "finalizado_por": cita.get("finalizado_por", "Sistema"),
-            # Datos financieros
             "valor_total": cita.get("valor_total", 0),
             "abono": cita.get("abono", 0),
             "saldo_pendiente": cita.get("saldo_pendiente", 0),
@@ -142,24 +130,14 @@ async def generar_pdf_especifico(
             "moneda": cita.get("moneda", "COP"),
             "hora_fin": cita.get("hora_fin", "No especificado"),
         }
-        
-        print("📄 Generando PDF...")
-        print(f"   - Cliente: {cliente.get('nombre')} {cliente.get('apellido', '')}")
-        print(f"   - Servicio: {ficha.get('servicio_nombre')}")
-        print(f"   - Profesional: {ficha.get('profesional_nombre')}")
-        print(f"   - Valor Total: ${cita.get('valor_total', 0):,.0f}")
-        
-        # Generar el PDF usando tu función existente
+
         pdf_bytes = await generar_pdf_ficha(ficha, cita_data_for_pdf)
-        
-        print(f"✅ PDF generado exitosamente ({len(pdf_bytes)} bytes)")
-        
-        # Crear nombre del archivo
+        print(f"✅ PDF generado: {len(pdf_bytes)} bytes")
+
         nombre_cliente = f"{cliente.get('nombre', '').replace(' ', '_')}_{cliente.get('apellido', '').replace(' ', '_')}"
         fecha_actual = datetime.now().strftime("%Y%m%d")
         nombre_archivo = f"comprobante_{nombre_cliente}_{fecha_actual}.pdf"
-        
-        # Retornar el PDF como respuesta
+
         return StreamingResponse(
             BytesIO(pdf_bytes),
             media_type="application/pdf",
@@ -168,7 +146,7 @@ async def generar_pdf_especifico(
                 "Content-Length": str(len(pdf_bytes))
             }
         )
-        
+
     except HTTPException as he:
         print(f"❌ HTTP Exception: {he.detail}")
         raise he
@@ -176,10 +154,7 @@ async def generar_pdf_especifico(
         print(f"❌ Error generando PDF: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error generando PDF: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
 
 # ============================================
 # ✅ Versión alternativa que devuelve JSON + URL - CORREGIDA
