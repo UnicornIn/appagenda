@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader, Plus, Search, ShieldCheck, UserCog } from "lucide-react";
+import { Loader, Pencil, Plus, Search, ShieldCheck, Trash2, UserCog } from "lucide-react";
 import { Sidebar } from "../../../components/Layout/Sidebar";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import type { CreateSystemUserPayload, SystemUser } from "../../../types/system-user";
@@ -12,13 +12,31 @@ import { sedeService } from "../Sedes/sedeService";
 
 const roleBadgeClasses: Record<string, string> = {
   superadmin: "bg-gray-900 text-white",
+  super_admin: "bg-gray-900 text-white",
+  admin: "bg-blue-50 text-blue-700",
   admin_sede: "bg-blue-50 text-blue-700",
+  adminsede: "bg-blue-50 text-blue-700",
+  recepcionista: "bg-amber-50 text-amber-700",
+  recepcionoista: "bg-amber-50 text-amber-700",
+  call_center: "bg-emerald-50 text-emerald-700",
+  callcenter: "bg-emerald-50 text-emerald-700",
+  soporte: "bg-emerald-50 text-emerald-700",
 };
 
 const roleLabels: Record<string, string> = {
   superadmin: "superadmin",
+  super_admin: "superadmin",
+  admin: "adminsede",
   admin_sede: "adminsede",
+  adminsede: "adminsede",
+  recepcionista: "recepcionista",
+  recepcionoista: "recepcionista",
+  call_center: "call center",
+  callcenter: "call center",
+  soporte: "call center",
 };
+
+const normalizeRoleKey = (role: string) => role.trim().toLowerCase().replace(/[\s-]+/g, "_");
 
 export default function SystemUsersPage() {
   const { user, isLoading: authLoading } = useAuth();
@@ -28,8 +46,11 @@ export default function SystemUsersPage() {
   const [sedeNamesById, setSedeNamesById] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"create" | "edit">("create");
+  const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
 
   const isSuperAdmin = useMemo(
     () => user?.role === "superadmin" || user?.role === "super_admin",
@@ -60,7 +81,8 @@ export default function SystemUsersPage() {
     if (!query) return users;
 
     return users.filter((systemUser) => {
-      const roleLabel = (roleLabels[systemUser.role] || systemUser.role).toLowerCase();
+      const roleKey = normalizeRoleKey(systemUser.role);
+      const roleLabel = (roleLabels[roleKey] || systemUser.role).toLowerCase();
       const sedeNombre = getSedeDisplayName(systemUser).toLowerCase();
 
       return (
@@ -136,9 +158,83 @@ export default function SystemUsersPage() {
     try {
       await systemUsersService.createSystemUser(user.access_token, payload);
       await loadSystemUsers();
-      setIsModalOpen(false);
+      closeModal();
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleUpdateSystemUser = async (payload: CreateSystemUserPayload) => {
+    if (!user?.access_token) {
+      throw new Error("No hay token de autenticación disponible");
+    }
+    if (!isSuperAdmin) {
+      throw new Error("No autorizado para editar usuarios del sistema");
+    }
+    if (!editingUser?._id) {
+      throw new Error("No se encontró el usuario a editar");
+    }
+
+    setIsSaving(true);
+    try {
+      await systemUsersService.updateSystemUser(user.access_token, editingUser._id, payload);
+      await loadSystemUsers();
+      closeModal();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const openCreateModal = () => {
+    setModalMode("create");
+    setEditingUser(null);
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = () => {
+    if (!selectedUser) return;
+    setModalMode("edit");
+    setEditingUser(selectedUser);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingUser(null);
+    setModalMode("create");
+  };
+
+  const handleDeleteSystemUser = async () => {
+    if (!selectedUser || !user?.access_token) return;
+    if (!isSuperAdmin) {
+      setError("No autorizado para eliminar usuarios del sistema");
+      return;
+    }
+
+    const isSelfUser = selectedUser.email.trim().toLowerCase() === user.email.trim().toLowerCase();
+    if (isSelfUser) {
+      setError("No puedes eliminar tu propio usuario.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Vas a eliminar el usuario "${selectedUser.nombre}" (${selectedUser.email}). Esta accion no se puede deshacer.`
+    );
+    if (!confirmed) return;
+
+    setError(null);
+    setIsDeleting(true);
+    try {
+      const result = await systemUsersService.deleteSystemUser(user.access_token, selectedUser._id);
+      await loadSystemUsers();
+
+      if (result.softDeleted) {
+        setError("El backend no soporta borrado fisico; el usuario fue desactivado.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo eliminar el usuario del sistema.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -184,7 +280,7 @@ export default function SystemUsersPage() {
 
               {isSuperAdmin && (
                 <button
-                  onClick={() => setIsModalOpen(true)}
+                  onClick={openCreateModal}
                   className="h-8 px-3 text-xs bg-gray-900 text-white rounded hover:bg-gray-800 flex items-center gap-1"
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -231,7 +327,8 @@ export default function SystemUsersPage() {
             )}
 
             {filteredUsers.map((systemUser) => {
-              const badgeClass = roleBadgeClasses[systemUser.role] || "bg-gray-100 text-gray-700";
+              const roleKey = normalizeRoleKey(systemUser.role);
+              const badgeClass = roleBadgeClasses[roleKey] || "bg-gray-100 text-gray-700";
               const isSelected = selectedUserId === systemUser._id;
 
               return (
@@ -250,7 +347,7 @@ export default function SystemUsersPage() {
                       <div className="text-xs text-gray-600 truncate">{systemUser.email}</div>
                     </div>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${badgeClass}`}>
-                      {roleLabels[systemUser.role] || systemUser.role}
+                      {roleLabels[roleKey] || systemUser.role}
                     </span>
                   </div>
                   <div className="mt-2 flex items-center justify-between text-[11px] text-gray-500">
@@ -275,13 +372,44 @@ export default function SystemUsersPage() {
                     <h2 className="text-lg font-semibold text-gray-900">{selectedUser.nombre}</h2>
                     <p className="text-sm text-gray-600">{selectedUser.email}</p>
                   </div>
+                  {isSuperAdmin && (
+                    <div className="ml-auto flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={openEditModal}
+                        className="inline-flex items-center gap-1 rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                        disabled={isDeleting}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDeleteSystemUser}
+                        className="inline-flex items-center gap-1 rounded border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+                        disabled={isDeleting}
+                      >
+                        {isDeleting ? (
+                          <>
+                            <Loader className="h-3.5 w-3.5 animate-spin" />
+                            Eliminando...
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Eliminar
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="text-gray-500 mb-1">Rol</p>
                     <p className="text-gray-900 font-medium">
-                      {roleLabels[selectedUser.role] || selectedUser.role}
+                      {roleLabels[normalizeRoleKey(selectedUser.role)] || selectedUser.role}
                     </p>
                   </div>
                   <div>
@@ -331,8 +459,10 @@ export default function SystemUsersPage() {
 
       <SystemUserFormModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onSave={handleCreateSystemUser}
+        onClose={closeModal}
+        onSave={modalMode === "edit" ? handleUpdateSystemUser : handleCreateSystemUser}
+        mode={modalMode}
+        initialUser={editingUser}
         isSaving={isSaving}
       />
     </div>

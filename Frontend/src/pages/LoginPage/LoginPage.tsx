@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Eye, EyeOff, Mail, Lock, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../components/Auth/AuthContext";
+import { getDefaultRouteForRole } from "../../lib/access-control";
 
 // Importar el logo desde assets
 import RFLogo from "../../assets/RF PNG.png";
@@ -25,29 +26,11 @@ const BeauxLogin: React.FC = () => {
       const success = await login(email, password, rememberMe);
 
       if (success) {
-        // 🔹 Obtener el rol del usuario desde storage
         const storedRole =
           localStorage.getItem("beaux-role") ||
           sessionStorage.getItem("beaux-role");
 
-        // 🔹 Redirigir según el rol
-        switch (storedRole) {
-          case "super_admin":
-            navigate("/superadmin/dashboard");
-            break;
-          case "superadmin":
-            navigate("/superadmin/system-users");
-            break;
-          case "admin_sede":
-            navigate("/sede/dashboard");
-            break;
-          case "estilista":
-            navigate("/stylist/appointments");
-            break;
-          default:
-            navigate("/unauthorized");
-            break;
-        }
+        navigate(getDefaultRouteForRole(storedRole));
       } else {
         setError("Credenciales incorrectas o servidor no disponible.");
       }

@@ -230,12 +230,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         const loginData = await loginResponse.json();
         
+        const resolvedRole =
+          loginData.rol ||
+          loginData.role ||
+          loginData.user_type ||
+          loginData.userRole ||
+          loginData.user?.rol ||
+          loginData.user?.role ||
+          loginData.user?.user_type ||
+          "user";
+
         // 2. Crear objeto de usuario básico
         const userData: User = {
           id: loginData.email || email,
           name: loginData.nombre || loginData.name || email.split('@')[0],
           email: loginData.email || email,
-          role: loginData.rol || "user",
+          role: String(resolvedRole),
           token: loginData.access_token,
           access_token: loginData.access_token,
           sede_id: loginData.sede_id || undefined,

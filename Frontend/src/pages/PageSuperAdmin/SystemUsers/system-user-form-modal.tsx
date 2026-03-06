@@ -5,7 +5,7 @@ import { ChevronDown, ChevronUp, Loader, X } from "lucide-react";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import { sedeService, type Sede } from "../Sedes/sedeService";
 import { serviciosService } from "../Services/serviciosService";
-import type { CreateSystemUserPayload, SystemUserRole } from "../../../types/system-user";
+import type { CreateSystemUserPayload, SystemUser, SystemUserRole } from "../../../types/system-user";
 import { formatSedeNombre } from "../../../lib/sede";
 import type { Service } from "../../../types/service";
 
@@ -13,21 +13,28 @@ interface SystemUserFormModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (payload: CreateSystemUserPayload) => Promise<void>;
+  mode?: "create" | "edit";
+  initialUser?: SystemUser | null;
   isSaving?: boolean;
 }
 
 const ROLE_OPTIONS: Array<{ label: string; value: SystemUserRole }> = [
   { label: "superadmin", value: "superadmin" },
   { label: "adminsede", value: "admin_sede" },
+  { label: "recepcionista", value: "recepcionista" },
+  { label: "call center", value: "call_center" },
 ];
 
 export function SystemUserFormModal({
   isOpen,
   onClose,
   onSave,
+  mode = "create",
+  initialUser = null,
   isSaving = false,
 }: SystemUserFormModalProps) {
   const { user } = useAuth();
+  const isEditMode = mode === "edit";
 
   const [formData, setFormData] = useState({
     nombre: "",
@@ -55,25 +62,39 @@ export function SystemUserFormModal({
           formData.email.trim() &&
           formData.role &&
           formData.sede_id.trim() &&
-          formData.password.trim()
+          (isEditMode || formData.password.trim())
       ),
-    [formData]
+    [formData, isEditMode]
   );
 
   useEffect(() => {
     if (!isOpen) return;
 
-    setFormData({
-      nombre: "",
-      email: "",
-      role: "admin_sede",
-      sede_id: "",
-      especialidades: [],
-      password: "",
-      activo: true,
-    });
+    if (isEditMode && initialUser) {
+      setFormData({
+        nombre: initialUser.nombre || "",
+        email: initialUser.email || "",
+        role: toSystemUserRole(initialUser.role),
+        sede_id: initialUser.sede_id?.trim() || "",
+        especialidades: Array.isArray(initialUser.especialidades)
+          ? initialUser.especialidades.map((esp) => esp.trim()).filter(Boolean)
+          : [],
+        password: "",
+        activo: Boolean(initialUser.activo),
+      });
+    } else {
+      setFormData({
+        nombre: "",
+        email: "",
+        role: "admin_sede",
+        sede_id: "",
+        especialidades: [],
+        password: "",
+        activo: true,
+      });
+    }
     setError(null);
-  }, [isOpen]);
+  }, [isOpen, isEditMode, initialUser]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -90,7 +111,7 @@ export function SystemUserFormModal({
         setSedes(sedesData);
         setServicios(serviciosData);
       } catch (err) {
-        console.error("Error cargando datos para crear usuario del sistema:", err);
+        console.error("Error cargando datos para formulario de usuario del sistema:", err);
       } finally {
         setIsLoadingSedes(false);
         setIsLoadingServicios(false);
@@ -167,12 +188,12 @@ export function SystemUserFormModal({
       return;
     }
 
-    if (!password) {
+    if (!isEditMode && !password) {
       setError("Por favor ingresa una contraseña.");
       return;
     }
 
-    if (password.length < 6) {
+    if (password && password.length < 6) {
       setError("La contraseña debe tener minimo 6 caracteres.");
       return;
     }
@@ -187,14 +208,14 @@ export function SystemUserFormModal({
       role: formData.role,
       sede_id: sedeId,
       especialidades: especialidadesValidas,
-      password,
+      password: password || undefined,
       activo: formData.activo,
     };
 
     try {
       await onSave(payload);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo crear el usuario del sistema.");
+      setError(err instanceof Error ? err.message : "No se pudo guardar el usuario del sistema.");
     }
   };
 
@@ -206,7 +227,9 @@ export function SystemUserFormModal({
           onClick={stopPropagation}
         >
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold">Anadir usuario del sistema</h2>
+            <h2 className="text-xl font-bold">
+              {isEditMode ? "Editar usuario del sistema" : "Anadir usuario del sistema"}
+            </h2>
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-600 disabled:opacity-50"
@@ -373,18 +396,26 @@ export function SystemUserFormModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">Contrasena *</label>
+              <label className="block text-sm font-medium mb-2">
+                {isEditMode ? "Contrasena (opcional)" : "Contrasena *"}
+              </label>
               <input
                 type="password"
                 value={formData.password}
                 onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20"
-                required
-                placeholder="Ingresa una contrasena segura"
+                required={!isEditMode}
+                placeholder={
+                  isEditMode
+                    ? "Dejar vacio para conservar la contrasena actual"
+                    : "Ingresa una contrasena segura"
+                }
                 disabled={isSaving}
                 minLength={6}
               />
-              <p className="text-xs text-gray-500 mt-1">Minimo 6 caracteres</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {isEditMode ? "Solo si deseas cambiarla (minimo 6 caracteres)." : "Minimo 6 caracteres"}
+              </p>
             </div>
 
             <div className="flex items-center gap-2">
@@ -427,7 +458,7 @@ export function SystemUserFormModal({
                     Guardando...
                   </>
                 ) : (
-                  "Crear usuario del sistema"
+                  isEditMode ? "Guardar cambios" : "Crear usuario del sistema"
                 )}
               </button>
             </div>
@@ -437,3 +468,21 @@ export function SystemUserFormModal({
     </div>
   );
 }
+
+const normalizeRole = (role: string) => role.trim().toLowerCase().replace(/[\s-]+/g, "_");
+
+const toSystemUserRole = (role: string): SystemUserRole => {
+  const normalizedRole = normalizeRole(role);
+
+  if (normalizedRole === "super_admin") return "superadmin";
+  if (normalizedRole === "adminsede") return "admin_sede";
+  if (normalizedRole === "callcenter" || normalizedRole === "soporte") return "call_center";
+  if (normalizedRole === "recepcionoista") return "recepcionista";
+
+  if (normalizedRole === "superadmin") return "superadmin";
+  if (normalizedRole === "admin_sede") return "admin_sede";
+  if (normalizedRole === "recepcionista") return "recepcionista";
+  if (normalizedRole === "call_center") return "call_center";
+
+  return "admin_sede";
+};
