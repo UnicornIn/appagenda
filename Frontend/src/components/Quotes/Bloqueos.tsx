@@ -7,14 +7,6 @@ import { formatSedeNombre } from "../../lib/sede";
 import TimeInputWithPicker from "../ui/time-input-with-picker";
 import { formatAgendaTime, normalizeAgendaTimeValue } from "../../lib/agenda";
 
-interface CitaHorario {
-  cita_id?: string;
-  fecha: string;
-  hora_inicio: string;
-  hora_fin: string;
-  estado?: string;
-}
-
 interface BloqueosProps {
   onClose: () => void;
   estilistaId?: string;
@@ -22,7 +14,7 @@ interface BloqueosProps {
   horaInicio?: string;
   compact?: boolean;
   editingBloqueo?: Bloqueo | null;
-  citasExistentes?: CitaHorario[];
+  citasExistentes?: unknown[];
   onBloqueoGuardado?: (bloqueo: Bloqueo, action: "create" | "update") => void;
 }
 
@@ -47,14 +39,6 @@ const toMinutes = (hora: string) => {
   return h * 60 + m;
 };
 
-const ESTADOS_NO_BLOQUEANTES = new Set([
-  "cancelada",
-  "cancelado",
-  "no asistio",
-  "no_asistio",
-  "no asistió",
-]);
-
 const Bloqueos: React.FC<BloqueosProps> = ({
   onClose,
   estilistaId,
@@ -62,7 +46,7 @@ const Bloqueos: React.FC<BloqueosProps> = ({
   horaInicio,
   compact = false,
   editingBloqueo = null,
-  citasExistentes = [],
+  citasExistentes: _citasExistentes = [],
   onBloqueoGuardado,
 }) => {
   const { user } = useAuth();
@@ -370,24 +354,6 @@ const Bloqueos: React.FC<BloqueosProps> = ({
       return;
     }
 
-    const citasDelDia = citasExistentes.filter((cita) => {
-      const estado = (cita.estado || "").toLowerCase().trim();
-      return normalizeFecha(cita.fecha) === formData.fecha && !ESTADOS_NO_BLOQUEANTES.has(estado);
-    });
-
-    const haySolapamiento = citasDelDia.some((cita) => {
-      const citaInicio = toMinutes(cita.hora_inicio);
-      const citaFin = toMinutes(cita.hora_fin);
-
-      if (citaInicio === null || citaFin === null) return false;
-      return inicioMinutos < citaFin && finMinutos > citaInicio;
-    });
-
-    if (haySolapamiento) {
-      setMensaje("❌ No puedes bloquear un horario que se solapa con una cita existente");
-      return;
-    }
-
     if (isEditing && !editingBloqueo?._id) {
       setMensaje("❌ No se encontró el ID del bloqueo a editar");
       return;
@@ -512,7 +478,18 @@ const Bloqueos: React.FC<BloqueosProps> = ({
       setTimeout(onClose, 1200);
     } catch (err: any) {
       console.error("Error guardando bloqueo:", err);
-      setMensaje(`❌ ${err?.message || "Error al guardar el bloqueo"}`);
+      const rawMessage = String(err?.message || "").trim();
+      const lowerMessage = rawMessage.toLowerCase();
+      const isUnauthorized =
+        lowerMessage.includes("no autorizado") ||
+        lowerMessage.includes("forbidden") ||
+        lowerMessage.includes("http 403");
+
+      if (isEditing && isUnauthorized) {
+        setMensaje("❌ No tienes permisos para editar este bloqueo.");
+      } else {
+        setMensaje(`❌ ${rawMessage || "Error al guardar el bloqueo"}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -527,7 +504,6 @@ const Bloqueos: React.FC<BloqueosProps> = ({
     isEditing,
     editingBloqueo,
     onBloqueoGuardado,
-    citasExistentes,
   ]);
 
   // Calcular hora mínima para fin

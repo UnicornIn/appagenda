@@ -774,13 +774,13 @@ const CalendarScheduler: React.FC = () => {
     return startMinutes < slotEndMinutes && endMinutes > slotStartMinutes;
   }, []);
 
-  const getBloqueoEnSlot = useCallback((profesionalId: string, hora: string): BloqueoCalendario | null => {
+  const getBloqueosEnSlot = useCallback((profesionalId: string, hora: string): BloqueoCalendario[] => {
     const [blockHour, blockMin] = hora.split(':').map(Number);
-    if (Number.isNaN(blockHour) || Number.isNaN(blockMin)) return null;
+    if (Number.isNaN(blockHour) || Number.isNaN(blockMin)) return [];
 
     const blockMinutesFrom5AM = (blockHour - START_HOUR) * 60 + blockMin;
 
-    return bloqueos.find((bloqueo) => {
+    return bloqueos.filter((bloqueo) => {
       if (bloqueo.profesional_id !== profesionalId) return false;
 
       const [startHour, startMin] = bloqueo.hora_inicio.split(':').map(Number);
@@ -792,50 +792,29 @@ const CalendarScheduler: React.FC = () => {
       const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
 
       return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
-    }) || null;
+    });
   }, [bloqueos, overlapsSlot]);
 
-  const tieneCitaOBloqueo = useCallback((estilistaNombre: string, hora: string) => {
+  const getCitaEnSlot = useCallback((profesionalId: string, hora: string): Appointment | null => {
     const [blockHour, blockMin] = hora.split(':').map(Number);
+    if (Number.isNaN(blockHour) || Number.isNaN(blockMin)) return null;
+
     const blockMinutesFrom5AM = (blockHour - START_HOUR) * 60 + blockMin;
 
-    const tieneCitaActual = appointments.some(apt => {
-      const estilista = profesionales.find(p => p.name === estilistaNombre);
-      if (!estilista) return false;
-
+    return appointments.find((apt) => {
       const aptProfesionalId = apt.profesional_id || apt.rawData?.profesional_id;
-      const estilistaId = estilista.estilista.profesional_id;
-
-      if (aptProfesionalId !== estilistaId) return false;
+      if (aptProfesionalId !== profesionalId) return false;
 
       const [startHour, startMin] = apt.start.split(':').map(Number);
-      const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
-
       const [endHour, endMin] = apt.end.split(':').map(Number);
-      const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
+      if ([startHour, startMin, endHour, endMin].some(Number.isNaN)) return false;
 
-      return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
-    });
-
-    if (tieneCitaActual) return true;
-
-    const tieneBloqueo = bloqueos.some(bloqueo => {
-      const estilista = profesionales.find(p => p.name === estilistaNombre);
-      if (!estilista) return false;
-
-      if (bloqueo.profesional_id !== estilista.estilista.profesional_id) return false;
-
-      const [startHour, startMin] = bloqueo.hora_inicio.split(':').map(Number);
       const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
-
-      const [endHour, endMin] = bloqueo.hora_fin.split(':').map(Number);
       const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
 
       return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
-    });
-
-    return tieneBloqueo;
-  }, [appointments, profesionales, bloqueos, overlapsSlot]);
+    }) || null;
+  }, [appointments, overlapsSlot]);
 
   // const handleCellHover = useCallback((estilista: EstilistaCompleto, hora: string) => {
   //   setHoveredCell({ estilista, hora });
@@ -1050,15 +1029,48 @@ const CalendarScheduler: React.FC = () => {
     const [showButtons, setShowButtons] = useState(false);
     const cellRef = useRef<HTMLDivElement>(null);
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const profesionalId = prof.estilista.profesional_id;
 
-    const tieneCitaOBloqueoEnEstaHora = tieneCitaOBloqueo(prof.name, hour);
-
-    const bloqueoEnSlot = useMemo(
-      () => getBloqueoEnSlot(prof.estilista.profesional_id, hour),
-      [getBloqueoEnSlot, prof.estilista.profesional_id, hour]
+    const citaEnSlot = useMemo(
+      () => getCitaEnSlot(profesionalId, hour),
+      [getCitaEnSlot, profesionalId, hour]
     );
+    const bloqueosEnSlot = useMemo(
+      () => getBloqueosEnSlot(profesionalId, hour),
+      [getBloqueosEnSlot, profesionalId, hour]
+    );
+    const tieneCitaEnEstaHora = Boolean(citaEnSlot);
+    const tieneBloqueoEnEstaHora = bloqueosEnSlot.length > 0;
+    const primerBloqueo = bloqueosEnSlot[0] || null;
+    const userEmail = user?.email?.toLowerCase().trim() || "";
+    const userId = user?.id?.toLowerCase().trim() || "";
+    const bloqueoEditable = useMemo(() => {
+      if (!bloqueosEnSlot.length) return null;
+      if (user?.role === "super_admin") return bloqueosEnSlot[0];
 
-    const esBloqueo = Boolean(bloqueoEnSlot);
+      const editablePorAutor = bloqueosEnSlot.find((bloqueo) => {
+        const creadoPor = (bloqueo.creado_por || "").toLowerCase().trim();
+        if (!creadoPor) return false;
+        return creadoPor === userEmail || creadoPor === userId;
+      });
+
+      if (editablePorAutor) return editablePorAutor;
+
+      // Compatibilidad con bloqueos antiguos sin trazabilidad de autor.
+      const hayInfoDeAutor = bloqueosEnSlot.some((bloqueo) => Boolean((bloqueo.creado_por || "").trim()));
+      return hayInfoDeAutor ? null : bloqueosEnSlot[0];
+    }, [bloqueosEnSlot, user?.role, userEmail, userId]);
+    const bloqueosExtra = Math.max(bloqueosEnSlot.length - 1, 0);
+    const motivoPrincipal = primerBloqueo?.motivo?.trim() || "Bloqueo de agenda";
+    const detalleBloqueosTooltip = useMemo(() => {
+      if (!bloqueosEnSlot.length) return "";
+      return bloqueosEnSlot
+        .map((bloqueo, index) => {
+          const motivo = bloqueo.motivo?.trim() || "Bloqueo de agenda";
+          return `${index + 1}. ${motivo} (${bloqueo.hora_inicio}-${bloqueo.hora_fin})`;
+        })
+        .join('\n');
+    }, [bloqueosEnSlot]);
 
     // Limpiar timeout cuando el componente se desmonta
     useEffect(() => {
@@ -1070,39 +1082,15 @@ const CalendarScheduler: React.FC = () => {
     const handleCellClick = useCallback((e: React.MouseEvent) => {
       e.stopPropagation();
 
-      if (tieneCitaOBloqueoEnEstaHora) {
-        if (esBloqueo) {
-          openBloqueoModal(prof.estilista, hour, bloqueoEnSlot);
-          setShowButtons(false);
-          return;
-        }
-
-        if (!esBloqueo) {
-          const citaEnHora = appointments.find(apt => {
-            const aptProfesionalId = apt.profesional_id || apt.rawData?.profesional_id;
-            if (aptProfesionalId !== prof.estilista.profesional_id) return false;
-
-            const [startHour, startMin] = apt.start.split(':').map(Number);
-            const [endHour, endMin] = apt.end.split(':').map(Number);
-            const [blockHour, blockMin] = hour.split(':').map(Number);
-
-            const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
-            const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
-            const blockMinutesFrom5AM = (blockHour - START_HOUR) * 60 + blockMin;
-
-            return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
-          });
-
-          if (citaEnHora) {
-            handleCitaClick(citaEnHora);
-          }
-        }
-      } else {
-        // Mostrar botones al hacer clic
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        setShowButtons(true);
+      if (tieneCitaEnEstaHora && citaEnSlot) {
+        handleCitaClick(citaEnSlot);
+        setShowButtons(false);
+        return;
       }
-    }, [tieneCitaOBloqueoEnEstaHora, esBloqueo, appointments, prof.estilista.profesional_id, hour, handleCitaClick, overlapsSlot, openBloqueoModal, bloqueoEnSlot, prof.estilista]);
+
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      setShowButtons(true);
+    }, [tieneCitaEnEstaHora, citaEnSlot, handleCitaClick]);
 
     const handleReservarClick = useCallback((e: React.MouseEvent) => {
       e.stopPropagation();
@@ -1118,6 +1106,14 @@ const CalendarScheduler: React.FC = () => {
       openBloqueoModal(prof.estilista, hour);
       setShowButtons(false);
     }, [prof.estilista, hour, openBloqueoModal]);
+
+    const handleEditarBloqueoClick = useCallback((e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!bloqueoEditable) return;
+      openBloqueoModal(prof.estilista, hour, bloqueoEditable);
+      setShowButtons(false);
+    }, [bloqueoEditable, prof.estilista, hour, openBloqueoModal]);
 
     // Ocultar botones después de tiempo
     useEffect(() => {
@@ -1137,11 +1133,11 @@ const CalendarScheduler: React.FC = () => {
       // Limpiar timeout de ocultar
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
 
-      // Solo mostrar botones al hover si la celda está vacía
-      if (!tieneCitaOBloqueoEnEstaHora) {
+      // Mantener visible el detalle del bloqueo en hover; controles solo en celdas libres
+      if (!tieneCitaEnEstaHora && !tieneBloqueoEnEstaHora) {
         setShowButtons(true);
       }
-    }, [tieneCitaOBloqueoEnEstaHora]);
+    }, [tieneCitaEnEstaHora, tieneBloqueoEnEstaHora]);
 
     const handleMouseLeave = useCallback(() => {
       // Ocultar inmediatamente cuando el mouse sale
@@ -1166,28 +1162,41 @@ const CalendarScheduler: React.FC = () => {
         onClick={handleCellClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={`border-l border-gray-100 relative transition-all duration-150 ${tieneCitaOBloqueoEnEstaHora
-          ? esBloqueo
-            ? 'bg-gray-100/40 hover:bg-gray-200/50 border-gray-300 cursor-pointer'
+        className={`border-l border-gray-100 relative transition-all duration-150 ${tieneCitaEnEstaHora || tieneBloqueoEnEstaHora
+          ? tieneBloqueoEnEstaHora && !tieneCitaEnEstaHora
+            ? 'bg-red-50/30 hover:bg-red-50/50 border-red-100 cursor-pointer'
             : 'bg-white/30 hover:bg-gray-100/50 border-gray-200 cursor-pointer'
           : 'bg-white hover:bg-gray-50 hover:shadow-sm cursor-pointer'
           }`}
         style={{ width: `${CELL_WIDTH}px`, height: `${CELL_HEIGHT}px` }}
       >
-        {tieneCitaOBloqueoEnEstaHora && (
-          <div className={`absolute inset-0.5 rounded-md border flex items-center justify-center ${esBloqueo
-            ? 'bg-gradient-to-r from-gray-100/50 to-gray-200/40 border-gray-300/60'
-            : 'bg-white/40 border-gray-200/60'
-            }`}>
-            <div className={`text-[10px] font-semibold ${esBloqueo ? 'text-gray-700 opacity-70' : 'text-gray-600 opacity-70'
-              }`}>
-              {esBloqueo ? '🔒' : '●'}
+        {tieneBloqueoEnEstaHora && !tieneCitaEnEstaHora && primerBloqueo && (
+          <div
+            className="absolute inset-0.5 rounded-md border border-red-200 bg-red-50/90 px-1 py-0.5 overflow-hidden"
+            title={detalleBloqueosTooltip}
+          >
+            <div className="text-[8px] leading-[9px] font-bold uppercase tracking-wide text-red-700 truncate">
+              Bloqueado
             </div>
+            <div className="text-[8px] leading-[9px] text-red-900 truncate" title={motivoPrincipal}>
+              Motivo: {motivoPrincipal}
+            </div>
+            <div className="text-[8px] leading-[9px] text-red-800 truncate">
+              {primerBloqueo.hora_inicio} - {primerBloqueo.hora_fin}
+            </div>
+            <div className="text-[8px] leading-[9px] text-red-700 truncate">
+              Prof: {prof.name}
+            </div>
+            {bloqueosExtra > 0 && (
+              <span className="absolute top-0.5 right-0.5 rounded bg-red-200 px-1 py-[1px] text-[8px] font-semibold text-red-800">
+                +{bloqueosExtra}
+              </span>
+            )}
           </div>
         )}
 
         {/* BOTONES DE RESERVAR Y BLOQUEAR */}
-        {!tieneCitaOBloqueoEnEstaHora && showButtons && (
+        {!tieneCitaEnEstaHora && showButtons && (
           <div
             className="absolute inset-0 flex items-center justify-center z-[50]"
             onMouseEnter={handleButtonContainerMouseEnter}
@@ -1197,13 +1206,15 @@ const CalendarScheduler: React.FC = () => {
               className="flex gap-0.5 bg-white/95 backdrop-blur-sm rounded-md p-0.5 shadow-lg border border-gray-300 animate-fadeIn"
               onClick={(e) => e.stopPropagation()}
             >
-              <button
-                onClick={handleReservarClick}
-                className="group flex items-center justify-center gap-0.5 bg-white text-gray-900 hover:bg-gray-900 hover:text-white active:bg-gray-800 active:text-white border border-gray-300 hover:border-gray-900 px-1.5 py-0.5 rounded text-[10px] font-medium min-w-[50px] transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer focus:outline-none focus:ring-1 focus:ring-gray-900"
-              >
-                <Plus className="w-2.5 h-2.5 transition-colors" />
-                Reservar
-              </button>
+              {!tieneBloqueoEnEstaHora && (
+                <button
+                  onClick={handleReservarClick}
+                  className="group flex items-center justify-center gap-0.5 bg-white text-gray-900 hover:bg-gray-900 hover:text-white active:bg-gray-800 active:text-white border border-gray-300 hover:border-gray-900 px-1.5 py-0.5 rounded text-[10px] font-medium min-w-[50px] transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer focus:outline-none focus:ring-1 focus:ring-gray-900"
+                >
+                  <Plus className="w-2.5 h-2.5 transition-colors" />
+                  Reservar
+                </button>
+              )}
 
               <button
                 onClick={handleBloquearClick}
@@ -1212,6 +1223,15 @@ const CalendarScheduler: React.FC = () => {
                 <X className="w-2.5 h-2.5 transition-colors" />
                 Bloquear
               </button>
+
+              {tieneBloqueoEnEstaHora && bloqueoEditable && (
+                <button
+                  onClick={handleEditarBloqueoClick}
+                  className="group flex items-center justify-center gap-0.5 bg-white text-gray-900 hover:bg-gray-900 hover:text-white active:bg-gray-800 active:text-white border border-gray-300 hover:border-gray-900 px-1.5 py-0.5 rounded text-[10px] font-medium min-w-[50px] transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer focus:outline-none focus:ring-1 focus:ring-gray-900"
+                >
+                  Editar
+                </button>
+              )}
             </div>
           </div>
         )}
