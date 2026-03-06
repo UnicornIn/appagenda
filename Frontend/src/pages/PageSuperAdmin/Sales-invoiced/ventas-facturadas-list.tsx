@@ -6,11 +6,14 @@ import {
   Download,
   Loader2,
   Building,
+  Calendar,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react"
+import { Button } from "../../../components/ui/button"
+import { Input } from "../../../components/ui/input"
 import { FacturaDetailModal } from "./factura-detail-modal"
 import { PageHeader } from "../../../components/Layout/PageHeader"
 import type { Factura } from "../../../types/factura"
@@ -32,12 +35,23 @@ const toIsoLocalDate = (date: Date) => {
   return `${year}-${month}-${day}`
 }
 
+type FacturaFilters = {
+  searchTerm: string
+  fecha_desde: string
+  fecha_hasta: string
+}
+
+const EMPTY_FACTURA_FILTERS: FacturaFilters = {
+  searchTerm: "",
+  fecha_desde: "",
+  fecha_hasta: "",
+}
+
 export function VentasFacturadasList() {
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedSede, setSelectedSede] = useState("")
-  const [selectedEstado, setSelectedEstado] = useState("all")
-  const [fechaDesde] = useState(() => toIsoLocalDate(new Date()))
-  const [fechaHasta] = useState(() => toIsoLocalDate(new Date()))
+  const [fechaDesde, setFechaDesde] = useState("")
+  const [fechaHasta, setFechaHasta] = useState("")
   const [selectedFactura, setSelectedFactura] = useState<Factura | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [facturas, setFacturas] = useState<Factura[]>([])
@@ -47,9 +61,10 @@ export function VentasFacturadasList() {
   const [sedes, setSedes] = useState<Sede[]>([])
   const [sedeIdMap, setSedeIdMap] = useState<Record<string, string>>({}) // Mapa de _id a sede_id
   const [pagination, setPagination] = useState<any>(null)
+  const [filtersApplied, setFiltersApplied] = useState<any>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [limit] = useState(50)
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
+  const [appliedFilters, setAppliedFilters] = useState<FacturaFilters>(EMPTY_FACTURA_FILTERS)
   const [paymentSummary, setPaymentSummary] = useState<PaymentMethodTotals | null>(null)
 
   // Cargar sedes disponibles
@@ -57,24 +72,29 @@ export function VentasFacturadasList() {
     cargarSedes()
   }, [])
 
-  // Aplicar debounce al término de búsqueda para no disparar requests por tecla
+  // Inicializar filtros al seleccionar sede
   useEffect(() => {
-    const timeout = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm.trim())
-    }, 300)
-    return () => clearTimeout(timeout)
-  }, [searchTerm])
+    if (selectedSede) {
+      const today = toIsoLocalDate(new Date())
+      const initialFilters: FacturaFilters = {
+        ...EMPTY_FACTURA_FILTERS,
+        fecha_desde: today,
+        fecha_hasta: today,
+      }
 
-  // Cargar facturas cuando se selecciona una sede o cambia la búsqueda
-  useEffect(() => {
-    if (selectedSede && sedeIdMap[selectedSede]) {
-      cargarFacturas(1)
+      setSearchTerm("")
+      setFechaDesde(today)
+      setFechaHasta(today)
+      setAppliedFilters(initialFilters)
+      cargarFacturas(1, initialFilters)
     } else {
       setFacturas([])
       setPagination(null)
+      setFiltersApplied(null)
+      setAppliedFilters(EMPTY_FACTURA_FILTERS)
       setPaymentSummary(null)
     }
-  }, [selectedSede, sedeIdMap, debouncedSearchTerm, fechaDesde, fechaHasta])
+  }, [selectedSede, sedeIdMap])
 
   const cargarSedes = async () => {
     try {
@@ -96,17 +116,6 @@ export function VentasFacturadasList() {
       })
       setSedeIdMap(idMap)
 
-      // Seleccionar sede por defecto al entrar para cargar estadisticas de hoy.
-      setSelectedSede((actual) => {
-        if (actual && idMap[actual]) return actual
-
-        const sedeSesionId = sessionStorage.getItem("beaux-sede_id") || ""
-        const sedeSesion = sedesData.find((sede) => sede.sede_id === sedeSesionId)?._id || ""
-        if (sedeSesion && idMap[sedeSesion]) return sedeSesion
-
-        const primeraSedeId = sedesData[0]?._id || ""
-        return primeraSedeId && idMap[primeraSedeId] ? primeraSedeId : ""
-      })
     } catch (err) {
       console.error("Error cargando sedes:", err)
       setError("Error al cargar las sedes disponibles")
@@ -115,27 +124,49 @@ export function VentasFacturadasList() {
     }
   }
 
-  const cargarFacturas = async (page: number = 1) => {
+  const cargarFacturas = async (page: number = 1, filtros: FacturaFilters = appliedFilters) => {
     try {
       setIsLoading(true)
       setError(null)
 
-      // Usar el sede_id correcto (SD-XXXXX)
-      const sedeId = sedeIdMap[selectedSede]
-      if (!sedeId) {
+      const primarySedeId = sedeIdMap[selectedSede] || selectedSede
+      const secondarySedeId =
+        sedeIdMap[selectedSede] && sedeIdMap[selectedSede] !== selectedSede
+          ? selectedSede
+          : ""
+
+      if (!primarySedeId) {
         throw new Error("ID de sede no válido")
       }
-      
-      console.log("Cargando facturas para sede:", sedeId)
-      
-      // Usar el servicio existente con paginación backend
-      const result = await facturaService.getVentasBySedePaginadas(sedeId, {
+
+      console.log("Cargando facturas para sede:", primarySedeId)
+
+      let result = await facturaService.getVentasBySedePaginadas(primarySedeId, {
         page,
         limit,
-        fecha_desde: fechaDesde,
-        fecha_hasta: fechaHasta,
-        search: debouncedSearchTerm || undefined,
+        fecha_desde: filtros.fecha_desde,
+        fecha_hasta: filtros.fecha_hasta,
+        search: filtros.searchTerm || undefined,
       })
+
+      // Compatibilidad: algunos entornos aceptan _id y otros sede_id en el path.
+      if (result.facturas.length === 0 && secondarySedeId) {
+        try {
+          const fallbackResult = await facturaService.getVentasBySedePaginadas(secondarySedeId, {
+            page,
+            limit,
+            fecha_desde: filtros.fecha_desde,
+            fecha_hasta: filtros.fecha_hasta,
+            search: filtros.searchTerm || undefined,
+          })
+
+          if (fallbackResult.facturas.length > 0) {
+            result = fallbackResult
+          }
+        } catch (fallbackError) {
+          console.warn("Fallback de sede con _id falló, se mantiene resultado principal:", fallbackError)
+        }
+      }
       
       console.log("Facturas cargadas:", result.facturas.length)
       
@@ -143,6 +174,12 @@ export function VentasFacturadasList() {
       setFacturas(result.facturas as Factura[])
       setPagination(result.pagination || null)
       setPaymentSummary(result.paymentSummary || null)
+      setFiltersApplied({
+        ...(result.filters_applied || {}),
+        fecha_desde: filtros.fecha_desde || null,
+        fecha_hasta: filtros.fecha_hasta || null,
+        search: filtros.searchTerm || null,
+      })
       setCurrentPage(page)
       
     } catch (err: any) {
@@ -156,19 +193,40 @@ export function VentasFacturadasList() {
     }
   }
 
-  // Filtrar facturas basado en los criterios
-  const facturasFiltradas = facturas.filter(factura => {
-    // Filtro por estado
-    if (selectedEstado !== "all" && factura.estado !== selectedEstado) {
-      return false
+  const aplicarFiltros = async () => {
+    const filtros: FacturaFilters = {
+      searchTerm: searchTerm.trim(),
+      fecha_desde: fechaDesde,
+      fecha_hasta: fechaHasta,
     }
-    
-    return true
-  })
+    setAppliedFilters(filtros)
+    await cargarFacturas(1, filtros)
+  }
+
+  const limpiarFiltros = () => {
+    setSearchTerm("")
+    setFechaDesde("")
+    setFechaHasta("")
+    setAppliedFilters(EMPTY_FACTURA_FILTERS)
+    cargarFacturas(1, EMPTY_FACTURA_FILTERS)
+  }
+
+  const filtrarHoy = () => {
+    const today = toIsoLocalDate(new Date())
+    setFechaDesde(today)
+    setFechaHasta(today)
+  }
+
+  const filtrarUltimoMes = () => {
+    const date = new Date()
+    date.setDate(date.getDate() - 30)
+    setFechaDesde(toIsoLocalDate(date))
+    setFechaHasta(toIsoLocalDate(new Date()))
+  }
 
   const irAPagina = (pagina: number) => {
     if (pagina >= 1 && pagina <= (pagination?.total_pages || 1)) {
-      cargarFacturas(pagina)
+      cargarFacturas(pagina, appliedFilters)
     }
   }
 
@@ -207,7 +265,7 @@ export function VentasFacturadasList() {
     return `${safeCurrency} ${Math.round(safeAmount).toLocaleString(getCurrencyLocale(safeCurrency))}`
   }
 
-  const summaryCurrency = (facturasFiltradas[0]?.moneda || facturas[0]?.moneda || "COP").toUpperCase()
+  const summaryCurrency = (facturas[0]?.moneda || "COP").toUpperCase()
 
   const formatSummaryCurrency = (amount: number) => {
     const safeAmount = Number.isFinite(amount) ? amount : 0
@@ -219,17 +277,14 @@ export function VentasFacturadasList() {
     "Sede seleccionada"
   )
 
-  const shouldUseBackendPaymentSummary =
-    selectedEstado === "all" && Boolean(paymentSummary)
-
   const paymentTotals = useMemo(() => {
-    if (shouldUseBackendPaymentSummary && paymentSummary) {
+    if (paymentSummary) {
       return paymentSummary
     }
 
     // TODO: Sin agregados del backend para este filtro, estos totales reflejan las filas cargadas en la página actual.
-    return calculatePaymentMethodTotals(facturasFiltradas)
-  }, [shouldUseBackendPaymentSummary, paymentSummary, facturasFiltradas])
+    return calculatePaymentMethodTotals(facturas)
+  }, [paymentSummary, facturas])
 
   const handleExportCSV = () => {
     try {
@@ -246,7 +301,7 @@ export function VentasFacturadasList() {
       ]
       
       // Crear filas de datos
-      const rows = facturasFiltradas.map(factura => [
+      const rows = facturas.map(factura => [
         formatDate(factura.fecha_pago),
         factura.nombre_cliente,
         factura.local,
@@ -298,7 +353,7 @@ export function VentasFacturadasList() {
               : "Selecciona una sede para ver las facturas"
           }
           actions={
-            selectedSede && facturasFiltradas.length > 0 ? (
+            selectedSede && facturas.length > 0 ? (
               <button
                 onClick={handleExportCSV}
                 className="flex items-center gap-1 px-3 py-1.5 text-sm border border-black hover:bg-gray-50"
@@ -345,29 +400,145 @@ export function VentasFacturadasList() {
         {/* Filtros (solo mostrar si hay sede seleccionada) */}
         {selectedSede && (
           <>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Buscar facturas..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="h-9 w-full border pl-8 pr-3 text-sm focus:border-gray-400 focus:outline-none"
-                  disabled={isLoading}
-                />
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-4">
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-xs font-medium text-gray-700">
+                    Buscar cliente/comprobante
+                  </label>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      placeholder="Nombre, cédula, email o número de comprobante..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="h-9 pl-8 text-sm"
+                      disabled={isLoading}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">
+                    Fecha desde
+                  </label>
+                  <div className="relative">
+                    <Input
+                      type="text"
+                      value={formatDateDMY(fechaDesde, "")}
+                      readOnly
+                      placeholder="DD-MM-YYYY"
+                      className="h-9 pl-8 text-sm"
+                      disabled={isLoading}
+                    />
+                    <Calendar className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      type="date"
+                      value={fechaDesde}
+                      onChange={(e) => setFechaDesde(e.target.value)}
+                      className="absolute inset-0 h-9 w-full cursor-pointer opacity-0"
+                      disabled={isLoading}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-700">
+                    Fecha hasta
+                  </label>
+                  <div className="relative">
+                    <Input
+                      type="text"
+                      value={formatDateDMY(fechaHasta, "")}
+                      readOnly
+                      placeholder="DD-MM-YYYY"
+                      className="h-9 pl-8 text-sm"
+                      disabled={isLoading}
+                    />
+                    <Calendar className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      type="date"
+                      value={fechaHasta}
+                      onChange={(e) => setFechaHasta(e.target.value)}
+                      className="absolute inset-0 h-9 w-full cursor-pointer opacity-0"
+                      disabled={isLoading}
+                    />
+                  </div>
+                </div>
               </div>
-              
-              <select
-                value={selectedEstado}
-                onChange={(e) => setSelectedEstado(e.target.value)}
-                className="h-9 min-w-[180px] border px-3 text-sm focus:border-gray-400 focus:outline-none"
-                disabled={isLoading}
-              >
-                <option value="all">Todos los estados</option>
-                <option value="pagado">Pagado</option>
-                <option value="pendiente">Pendiente</option>
-              </select>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={filtrarHoy}
+                    disabled={isLoading}
+                    className="h-9 px-3 text-xs"
+                  >
+                    Hoy
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={filtrarUltimoMes}
+                    disabled={isLoading}
+                    className="h-9 px-3 text-xs"
+                  >
+                    Últimos 30 días
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={limpiarFiltros}
+                    disabled={isLoading}
+                    className="h-9 px-3 text-xs"
+                  >
+                    Limpiar filtros
+                  </Button>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="default"
+                    onClick={aplicarFiltros}
+                    disabled={isLoading}
+                    className="h-9 bg-gray-900 px-3 text-xs text-white hover:bg-gray-800"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        Aplicando...
+                      </>
+                    ) : (
+                      "Aplicar filtros"
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {filtersApplied && (filtersApplied.fecha_desde || filtersApplied.fecha_hasta || filtersApplied.search) && (
+                <div className="mt-4 rounded-lg border border-gray-300 bg-gray-50 p-3">
+                  <p className="mb-1 text-sm font-medium text-gray-900">Filtros aplicados:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {filtersApplied.fecha_desde && (
+                      <span className="inline-flex items-center rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-800">
+                        Desde: {formatDate(filtersApplied.fecha_desde)}
+                      </span>
+                    )}
+                    {filtersApplied.fecha_hasta && (
+                      <span className="inline-flex items-center rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-800">
+                        Hasta: {formatDate(filtersApplied.fecha_hasta)}
+                      </span>
+                    )}
+                    {filtersApplied.search && (
+                      <span className="inline-flex items-center rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-800">
+                        Búsqueda: "{filtersApplied.search}"
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <PaymentMethodsSummary
@@ -385,62 +556,64 @@ export function VentasFacturadasList() {
             )}
 
             {error && !isLoading && (
-              <div className="p-3 border border-red-300 bg-red-50">
-                <p className="text-sm text-red-800">{error}</p>
-                <button 
-                  onClick={() => cargarFacturas(currentPage)}
-                  className="mt-2 text-sm underline"
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-red-700">{error}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => cargarFacturas(currentPage, appliedFilters)}
                 >
                   Reintentar
-                </button>
+                </Button>
               </div>
             )}
 
             {/* Tabla */}
             {!isLoading && !error && (
-              <div className="border">
+              <div className="rounded-lg border bg-white">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b">
+                  <table className="w-full">
+                    <thead className="border-b bg-gray-50">
                       <tr>
-                        <th className="px-4 py-2 text-left">Fecha pago</th>
-                        <th className="px-4 py-2 text-left">Cliente</th>
-                        <th className="px-4 py-2 text-left">Profesional</th>
-                        <th className="px-4 py-2 text-left">Comprobante</th>
-                        <th className="px-4 py-2 text-left">Método</th>
-                        <th className="px-4 py-2 text-left">Total</th>
-                        <th className="px-4 py-2 text-left">Estado</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Fecha pago</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Cliente</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Local</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Profesional</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">N° Comprobante</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Método pago</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Total</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Estado</th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {facturasFiltradas.length === 0 ? (
+                    <tbody className="divide-y">
+                      {facturas.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                            {debouncedSearchTerm || selectedEstado !== "all"
-                              ? "No se encontraron facturas con los filtros aplicados"
-                              : "No hay facturas registradas en esta sede"}
+                          <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                            No se encontraron facturas con los filtros aplicados.
                           </td>
                         </tr>
                       ) : (
-                        facturasFiltradas.map((factura) => (
+                        facturas.map((factura) => (
                           <tr
-                            key={factura.identificador}
+                            key={`${factura.identificador}-${factura.fecha_pago}`}
                             onClick={() => handleRowClick(factura)}
-                            className="cursor-pointer hover:bg-gray-50 border-b"
+                            className="cursor-pointer transition-colors hover:bg-gray-50"
                           >
-                            <td className="px-4 py-2 text-gray-700">{formatDate(factura.fecha_pago)}</td>
-                            <td className="px-4 py-2 text-gray-700">{factura.nombre_cliente}</td>
-                            <td className="px-4 py-2 text-gray-700">{factura.profesional_nombre}</td>
-                            <td className="px-4 py-2 text-gray-700">{factura.numero_comprobante}</td>
-                            <td className="px-4 py-2 text-gray-700 capitalize">{factura.metodo_pago}</td>
-                            <td className="px-4 py-2 font-medium">
+                            <td className="px-6 py-4 text-sm text-gray-700">{formatDate(factura.fecha_pago)}</td>
+                            <td className="px-6 py-4 text-sm text-gray-700">{factura.nombre_cliente}</td>
+                            <td className="px-6 py-4 text-sm text-gray-700">{factura.local}</td>
+                            <td className="px-6 py-4 text-sm text-gray-700">{factura.profesional_nombre}</td>
+                            <td className="px-6 py-4 text-sm text-gray-700">{factura.numero_comprobante}</td>
+                            <td className="px-6 py-4 text-sm text-gray-700 capitalize">{factura.metodo_pago}</td>
+                            <td className="px-6 py-4 text-sm font-semibold text-gray-900">
                               {formatCurrency(factura.total, factura.moneda)}
                             </td>
-                            <td className="px-4 py-2">
-                              <span className={`text-xs px-2 py-0.5 ${
+                            <td className="px-6 py-4">
+                              <span className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${
                                 factura.estado === "pagado" 
-                                  ? "bg-gray-100" 
-                                  : "bg-gray-200"
+                                  ? "bg-green-100 text-green-800" 
+                                  : "bg-yellow-100 text-yellow-800"
                               }`}>
                                 {factura.estado}
                               </span>
@@ -455,11 +628,18 @@ export function VentasFacturadasList() {
             )}
 
             {/* Resumen */}
-            {!isLoading && !error && facturasFiltradas.length > 0 && (
-              <div className="text-sm text-gray-600">
+            {!isLoading && !error && facturas.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-600">
                 {pagination
                   ? `Mostrando ${pagination.from} a ${pagination.to} de ${pagination.total} facturas`
-                  : `Mostrando ${facturasFiltradas.length} de ${facturas.length} facturas`}
+                  : `Mostrando ${facturas.length} facturas`}
+
+                {(appliedFilters.fecha_desde || appliedFilters.fecha_hasta) && (
+                  <div className="text-sm text-gray-500">
+                    {appliedFilters.fecha_desde && `Desde: ${formatDate(appliedFilters.fecha_desde)} `}
+                    {appliedFilters.fecha_hasta && `Hasta: ${formatDate(appliedFilters.fecha_hasta)}`}
+                  </div>
+                )}
               </div>
             )}
 

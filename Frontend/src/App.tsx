@@ -186,7 +186,7 @@ function App() {
             <Route
               path="/superadmin/cierre-caja"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]} allowedCurrencies={["COP", "USD"]}>
+                <PrivateRoute allowedRoles={["super_admin"]}>
                   <CierreCajaPage />
                 </PrivateRoute>
               }
@@ -221,7 +221,7 @@ function App() {
             <Route
               path="/sede/cierre-caja"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]} allowedCurrencies={["COP", "USD"]}>
+                <PrivateRoute allowedRoles={["admin_sede"]}>
                   <CierreCajaPage />
                 </PrivateRoute>
               }

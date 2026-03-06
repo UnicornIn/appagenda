@@ -20,6 +20,7 @@ import { cashService, getEfectivoDia } from "./api/cashService";
 import type { CashCierre, CashEgreso, CashIngreso, CashResumen, CashReporteRaw } from "./types";
 import { formatDateDMY } from "../../../lib/dateFormat";
 import { toast } from "../../../hooks/use-toast";
+import { useAuth } from "../../../components/Auth/AuthContext";
 
 const toLocalDateString = (date: Date) => {
   const year = date.getFullYear();
@@ -80,10 +81,9 @@ const toTimestamp = (value?: string) => {
   const fallbackParsed = Date.parse(normalized);
   return Number.isNaN(fallbackParsed) ? 0 : fallbackParsed;
 };
-const getSessionToken = () =>
-  sessionStorage.getItem("access_token") || localStorage.getItem("access_token") || "";
 
 export default function CierreCajaPage() {
+  const { user } = useAuth();
   const [moneda, setMoneda] = useState("COP");
   const [sedeId, setSedeId] = useState<string | null>(null);
   const [sedeNombre, setSedeNombre] = useState<string | null>(null);
@@ -138,19 +138,29 @@ export default function CierreCajaPage() {
   // // const [aperturaFecha, setAperturaFecha] = useState(getToday());
 
   useEffect(() => {
-    const sedeStorage =
-      sessionStorage.getItem("beaux-sede_id") || localStorage.getItem("beaux-sede_id");
-    const sedeNombreStorage =
-      sessionStorage.getItem("beaux-nombre_local") || localStorage.getItem("beaux-nombre_local");
-    const monedaStorage =
-      sessionStorage.getItem("beaux-moneda") || localStorage.getItem("beaux-moneda");
+    const resolvedSedeId = String(
+      user?.sede_id ||
+        sessionStorage.getItem("beaux-sede_id") ||
+        localStorage.getItem("beaux-sede_id") ||
+        ""
+    ).trim();
+    const resolvedSedeNombre = String(
+      user?.nombre_local ||
+        sessionStorage.getItem("beaux-nombre_local") ||
+        localStorage.getItem("beaux-nombre_local") ||
+        ""
+    ).trim();
+    const resolvedMoneda = String(
+      user?.moneda ||
+        sessionStorage.getItem("beaux-moneda") ||
+        localStorage.getItem("beaux-moneda") ||
+        "COP"
+    ).trim();
 
-    setSedeId(sedeStorage);
-    setSedeNombre(sedeNombreStorage);
-    if (monedaStorage) {
-      setMoneda(monedaStorage.toUpperCase());
-    }
-  }, []);
+    setSedeId(resolvedSedeId || null);
+    setSedeNombre(resolvedSedeNombre || null);
+    setMoneda((resolvedMoneda || "COP").toUpperCase());
+  }, [user?.sede_id, user?.nombre_local, user?.moneda]);
 
   const ingresosManualesTotal = useMemo(() => {
     return ingresos.reduce((sum, ingreso) => sum + (ingreso.monto || 0), 0);
@@ -312,9 +322,44 @@ export default function CierreCajaPage() {
 
   const normalizeEfectivoEnCaja = (data: any): number => {
     const root = unwrapData(data) || {};
+    const dataNode = unwrapData(root?.data) || root?.data;
+    const resultNode = unwrapData(root?.result) || root?.result;
+    const resumenNode = unwrapData(root?.resumen) || root?.resumen;
+    const efectivoCalculado =
+      toNumber(root?.efectivo_inicial) +
+      toNumber(root?.ingresos_efectivo?.total) -
+      toNumber(root?.egresos?.total);
+
     const efectivo =
-      pickNumber(root, ["efectivo", "efectivo_esperado", "efectivo_total", "saldo"]) ??
-      pickNumber(root?.resumen, ["efectivo", "efectivo_esperado", "saldo"]) ??
+      pickNumber(root, [
+        "efectivo",
+        "efectivo_esperado",
+        "efectivo_total",
+        "efectivo_en_caja",
+        "saldo",
+      ]) ??
+      pickNumber(resumenNode, [
+        "efectivo",
+        "efectivo_esperado",
+        "efectivo_total",
+        "efectivo_en_caja",
+        "saldo",
+      ]) ??
+      pickNumber(dataNode, [
+        "efectivo",
+        "efectivo_esperado",
+        "efectivo_total",
+        "efectivo_en_caja",
+        "saldo",
+      ]) ??
+      pickNumber(resultNode, [
+        "efectivo",
+        "efectivo_esperado",
+        "efectivo_total",
+        "efectivo_en_caja",
+        "saldo",
+      ]) ??
+      efectivoCalculado ??
       0;
 
     return toNumber(efectivo);
@@ -323,7 +368,13 @@ export default function CierreCajaPage() {
   const loadEfectivoEnCaja = useCallback(async () => {
     if (!sedeId) return;
 
-    const token = getSessionToken();
+    const token = String(
+      user?.access_token ||
+        user?.token ||
+        sessionStorage.getItem("access_token") ||
+        localStorage.getItem("access_token") ||
+        ""
+    ).trim();
     if (!token) {
       setEfectivoEnCaja(null);
       return;
@@ -343,7 +394,7 @@ export default function CierreCajaPage() {
     } finally {
       setLoadingEfectivoEnCaja(false);
     }
-  }, [cierreFecha, sedeId]);
+  }, [cierreFecha, sedeId, user?.access_token, user?.token]);
 
   const loadResumen = async () => {
     if (!sedeId) return;
@@ -454,7 +505,7 @@ export default function CierreCajaPage() {
     if (sedeId) {
       loadAll();
     }
-  }, [sedeId, fechaDesde, fechaHasta, monedaSede]);
+  }, [sedeId, fechaDesde, fechaHasta]);
 
   useEffect(() => {
     if (sedeId) {

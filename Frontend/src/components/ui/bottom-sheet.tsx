@@ -53,7 +53,10 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ open, onClose, title, 
           </button>
         </div>
 
-        <div className="max-h-[90vh] overflow-y-auto px-2 pb-[max(env(safe-area-inset-bottom),1rem)]">
+        <div
+          data-bottom-sheet-scroll
+          className="max-h-[90vh] overflow-y-auto px-2 pb-[max(env(safe-area-inset-bottom),1rem)]"
+        >
           {children}
         </div>
       </div>

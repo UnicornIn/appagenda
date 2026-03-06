@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Calendar, Plus, User, Clock, X, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, Plus, User, Clock, X, Loader2, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { Sidebar } from '../../../components/Layout/Sidebar';
 import { PageHeader } from '../../../components/Layout/PageHeader';
 import Bloqueos from "../../../components/Quotes/Bloqueos";
@@ -10,7 +10,7 @@ import { getSedes, type Sede } from '../../../components/Branch/sedesApi';
 import { getEstilistas, type Estilista } from '../../../components/Professionales/estilistasApi';
 import AppointmentDetailsModal from './AppointmentDetailsModal';
 import { useAuth } from '../../../components/Auth/AuthContext';
-import { getBloqueosEstilista, type Bloqueo } from '../../../components/Quotes/bloqueosApi';
+import { deleteBloqueo, getBloqueosEstilista, type Bloqueo } from '../../../components/Quotes/bloqueosApi';
 import { formatDateDMY } from '../../../lib/dateFormat';
 import { extractAgendaAdditionalNotes } from '../../../lib/agenda';
 
@@ -169,6 +169,7 @@ const CalendarScheduler: React.FC = () => {
   const [bloqueos, setBloqueos] = useState<BloqueoCalendario[]>([]);
   const [loadingBloqueos, setLoadingBloqueos] = useState(false);
   const [selectedBloqueo, setSelectedBloqueo] = useState<BloqueoCalendario | null>(null);
+  const [deletingBloqueoId, setDeletingBloqueoId] = useState<string | null>(null);
 
   const optionsRef = useRef<HTMLDivElement>(null);
   const tooltipTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -727,6 +728,46 @@ const CalendarScheduler: React.FC = () => {
     setRefreshTrigger(prev => prev + 1);
     handleClose();
   }, [cargarCitas, cargarEstilistas, cargarBloqueos, handleClose]);
+
+  const handleEliminarBloqueo = useCallback(async (bloqueo: BloqueoCalendario) => {
+    if (!bloqueo?._id) {
+      alert('No se encontró el ID del bloqueo.');
+      return;
+    }
+
+    if (!user?.access_token) {
+      alert('No hay token de autenticación.');
+      return;
+    }
+
+    const estilista = estilistas.find((item) => item.profesional_id === bloqueo.profesional_id);
+    const nombreEstilista = estilista?.nombre || bloqueo.profesional_id;
+    const confirmar = window.confirm(
+      `¿Eliminar este bloqueo?\n\nEstilista: ${nombreEstilista}\nHorario: ${bloqueo.hora_inicio} - ${bloqueo.hora_fin}\nMotivo: ${bloqueo.motivo}`
+    );
+
+    if (!confirmar) return;
+
+    setDeletingBloqueoId(bloqueo._id);
+
+    try {
+      await deleteBloqueo(bloqueo._id, user.access_token);
+
+      setBloqueos((prev) => prev.filter((item) => item._id !== bloqueo._id));
+      if (selectedBloqueo?._id === bloqueo._id) {
+        setSelectedBloqueo(null);
+      }
+
+      await cargarBloqueos();
+      setRefreshTrigger((prev) => prev + 1);
+      alert('✅ Bloqueo eliminado correctamente');
+    } catch (error) {
+      console.error('Error eliminando bloqueo desde admin sede:', error);
+      alert(`❌ ${error instanceof Error ? error.message : 'No se pudo eliminar el bloqueo'}`);
+    } finally {
+      setDeletingBloqueoId(null);
+    }
+  }, [user?.access_token, estilistas, selectedBloqueo, cargarBloqueos]);
 
   const overlapsSlot = useCallback((startMinutes: number, endMinutes: number, slotStartMinutes: number) => {
     const slotEndMinutes = slotStartMinutes + SLOT_INTERVAL_MINUTES;
@@ -1384,10 +1425,24 @@ const CalendarScheduler: React.FC = () => {
                     const estilista = estilistas.find(e => e.profesional_id === bloqueo.profesional_id);
                     return (
                       <div key={bloqueo._id} className="p-1.5 bg-gray-50 border border-gray-100 rounded-lg">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-1">
                           <span className="text-[10px] font-medium text-gray-700 truncate">
                             🔒 {bloqueo.motivo}
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => handleEliminarBloqueo(bloqueo)}
+                            disabled={deletingBloqueoId === bloqueo._id}
+                            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-red-300"
+                            aria-label="Eliminar bloqueo"
+                            title="Eliminar bloqueo"
+                          >
+                            {deletingBloqueoId === bloqueo._id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3 w-3" />
+                            )}
+                          </button>
                         </div>
                         <div className="text-[10px] text-gray-600 mt-0.5">
                           <div className="flex justify-between">

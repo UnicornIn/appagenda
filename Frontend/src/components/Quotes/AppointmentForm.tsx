@@ -16,7 +16,6 @@ interface Service {
     duration: number;
     price: number;
     moneda?: string;
-    searchText: string;
 }
 
 interface EstilistaCompleto extends Estilista {
@@ -56,12 +55,6 @@ interface CitaParaPago {
 }
 
 const SLOT_INTERVAL_MINUTES = 60;
-const normalizeServiceSearchText = (value: string): string =>
-    value
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .trim();
 
 const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
     onClose,
@@ -92,7 +85,6 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
     const [selectedClient, setSelectedClient] = useState<Cliente | null>(null);
     const [notes, setNotes] = useState('');
     const [servicioActual, setServicioActual] = useState<Service | null>(null);
-    const [serviceSearchTerm, setServiceSearchTerm] = useState('');
     const [precioPersonalizado, setPrecioPersonalizado] = useState<string>('');
     const [usarPrecioCustom, setUsarPrecioCustom] = useState(false);
 
@@ -433,7 +425,6 @@ const handleContinuar = async () => {
             setSelectedStylist(estilista);
             setServiciosSeleccionados([]);
             setServicioActual(null);
-            setServiceSearchTerm('');
         }
     }, [estilistas]);
 
@@ -463,19 +454,10 @@ const handleContinuar = async () => {
             name: s.nombre,
             duration: Number(s.duracion_minutos) || s.duracion || 30,
             price: s.precio_local !== undefined ? s.precio_local : s.precio ?? 0,
-            moneda: s.moneda_local || 'USD',
-            searchText: normalizeServiceSearchText(
-                `${s.nombre} ${Number(s.duracion_minutos) || s.duracion || 30} ${(s.moneda_local || 'USD')} ${s.precio_local !== undefined ? s.precio_local : s.precio ?? 0}`
-            )
+            moneda: s.moneda_local || 'USD'
         })),
         [serviciosFiltrados]
     );
-
-    const serviciosVisibles = useMemo(() => {
-        const query = normalizeServiceSearchText(serviceSearchTerm);
-        if (!query) return serviciosAMostrar;
-        return serviciosAMostrar.filter((service) => service.searchText.includes(query));
-    }, [serviciosAMostrar, serviceSearchTerm]);
 
     const serviciosById = useMemo(() => {
         const map = new Map<string, Service>();
@@ -758,15 +740,6 @@ const handleContinuar = async () => {
                                 </div>
                             ) : (
                                 <>
-                                    <input
-                                        type="text"
-                                        value={serviceSearchTerm}
-                                        disabled={loadingServicios || serviciosAMostrar.length === 0}
-                                        onChange={(e) => setServiceSearchTerm(e.target.value)}
-                                        placeholder="Buscar servicio por nombre..."
-                                        className="mb-2 w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white disabled:bg-gray-100"
-                                    />
-
                                     {/* Selector de servicio */}
                                     <select
                                         value={servicioActual?.profesional_id || ''}
@@ -779,12 +752,10 @@ const handleContinuar = async () => {
                                                 ? '🔄 Cargando...'
                                                 : serviciosAMostrar.length === 0
                                                     ? '❌ No hay servicios'
-                                                    : serviciosVisibles.length === 0
-                                                        ? '🔎 Sin coincidencias'
-                                                        : '💇‍♀️ Seleccionar servicio...'
+                                                    : '💇‍♀️ Seleccionar servicio...'
                                             }
                                         </option>
-                                        {serviciosVisibles.map(service => (
+                                        {serviciosAMostrar.map(service => (
                                             <option key={`service-${service.profesional_id}`} value={service.profesional_id}>
                                                 {service.name} - {service.duration}min - {currencySymbol} {service.price}
                                             </option>

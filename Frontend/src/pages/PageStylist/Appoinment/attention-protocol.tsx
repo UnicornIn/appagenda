@@ -260,12 +260,57 @@ export function AttentionProtocol({
     }
   }
 
+  const getCitaId = (cita?: any): string => {
+    const rawId = cita?.cita_id || cita?._id || "";
+    return typeof rawId === "string" ? rawId : String(rawId || "");
+  };
+
+  const scrollBottomSheetToTop = () => {
+    const scrollContainer = document.querySelector("[data-bottom-sheet-scroll]");
+    if (scrollContainer instanceof HTMLElement) {
+      scrollContainer.scrollTo({ top: 0, behavior: "auto" });
+    }
+  };
+
+  const extractBackendErrorMessage = async (response: Response): Promise<string> => {
+    const contentType = response.headers.get("content-type") || "";
+
+    try {
+      if (contentType.includes("application/json")) {
+        const payload = await response.json();
+        if (typeof payload?.detail === "string") return payload.detail;
+        if (typeof payload?.message === "string") return payload.message;
+      } else {
+        const text = (await response.text()).trim();
+        if (text) {
+          try {
+            const parsed = JSON.parse(text);
+            if (typeof parsed?.detail === "string") return parsed.detail;
+            if (typeof parsed?.message === "string") return parsed.message;
+          } catch {
+            return text;
+          }
+          return text;
+        }
+      }
+    } catch (error) {
+      console.warn("No se pudo parsear el error del backend:", error);
+    }
+
+    return response.statusText || "Error desconocido";
+  };
+
+  useEffect(() => {
+    scrollBottomSheetToTop();
+  }, [vistaActual, tipoFichaSeleccionada, mostrarConfirmacionFinalizar, detalleFicha]);
+
   // FUNCIÓN SIMPLIFICADA: SIEMPRE puede finalizar si está pendiente/confirmada
   const puedeMostrarFinalizar = (cita: any): boolean => {
-    console.log('🔍 Verificando si puede mostrar botón finalizar para cita:', cita?.cita_id);
+    const citaId = getCitaId(cita);
+    console.log('🔍 Verificando si puede mostrar botón finalizar para cita:', citaId);
 
     // Verificar si la cita existe
-    if (!cita || !cita.cita_id) {
+    if (!cita || !citaId) {
       console.log('❌ No hay cita válida');
       return false;
     }
@@ -310,7 +355,13 @@ export function AttentionProtocol({
   }
 
   // FUNCIÓN MEJORADA PARA FINALIZAR SERVICIO (ENDPOINT PUT)
-  const finalizarServicioAPI = async (citaId: string) => {
+  const finalizarServicioAPI = async (rawCitaId?: string) => {
+    const citaId = (rawCitaId || getCitaId(citaSeleccionada)).trim();
+    if (!citaId) {
+      alert("No se pudo identificar la cita a finalizar.");
+      return;
+    }
+
     setLoadingFinalizar(true);
     try {
       const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
@@ -320,9 +371,10 @@ export function AttentionProtocol({
       }
 
       console.log(`👤 Rol del usuario: ${usuarioRol}`);
+      let seGeneroPdf = true;
 
       // Usar el endpoint PUT /scheduling/quotes/citas/{cita_id}/finalizar
-      const response = await fetch(`${API_BASE_URL}scheduling/quotes/citas/${citaId}/finalizar`, {
+      let response = await fetch(`${API_BASE_URL}scheduling/quotes/citas/${citaId}/finalizar`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -334,17 +386,39 @@ export function AttentionProtocol({
       console.log('Response status:', response.status);
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error response:', errorText);
-        throw new Error(`Error ${response.status}: ${errorText || response.statusText}`);
+        const errorMessage = await extractBackendErrorMessage(response);
+        const requiereFallbackCompletar =
+          response.status === 404 &&
+          errorMessage.toLowerCase().includes("ficha");
+
+        if (!requiereFallbackCompletar) {
+          throw new Error(`Error ${response.status}: ${errorMessage}`);
+        }
+
+        console.warn("Finalización con PDF no disponible, usando fallback de completar cita:", errorMessage);
+        seGeneroPdf = false;
+
+        response = await fetch(`${API_BASE_URL}scheduling/quotes/${citaId}/completar`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          const fallbackError = await extractBackendErrorMessage(response);
+          throw new Error(`Error ${response.status}: ${fallbackError}`);
+        }
       }
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       console.log('✅ Servicio finalizado:', data);
 
       // Actualizar estado local de la cita
       if (citaSeleccionada) {
-        citaSeleccionada.estado = "finalizado";
+        citaSeleccionada.estado = seGeneroPdf ? "finalizado" : "completada";
       }
 
       // Limpiar fichas guardadas de esta cita
@@ -365,15 +439,20 @@ export function AttentionProtocol({
 
       // Mostrar mensaje según rol
       const mensaje = usuarioRol === "estilista"
-        ? "✅ Servicio finalizado como estilista. El admin puede proceder con la facturación."
-        : "✅ Servicio finalizado por administración.";
+        ? seGeneroPdf
+          ? "✅ Servicio finalizado como estilista. El admin puede proceder con la facturación."
+          : "✅ Servicio finalizado sin ficha técnica asociada. La cita quedó completada."
+        : seGeneroPdf
+          ? "✅ Servicio finalizado por administración."
+          : "✅ Servicio finalizado sin ficha técnica asociada.";
 
       alert(mensaje);
 
-      // Recargar después de 2 segundos
-      setTimeout(() => {
-        window.location.reload();
-      }, 2000);
+      if (!onFinalizarServicio) {
+        setTimeout(() => {
+          window.location.reload();
+        }, 1200);
+      }
 
     } catch (error) {
       console.error('❌ Error al finalizar servicio:', error);
@@ -384,7 +463,7 @@ export function AttentionProtocol({
   };
 
   const getEstadoCita = (cita: any) => {
-    console.log(`🔄 Calculando estado para cita ${cita.cita_id}:`, {
+    console.log(`🔄 Calculando estado para cita ${getCitaId(cita)}:`, {
       estado: cita.estado,
       estado_pago: cita.estado_pago,
       fecha: cita.fecha,
@@ -1862,7 +1941,7 @@ export function AttentionProtocol({
   };
 
   // Si hay cita seleccionada pero no se ha elegido una vista específica
-  if (citaSeleccionada && vistaActual === "calendario") {
+  if (citaSeleccionada && vistaActual === "calendario" && !mostrarConfirmacionFinalizar) {
     return renderVistaMenuPrincipal();
   }
 
@@ -1874,17 +1953,23 @@ export function AttentionProtocol({
       datosIniciales: datosGuardados,
       onGuardar: (datos: any) => guardarFicha(tipoFichaSeleccionada, datos),
       onSubmit: (_: any) => {
-        const fichasActualizadas = fichasGuardadas.filter(
-          ficha => !(ficha.citaId === citaSeleccionada.cita_id && ficha.tipo === tipoFichaSeleccionada)
-        );
-        setFichasGuardadas(fichasActualizadas);
+        const citaId = getCitaId(citaSeleccionada);
+        const tipoActual = tipoFichaSeleccionada;
+
+        if (citaId && tipoActual) {
+          setFichasGuardadas((prev) =>
+            prev.filter((ficha) => !(ficha.citaId === citaId && ficha.tipo === tipoActual))
+          );
+        }
 
         setTipoFichaSeleccionada(null);
         setVistaActual("fichas");
+        scrollBottomSheetToTop();
       },
       onCancelar: () => {
         setTipoFichaSeleccionada(null);
         setVistaActual("fichas");
+        scrollBottomSheetToTop();
       }
     };
 
@@ -1968,8 +2053,8 @@ export function AttentionProtocol({
             <Button
               size="sm"
               className={`px-4 text-xs ${primaryActionButtonClass}`}
-              onClick={() => finalizarServicioAPI(citaSeleccionada.cita_id)}
-              disabled={loadingFinalizar}
+              onClick={() => finalizarServicioAPI(getCitaId(citaSeleccionada))}
+              disabled={loadingFinalizar || !getCitaId(citaSeleccionada)}
             >
               {loadingFinalizar ? (
                 <>

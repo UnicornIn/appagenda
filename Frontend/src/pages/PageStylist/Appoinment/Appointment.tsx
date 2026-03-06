@@ -593,6 +593,10 @@ export default function VistaEstilistaPage() {
             <AttentionProtocol
               citaSeleccionada={citaSeleccionada}
               onVolver={() => setCitaSeleccionada(null)}
+              onFinalizarServicio={() => {
+                refetchCitas();
+                setCitaSeleccionada(null);
+              }}
               onFechaSeleccionada={(fecha) => {
                 if (!fecha) return;
                 setSelectedDate(fecha);
