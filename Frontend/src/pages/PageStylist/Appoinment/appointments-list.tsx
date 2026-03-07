@@ -163,9 +163,9 @@ export function AppointmentsList({
         case "cancelado":
           return { 
             estado: "Cancelada", 
-            color: "text-gray-500", 
+            color: "text-red-700", 
             icon: X,
-            borderColor: "border-gray-300"
+            borderColor: "border-red-300 bg-red-50"
           };
         
         case "no asistio":
@@ -286,6 +286,9 @@ export function AppointmentsList({
           const appointment = elemento.data as Cita;
           const estadoInfo = getEstadoCita(appointment);
           const IconComponent = estadoInfo.icon;
+          const estadoNormalizado = (appointment.estado || "").toLowerCase().trim();
+          const citaCancelada = estadoNormalizado.includes("cancel");
+          const citaSeleccionadaActual = citaSeleccionada?.cita_id === appointment.cita_id;
           const nombreCliente = appointment.cliente?.nombre || "Cliente";
           const apellidoCliente = appointment.cliente?.apellido || "";
           
@@ -300,9 +303,9 @@ export function AppointmentsList({
             <div
               key={appointment.cita_id}
               className={`cursor-pointer overflow-hidden rounded-2xl border bg-white p-4 transition-transform active:scale-[0.99] ${
-                citaSeleccionada?.cita_id === appointment.cita_id
-                  ? "border-gray-900"
-                  : "border-gray-200"
+                citaCancelada
+                  ? (citaSeleccionadaActual ? "border-red-500" : "border-red-300")
+                  : (citaSeleccionadaActual ? "border-gray-900" : "border-gray-200")
               }`}
               onClick={() => onCitaSelect(appointment)}
             >
@@ -311,7 +314,11 @@ export function AppointmentsList({
                   <div className="mb-1 flex items-start justify-between gap-2">
                     {/* 🔥 MOSTRAR SERVICIOS CON BADGE SI HAY MÚLTIPLES */}
                     <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <h3 className="line-clamp-2 text-sm font-semibold text-gray-900">
+                      <h3
+                        className={`line-clamp-2 text-sm font-semibold ${
+                          citaCancelada ? "text-red-700" : "text-gray-900"
+                        }`}
+                      >
                         {nombresServicios}
                       </h3>
                       {cantidadServicios > 1 && (
@@ -322,19 +329,31 @@ export function AppointmentsList({
                     </div>
                     
                     {precioTotal > 0 && (
-                      <div className="ml-2 flex shrink-0 items-center gap-1 text-xs font-medium text-gray-700">
+                      <div
+                        className={`ml-2 flex shrink-0 items-center gap-1 text-xs font-medium ${
+                          citaCancelada ? "text-red-700" : "text-gray-700"
+                        }`}
+                      >
                         <Tag className="h-3 w-3" />
                         <span>${precioTotal.toLocaleString()}</span>
                       </div>
                     )}
                   </div>
                   
-                  <div className="mb-2 truncate text-xs font-medium text-gray-700">
+                  <div
+                    className={`mb-2 truncate text-xs font-medium ${
+                      citaCancelada ? "text-red-700" : "text-gray-700"
+                    }`}
+                  >
                     {nombreCliente} {apellidoCliente}
                   </div>
                   
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <div
+                      className={`flex items-center gap-2 text-xs ${
+                        citaCancelada ? "text-red-600" : "text-gray-500"
+                      }`}
+                    >
                       <Clock className="h-3 w-3" />
                       <span>{appointment.hora_inicio} - {appointment.hora_fin}</span>
                     </div>

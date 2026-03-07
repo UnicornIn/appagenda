@@ -58,7 +58,8 @@ const Bloqueos: React.FC<BloqueosProps> = ({
   // Determinar si el usuario actual es un estilista
   const esEstilista = user?.role === 'estilista';
   const useCompactView = compact || esEstilista;
-  const isEditing = Boolean(editingBloqueo?._id);
+  const [createFromExisting, setCreateFromExisting] = useState(false);
+  const isEditing = Boolean(editingBloqueo?._id) && !createFromExisting;
   
   const [formData, setFormData] = useState({
     profesional_id: editingBloqueo?.profesional_id || estilistaId || "",
@@ -241,6 +242,7 @@ const Bloqueos: React.FC<BloqueosProps> = ({
   }, [formData.sede_id, cargarEstilistas, estilistaId, esEstilista]);
 
   useEffect(() => {
+    setCreateFromExisting(false);
     if (editingBloqueo?._id) {
       setFormData((prev) => ({
         ...prev,
@@ -264,6 +266,17 @@ const Bloqueos: React.FC<BloqueosProps> = ({
       hora_inicio: horaInicio || prev.hora_inicio,
     }));
   }, [editingBloqueo, fecha, horaInicio]);
+
+  const handleCreateFromExisting = useCallback(() => {
+    if (!editingBloqueo?._id) return;
+    setCreateFromExisting(true);
+    setMensaje("ℹ️ Modo crear: se guardará un nuevo bloqueo superpuesto.");
+  }, [editingBloqueo]);
+
+  const handleReturnToEdit = useCallback(() => {
+    setCreateFromExisting(false);
+    setMensaje("");
+  }, []);
 
   const handleInputChange = useCallback((field: string, value: any) => {
     if (isEditing && (field === "sede_id" || field === "profesional_id" || field === "fecha")) {
@@ -546,6 +559,28 @@ const Bloqueos: React.FC<BloqueosProps> = ({
         {isEditing ? "Editar bloqueo" : "Bloqueo de horario"}
       </h2>
 
+      {editingBloqueo?._id && (
+        <div className={`${useCompactView ? "mb-3" : "mb-4"} flex items-center justify-end`}>
+          {isEditing ? (
+            <button
+              type="button"
+              onClick={handleCreateFromExisting}
+              className={`${useCompactView ? "px-3 py-1.5 text-xs rounded-md" : "px-3 py-2 text-sm rounded-lg"} border border-gray-300 text-gray-800 font-medium hover:bg-gray-100 transition-colors`}
+            >
+              Crear nuevo superpuesto
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleReturnToEdit}
+              className={`${useCompactView ? "px-3 py-1.5 text-xs rounded-md" : "px-3 py-2 text-sm rounded-lg"} border border-gray-300 text-gray-800 font-medium hover:bg-gray-100 transition-colors`}
+            >
+              Volver a edición
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Información del usuario */}
       <div className={`${useCompactView ? "mb-3 p-2.5 rounded-md" : "mb-4 p-3 rounded-lg"} bg-gray-100 border border-gray-300`}>
         <p className={useCompactView ? "text-xs text-gray-700" : "text-sm text-gray-800"}>
@@ -555,12 +590,14 @@ const Bloqueos: React.FC<BloqueosProps> = ({
           <span className="font-semibold">Rol:</span> {getRolDisplay()}
         </p>
         
-        {(estilistaId || esEstilista || isEditing) && (
+        {(estilistaId || esEstilista || editingBloqueo?._id) && (
           <div className="mt-2 pt-2 border-t border-gray-300">
             <p className={`${useCompactView ? "text-[11px]" : "text-xs"} text-gray-700`}>
               <span className="font-semibold">⚠️ Modo especial:</span> 
               {isEditing
                 ? " Editando bloqueo existente"
+                : createFromExisting
+                  ? " Creando nuevo bloqueo superpuesto"
                 : estilistaId
                   ? " Creando bloqueo para estilista específico"
                   : esEstilista
