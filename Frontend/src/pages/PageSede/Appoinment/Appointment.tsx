@@ -29,6 +29,7 @@ interface Appointment {
   estilista_nombre: string;
   estado: string;
   profesional_id?: string;
+  cliente_telefono?: string;
   notas_adicionales?: string;
   servicios_resumen?: string;
   servicios_detalle?: string;
@@ -102,6 +103,16 @@ const extractProfessionalName = (cita: any): string => {
     cita?.nombre_profesional,
     nestedName
   ) || '(Sin profesional)';
+};
+
+const extractClientPhone = (cita: any): string => {
+  return getFirstNonEmptyText(
+    cita?.cliente_telefono,
+    cita?.telefono_cliente,
+    cita?.cliente?.telefono,
+    cita?.cliente?.phone,
+    cita?.telefono
+  );
 };
 
 const extractServicesInfo = (cita: any): { detalle: string; resumen: string } => {
@@ -877,6 +888,7 @@ const CalendarScheduler: React.FC = () => {
         servicios_resumen: servicesInfo.resumen,
         servicios_detalle: servicesInfo.detalle,
         estilista_nombre: profesionalNombre,
+        cliente_telefono: extractClientPhone(cita),
         estado,
         profesional_id: cita.profesional_id,
         notas_adicionales: extractAgendaAdditionalNotes(cita),
@@ -1877,7 +1889,9 @@ const CalendarScheduler: React.FC = () => {
                 {getTextValue(citaTooltip.cita.cliente_nombre) || '(Sin nombre)'}
               </h3>
               <p className="text-xs text-gray-600 truncate">
-                {citaTooltip.cita.start} - {citaTooltip.cita.end}
+                {getTextValue(citaTooltip.cita.cliente_telefono)
+                  ? `📞 ${getTextValue(citaTooltip.cita.cliente_telefono)}`
+                  : `${citaTooltip.cita.start} - ${citaTooltip.cita.end}`}
               </p>
             </div>
           </div>

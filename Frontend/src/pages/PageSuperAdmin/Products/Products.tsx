@@ -126,14 +126,15 @@ export function ProductsList() {
   }
 
   const searchTermLower = searchTerm.trim().toLowerCase()
+  const safeLower = (value: unknown) => (typeof value === "string" ? value.toLowerCase() : "")
 
   const productosFiltrados = useMemo(() => {
     return productos.filter((producto) => {
       if (searchTermLower) {
         const cumpleBusqueda =
-          producto.nombre.toLowerCase().includes(searchTermLower) ||
-          producto.producto_id.toLowerCase().includes(searchTermLower) ||
-          producto.producto_codigo.toLowerCase().includes(searchTermLower)
+          safeLower(producto.nombre).includes(searchTermLower) ||
+          safeLower(producto.producto_id).includes(searchTermLower) ||
+          safeLower(producto.producto_codigo).includes(searchTermLower)
 
         if (!cumpleBusqueda) {
           return false

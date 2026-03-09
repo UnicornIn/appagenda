@@ -291,6 +291,9 @@ export function AppointmentsList({
           const citaSeleccionadaActual = citaSeleccionada?.cita_id === appointment.cita_id;
           const nombreCliente = appointment.cliente?.nombre || "Cliente";
           const apellidoCliente = appointment.cliente?.apellido || "";
+          const emailCliente =
+            appointment.cliente?.email ||
+            ((appointment as any).cliente_email ?? "");
           
           // 🔥 CAMBIO CRÍTICO: Usar helper para obtener TODOS los servicios
           const nombresServicios = obtenerNombresServicios(appointment);
@@ -340,12 +343,23 @@ export function AppointmentsList({
                     )}
                   </div>
                   
-                  <div
-                    className={`mb-2 truncate text-xs font-medium ${
-                      citaCancelada ? "text-red-700" : "text-gray-700"
-                    }`}
-                  >
-                    {nombreCliente} {apellidoCliente}
+                  <div className="mb-2">
+                    <div
+                      className={`truncate text-xs font-medium ${
+                        citaCancelada ? "text-red-700" : "text-gray-700"
+                      }`}
+                    >
+                      {nombreCliente} {apellidoCliente}
+                    </div>
+                    {emailCliente && (
+                      <div
+                        className={`truncate text-[11px] ${
+                          citaCancelada ? "text-red-600" : "text-gray-500"
+                        }`}
+                      >
+                        {emailCliente}
+                      </div>
+                    )}
                   </div>
                   
                   <div className="flex flex-wrap items-center justify-between gap-2">

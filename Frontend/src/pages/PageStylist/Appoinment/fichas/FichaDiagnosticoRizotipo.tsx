@@ -14,20 +14,202 @@ interface FichaDiagnosticoRizotipoProps {
   onCancelar?: () => void;
 }
 
+type TechnicalField =
+  | "plasticidad"
+  | "permeabilidad"
+  | "porosidad"
+  | "exterior_lipidico"
+  | "densidad"
+  | "oleosidad"
+  | "grosor"
+  | "textura";
+
+const TECHNICAL_FIELDS: TechnicalField[] = [
+  "plasticidad",
+  "permeabilidad",
+  "porosidad",
+  "exterior_lipidico",
+  "densidad",
+  "oleosidad",
+  "grosor",
+  "textura",
+];
+
+const TECHNICAL_OPTIONS: Record<TechnicalField, Array<{ value: string; label: string }>> = {
+  plasticidad: [
+    { value: "ALTA", label: "Alta" },
+    { value: "MEDIA", label: "Media" },
+    { value: "BAJA", label: "Baja" },
+    { value: "MUY BAJA", label: "Muy Baja" },
+  ],
+  permeabilidad: [
+    { value: "ALTA", label: "Alta" },
+    { value: "MEDIA", label: "Media" },
+    { value: "BAJA", label: "Baja" },
+    { value: "OTRA", label: "Otra" },
+  ],
+  porosidad: [
+    { value: "ALTA", label: "Alta" },
+    { value: "BAJA", label: "Baja" },
+  ],
+  exterior_lipidico: [
+    { value: "ALTA", label: "Alta" },
+    { value: "MEDIA", label: "Media" },
+    { value: "BAJA", label: "Baja" },
+  ],
+  densidad: [
+    { value: "EXTRA ALTA", label: "Extra Alta" },
+    { value: "ALTA", label: "Alta" },
+    { value: "MEDIA", label: "Media" },
+    { value: "BAJA", label: "Baja" },
+  ],
+  oleosidad: [
+    { value: "ALTA", label: "Alta" },
+    { value: "MEDIA", label: "Media" },
+    { value: "BAJA", label: "Baja" },
+  ],
+  grosor: [
+    { value: "GRUESO", label: "Grueso" },
+    { value: "MEDIO", label: "Medio" },
+    { value: "DELGADO", label: "Delgado" },
+  ],
+  textura: [
+    { value: "Lanoso / Ulótrico", label: "Lanoso / Ulótrico" },
+    { value: "Ensotijado / Lisótrico", label: "Ensotijado / Lisótrico" },
+    { value: "Laminado / Cinótrico", label: "Laminado / Cinótrico" },
+    { value: "Procesado o dañado", label: "Procesado o dañado" },
+  ],
+};
+
+interface TechnicalMetadata {
+  definition: string;
+  actions: Record<string, string>;
+  defaultAction: string;
+}
+
+const TECHNICAL_METADATA: Record<TechnicalField, TechnicalMetadata> = {
+  plasticidad: {
+    definition: "Capacidad de la fibra capilar para estirarse y volver a su forma sin romperse.",
+    actions: {
+      ALTA: "Mantener equilibrio entre hidratación y proteína; evitar sobrecarga de queratina.",
+      MEDIA: "Alternar hidratación y reconstrucción de forma semanal.",
+      BAJA: "Priorizar reconstrucción con proteínas y reducir calor directo.",
+      "MUY BAJA": "Aplicar plan intensivo de recuperación y evitar procesos químicos.",
+    },
+    defaultAction: "Mantener seguimiento profesional para ajustar el tratamiento.",
+  },
+  permeabilidad: {
+    definition: "Facilidad con la que agua y activos penetran la fibra capilar.",
+    actions: {
+      ALTA: "Sellar con productos de pH ácido y mantener rutina anti-frizz.",
+      MEDIA: "Sostener rutina balanceada de hidratación y sellado.",
+      BAJA: "Mejorar penetración con calor moderado y productos ligeros de alta absorción.",
+      OTRA: "Realizar prueba de hebra y personalizar técnica/frecuencia.",
+    },
+    defaultAction: "Ajustar productos según respuesta real del cabello.",
+  },
+  porosidad: {
+    definition: "Capacidad del cabello para absorber y retener humedad.",
+    actions: {
+      ALTA: "Enfocar en sellado de cutícula y productos de larga hidratación.",
+      BAJA: "Aplicar productos ligeros y activar absorción con calor controlado.",
+    },
+    defaultAction: "Controlar respuesta del cabello para ajustar rutina.",
+  },
+  exterior_lipidico: {
+    definition: "Nivel de lípidos naturales que protegen la cutícula.",
+    actions: {
+      ALTA: "Usar limpieza suave y controlar acumulación de grasa en raíz.",
+      MEDIA: "Mantener higiene regular y equilibrio entre limpieza e hidratación.",
+      BAJA: "Reponer lípidos con aceites ligeros y cremas nutritivas.",
+    },
+    defaultAction: "Balancear nutrición y limpieza según evolución.",
+  },
+  densidad: {
+    definition: "Cantidad de cabellos por área del cuero cabelludo.",
+    actions: {
+      "EXTRA ALTA": "Trabajar por secciones pequeñas para una distribución uniforme de producto.",
+      ALTA: "Controlar volumen con técnicas de definición y cortes estratégicos.",
+      MEDIA: "Mantener rutina estándar y ajustes según objetivo de estilo.",
+      BAJA: "Aportar cuerpo con productos volumizadores ligeros y peinados de soporte.",
+    },
+    defaultAction: "Adecuar cantidad de producto y técnica de aplicación.",
+  },
+  oleosidad: {
+    definition: "Producción de sebo en cuero cabelludo y raíz.",
+    actions: {
+      ALTA: "Aumentar frecuencia de lavado con productos seborreguladores.",
+      MEDIA: "Mantener frecuencia intermedia y limpieza profunda periódica.",
+      BAJA: "Espaciar lavados y reforzar hidratación del cuero cabelludo.",
+    },
+    defaultAction: "Revisar periodicidad de lavado y tipo de producto.",
+  },
+  grosor: {
+    definition: "Diámetro promedio de cada fibra capilar.",
+    actions: {
+      GRUESO: "Usar productos de mayor emoliencia y tiempos de absorción más largos.",
+      MEDIO: "Mantener rutina equilibrada según respuesta del cabello.",
+      DELGADO: "Usar fórmulas ligeras y evitar sobrecargar con aceites pesados.",
+    },
+    defaultAction: "Ajustar concentración de producto a la fibra.",
+  },
+  textura: {
+    definition: "Patrón de curvatura y estado estructural de la fibra capilar.",
+    actions: {
+      "Lanoso / Ulótrico": "Priorizar hidratación profunda y definición por secciones.",
+      "Ensotijado / Lisótrico": "Definir con crema y gel ligero, minimizando fricción.",
+      "Laminado / Cinótrico": "Mantener control de grasa y protección térmica en estilizado.",
+      "Procesado o dañado": "Implementar cronograma de recuperación y limitar calor/químicos.",
+    },
+    defaultAction: "Personalizar técnica de estilizado según patrón de rizo.",
+  },
+};
+
+const TECHNICAL_QUESTIONS: Array<{ field: TechnicalField; pregunta_id: number; pregunta: string }> = [
+  { field: "plasticidad", pregunta_id: 1, pregunta: "Plasticidad" },
+  { field: "permeabilidad", pregunta_id: 2, pregunta: "Permeabilidad" },
+  { field: "porosidad", pregunta_id: 3, pregunta: "Porosidad" },
+  { field: "exterior_lipidico", pregunta_id: 4, pregunta: "Exterior Lipídico" },
+  { field: "densidad", pregunta_id: 5, pregunta: "Densidad" },
+  { field: "oleosidad", pregunta_id: 6, pregunta: "Oleosidad" },
+  { field: "grosor", pregunta_id: 7, pregunta: "Grosor" },
+  { field: "textura", pregunta_id: 8, pregunta: "Textura" },
+];
+
+const normalizeSelectionValue = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    return trimmed
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
 export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSubmit, onCancelar }: FichaDiagnosticoRizotipoProps) {
   const [formData, setFormData] = useState({
     autorizacion_publicacion: false,
     firma_profesional: false,
     foto_antes: [] as File[],
     foto_despues: [] as File[],
-    plasticidad: "",
-    permeabilidad: "",
-    porosidad: "",
-    exterior_lipidico: "",
-    densidad: "",
-    oleosidad: "",
-    grosor: "",
-    textura: "",
+    plasticidad: [] as string[],
+    permeabilidad: [] as string[],
+    porosidad: [] as string[],
+    exterior_lipidico: [] as string[],
+    densidad: [] as string[],
+    oleosidad: [] as string[],
+    grosor: [] as string[],
+    textura: [] as string[],
     recomendaciones_personalizadas: "",
     frecuencia_corte: "",
     tecnicas_estilizado: "",
@@ -44,20 +226,33 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
   const fileInputRefAntes = useRef<HTMLInputElement>(null);
   const fileInputRefDespues = useRef<HTMLInputElement>(null);
 
+  const normalizeTechnicalFields = (data: any): Record<TechnicalField, string[]> => {
+    return TECHNICAL_FIELDS.reduce((acc, field) => {
+      acc[field] = normalizeSelectionValue(data?.[field]);
+      return acc;
+    }, {} as Record<TechnicalField, string[]>);
+  };
+
   // Cargar datos iniciales del localStorage al montar
   useEffect(() => {
     const savedData = localStorage.getItem(`ficha_diagnostico_rizotipo_${cita.cita_id}`);
     if (savedData) {
       const parsedData = JSON.parse(savedData);
+      const normalizedTechnical = normalizeTechnicalFields(parsedData);
 
       // Nota: No podemos guardar Files en localStorage, solo el estado del formulario
       setFormData({
         ...parsedData,
+        ...normalizedTechnical,
         foto_antes: [], // Los archivos no se pueden guardar, se limpian
         foto_despues: [] // Los archivos no se pueden guardar, se limpian
       });
     } else if (datosIniciales) {
-      setFormData(datosIniciales);
+      const normalizedTechnical = normalizeTechnicalFields(datosIniciales);
+      setFormData({
+        ...datosIniciales,
+        ...normalizedTechnical,
+      });
     }
   }, [cita.cita_id, datosIniciales]);
 
@@ -140,6 +335,47 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const toggleTechnicalOption = (field: TechnicalField, optionValue: string) => {
+    setFormData((prev) => {
+      const currentValues = prev[field];
+      const isSelected = currentValues.includes(optionValue);
+
+      return {
+        ...prev,
+        [field]: isSelected
+          ? currentValues.filter((item) => item !== optionValue)
+          : [...currentValues, optionValue],
+      };
+    });
+  };
+
+  const formatTechnicalValue = (values: string[]) => values.join(", ");
+
+  const getTechnicalOptionLabel = (field: TechnicalField, value: string) => {
+    return TECHNICAL_OPTIONS[field].find((option) => option.value === value)?.label || value;
+  };
+
+  const buildTechnicalActionsText = (field: TechnicalField, values: string[]) => {
+    const metadata = TECHNICAL_METADATA[field];
+    if (!metadata || values.length === 0) return "";
+
+    return values
+      .map((value) => {
+        const label = getTechnicalOptionLabel(field, value);
+        const action = metadata.actions[value] || metadata.defaultAction;
+        return `${label}: ${action}`;
+      })
+      .join(" | ");
+  };
+
+  const buildTechnicalDefinitionAndActions = (field: TechnicalField, values: string[]) => {
+    const metadata = TECHNICAL_METADATA[field];
+    if (!metadata) return "";
+
+    const actionsText = buildTechnicalActionsText(field, values) || metadata.defaultAction;
+    return `Definición: ${metadata.definition} Acciones recomendadas: ${actionsText}`;
+  };
+
   const handleSaveDraft = () => {
     if (onGuardar) {
       const draftData = {
@@ -161,17 +397,17 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
     }
 
     // Verificar parámetros técnicos obligatorios
-    const parametrosObligatorios = [
-      'plasticidad', 'permeabilidad', 'porosidad', 'exterior_lipidico',
-      'densidad', 'oleosidad', 'grosor', 'textura'
-    ];
-
-    const parametrosFaltantes = parametrosObligatorios.filter(
-      param => !formData[param as keyof typeof formData]
+    const parametrosFaltantes = TECHNICAL_FIELDS.filter(
+      (param) => formData[param].length === 0
     );
 
     if (parametrosFaltantes.length > 0) {
       alert(`Debe completar todos los parámetros técnicos. Faltantes: ${parametrosFaltantes.join(', ')}`);
+      return;
+    }
+
+    if (formData.foto_antes.length === 0 || formData.foto_despues.length === 0) {
+      alert('Debe cargar al menos una foto de ANTES y una foto de DESPUÉS para crear la ficha');
       return;
     }
 
@@ -237,6 +473,24 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
         formDataToSend.append('fotos_despues', file);
       });
 
+      const technicalPayload = TECHNICAL_FIELDS.reduce<Record<string, string>>((acc, field) => {
+        const selectedValues = formData[field];
+        acc[field] = formatTechnicalValue(selectedValues);
+        acc[`${field}_seleccion`] = formatTechnicalValue(selectedValues);
+        acc[`${field}_acciones`] = buildTechnicalActionsText(field, selectedValues);
+        acc[`${field}_detalle`] = buildTechnicalDefinitionAndActions(field, selectedValues);
+        return acc;
+      }, {});
+
+      const technicalResponses = TECHNICAL_QUESTIONS.map(({ field, pregunta_id, pregunta }) => ({
+        pregunta_id,
+        pregunta,
+        respuesta: formatTechnicalValue(formData[field]),
+        observaciones: buildTechnicalDefinitionAndActions(field, formData[field]),
+        respondido_por: estilistaData.nombre,
+        respondido_por_id: estilistaData.id
+      }));
+
       // 3. Preparar datos según el modelo FichaCreate
       const fichaData = {
         // Campos REQUERIDOS
@@ -273,14 +527,7 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
           profesional_firmante: estilistaData.nombre,
           profesional_firmante_id: estilistaData.id,
           profesional_firmante_email: estilistaData.email,
-          plasticidad: formData.plasticidad,
-          permeabilidad: formData.permeabilidad,
-          porosidad: formData.porosidad,
-          exterior_lipidico: formData.exterior_lipidico,
-          densidad: formData.densidad,
-          oleosidad: formData.oleosidad,
-          grosor: formData.grosor,
-          textura: formData.textura,
+          ...technicalPayload,
           recomendaciones_personalizadas: formData.recomendaciones_personalizadas || "",
           frecuencia_corte: formData.frecuencia_corte || "",
           tecnicas_estilizado: formData.tecnicas_estilizado || "",
@@ -288,72 +535,7 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
           observaciones_generales: formData.observaciones_generales || "",
           autorizacion_publicacion: formData.autorizacion_publicacion
         },
-        respuestas: [
-          {
-            pregunta_id: 1,
-            pregunta: "Plasticidad",
-            respuesta: formData.plasticidad,
-            observaciones: "",
-            respondido_por: estilistaData.nombre,
-            respondido_por_id: estilistaData.id
-          },
-          {
-            pregunta_id: 2,
-            pregunta: "Permeabilidad",
-            respuesta: formData.permeabilidad,
-            observaciones: "",
-            respondido_por: estilistaData.nombre,
-            respondido_por_id: estilistaData.id
-          },
-          {
-            pregunta_id: 3,
-            pregunta: "Porosidad",
-            respuesta: formData.porosidad,
-            observaciones: "",
-            respondido_por: estilistaData.nombre,
-            respondido_por_id: estilistaData.id
-          },
-          {
-            pregunta_id: 4,
-            pregunta: "Exterior Lipídico",
-            respuesta: formData.exterior_lipidico,
-            observaciones: "",
-            respondido_por: estilistaData.nombre,
-            respondido_por_id: estilistaData.id
-          },
-          {
-            pregunta_id: 5,
-            pregunta: "Densidad",
-            respuesta: formData.densidad,
-            observaciones: "",
-            respondido_por: estilistaData.nombre,
-            respondido_por_id: estilistaData.id
-          },
-          {
-            pregunta_id: 6,
-            pregunta: "Oleosidad",
-            respuesta: formData.oleosidad,
-            observaciones: "",
-            respondido_por: estilistaData.nombre,
-            respondido_por_id: estilistaData.id
-          },
-          {
-            pregunta_id: 7,
-            pregunta: "Grosor",
-            respuesta: formData.grosor,
-            observaciones: "",
-            respondido_por: estilistaData.nombre,
-            respondido_por_id: estilistaData.id
-          },
-          {
-            pregunta_id: 8,
-            pregunta: "Textura",
-            respuesta: formData.textura,
-            observaciones: "",
-            respondido_por: estilistaData.nombre,
-            respondido_por_id: estilistaData.id
-          }
-        ],
+        respuestas: technicalResponses,
         descripcion_servicio: `Diagnóstico rizotipo para ${cita.servicios?.map((s: any) => s.nombre).join(', ') || 'Sin servicio'} - Realizado por ${estilistaData.nombre}`,
 
         // Fotos (URLs vacías porque el backend las subirá a S3)
@@ -513,6 +695,56 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
     );
   };
 
+  const renderTechnicalField = (field: TechnicalField, label: string) => {
+    const options = TECHNICAL_OPTIONS[field];
+    const selectedValues = formData[field];
+    const metadata = TECHNICAL_METADATA[field];
+    const accionesSeleccionadas = selectedValues.length > 0
+      ? buildTechnicalActionsText(field, selectedValues)
+      : "";
+
+    return (
+      <div>
+        <label className="block text-sm font-medium mb-2">{label} *</label>
+        <div className="grid grid-cols-2 gap-2">
+          {options.map((option) => {
+            const isSelected = selectedValues.includes(option.value);
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => toggleTechnicalOption(field, option.value)}
+                className={`p-2 rounded-lg border text-sm text-left transition-colors ${
+                  isSelected
+                    ? "border-gray-900 bg-gray-100 text-gray-900"
+                    : "border-gray-300 bg-white text-gray-700 hover:border-gray-400"
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-gray-500 mt-1">
+          {selectedValues.length > 0
+            ? `Seleccionado: ${selectedValues.join(", ")}`
+            : "Selecciona una o varias opciones"}
+        </p>
+        <p className="text-xs text-gray-500 mt-1">
+          <strong>Definición:</strong> {metadata.definition}
+        </p>
+        {accionesSeleccionadas && (
+          <p className="text-xs text-gray-600 mt-1">
+            <strong>Acciones:</strong> {accionesSeleccionadas}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  const tieneFotosAntesDespues = formData.foto_antes.length > 0 && formData.foto_despues.length > 0;
+
   return (
     <form onSubmit={handleSubmit} className="rounded-lg border bg-white p-6 space-y-6">
       {/* Header */}
@@ -556,128 +788,14 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
         <h3 className="text-lg font-semibold">Parámetros Técnicos</h3>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">Plasticidad *</label>
-            <select
-              className="w-full p-2 border rounded-lg"
-              value={formData.plasticidad}
-              onChange={(e) => handleInputChange('plasticidad', e.target.value)}
-              required
-            >
-              <option value="">Seleccionar</option>
-              <option value="ALTA">Alta</option>
-              <option value="MEDIA">Medio</option>
-              <option value="BAJA">Baja</option>
-              <option value="MUY BAJA">Muy Baja</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Permeabilidad *</label>
-            <select
-              className="w-full p-2 border rounded-lg"
-              value={formData.permeabilidad}
-              onChange={(e) => handleInputChange('permeabilidad', e.target.value)}
-              required
-            >
-              <option value="">Seleccionar</option>
-              <option value="ALTA">Alta</option>
-              <option value="MEDIA">Media</option>
-              <option value="BAJA">Baja</option>
-              <option value="OTRA">Otra</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Porosidad *</label>
-            <select
-              className="w-full p-2 border rounded-lg"
-              value={formData.porosidad}
-              onChange={(e) => handleInputChange('porosidad', e.target.value)}
-              required
-            >
-              <option value="">Seleccionar</option>
-              <option value="ALTA">Alta</option>
-              <option value="BAJA">Baja</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Exterior Lipídico *</label>
-            <select
-              className="w-full p-2 border rounded-lg"
-              value={formData.exterior_lipidico}
-              onChange={(e) => handleInputChange('exterior_lipidico', e.target.value)}
-              required
-            >
-              <option value="">Seleccionar</option>
-              <option value="ALTA">Alta</option>
-              <option value="MEDIA">Media</option>
-              <option value="BAJA">Baja</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Densidad *</label>
-            <select
-              className="w-full p-2 border rounded-lg"
-              value={formData.densidad}
-              onChange={(e) => handleInputChange('densidad', e.target.value)}
-              required
-            >
-              <option value="">Seleccionar</option>
-              <option value="EXTRA ALTA">Extra Alta</option>
-              <option value="ALTA">Alta</option>
-              <option value="MEDIA">Media</option>
-              <option value="BAJA">Baja</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Oleosidad *</label>
-            <select
-              className="w-full p-2 border rounded-lg"
-              value={formData.oleosidad}
-              onChange={(e) => handleInputChange('oleosidad', e.target.value)}
-              required
-            >
-              <option value="">Seleccionar</option>
-              <option value="ALTA">Alta</option>
-              <option value="MEDIA">Media</option>
-              <option value="BAJA">Baja</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Grosor *</label>
-            <select
-              className="w-full p-2 border rounded-lg"
-              value={formData.grosor}
-              onChange={(e) => handleInputChange('grosor', e.target.value)}
-              required
-            >
-              <option value="">Seleccionar</option>
-              <option value="GRUESO">Grueso</option>
-              <option value="MEDIO">Medio</option>
-              <option value="DELGADO">Delgado</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Textura *</label>
-            <select
-              className="w-full p-2 border rounded-lg"
-              value={formData.textura}
-              onChange={(e) => handleInputChange('textura', e.target.value)}
-              required
-            >
-              <option value="">Seleccionar</option>
-              <option value="Lanoso / Ulótrico">Lanoso / Ulótrico</option>
-              <option value="Ensotijado / Lisótrico">Ensotijado / Lisótrico</option>
-              <option value="Laminado / Cinótrico">Laminado / Cinótrico</option>
-              <option value="Procesado o dañado">Procesado o dañado</option>
-            </select>
-          </div>
+          {renderTechnicalField("plasticidad", "Plasticidad")}
+          {renderTechnicalField("permeabilidad", "Permeabilidad")}
+          {renderTechnicalField("porosidad", "Porosidad")}
+          {renderTechnicalField("exterior_lipidico", "Exterior Lipídico")}
+          {renderTechnicalField("densidad", "Densidad")}
+          {renderTechnicalField("oleosidad", "Oleosidad")}
+          {renderTechnicalField("grosor", "Grosor")}
+          {renderTechnicalField("textura", "Textura")}
         </div>
       </div>
 
@@ -790,13 +908,13 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
         <button
           type="submit"
           disabled={loading || !formData.firma_profesional ||
-            !formData.plasticidad || !formData.permeabilidad || !formData.porosidad ||
-            !formData.exterior_lipidico || !formData.densidad || !formData.oleosidad ||
-            !formData.grosor || !formData.textura}
+            formData.plasticidad.length === 0 || formData.permeabilidad.length === 0 || formData.porosidad.length === 0 ||
+            formData.exterior_lipidico.length === 0 || formData.densidad.length === 0 || formData.oleosidad.length === 0 ||
+            formData.grosor.length === 0 || formData.textura.length === 0 || !tieneFotosAntesDespues}
           className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center ${loading || !formData.firma_profesional ||
-            !formData.plasticidad || !formData.permeabilidad || !formData.porosidad ||
-            !formData.exterior_lipidico || !formData.densidad || !formData.oleosidad ||
-            !formData.grosor || !formData.textura
+            formData.plasticidad.length === 0 || formData.permeabilidad.length === 0 || formData.porosidad.length === 0 ||
+            formData.exterior_lipidico.length === 0 || formData.densidad.length === 0 || formData.oleosidad.length === 0 ||
+            formData.grosor.length === 0 || formData.textura.length === 0 || !tieneFotosAntesDespues
             ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
             : 'bg-gray-600 text-white hover:bg-gray-700'
             }`}
@@ -820,6 +938,14 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
         <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
           <p className="text-gray-700 text-sm">
             ⚠️ Debe incluir su firma como profesional para crear la ficha.
+          </p>
+        </div>
+      )}
+
+      {!tieneFotosAntesDespues && (
+        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+          <p className="text-gray-700 text-sm">
+            ⚠️ Debe cargar mínimo una foto de antes y una foto de después.
           </p>
         </div>
       )}

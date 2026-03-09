@@ -82,6 +82,14 @@ const paymentMethodMap: PaymentMethod[] = [
     icon: <Wallet className="w-5 h-5" />,
     description: "Transferencia bancaria",
     available: true
+  },
+  {
+    id: "descuento_nomina",
+    backendValue: "descuento_nomina",
+    displayName: "Descuento por nómina",
+    icon: <Wallet className="w-5 h-5" />,
+    description: "Descuento aplicado por nómina",
+    available: true
   }
 ];
 

@@ -87,6 +87,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         ...(isCopCurrency ? [{ id: "addi", name: "Addi", icon: <Wallet className="w-4 h-4" /> }] : []),
         { id: "efectivo", name: "Efectivo", icon: <DollarSign className="w-4 h-4" /> },
         { id: "transferencia", name: "Transferencia", icon: <Wallet className="w-4 h-4" /> },
+        { id: "descuento_nomina", name: "Descuento por nómina", icon: <Wallet className="w-4 h-4" /> },
     ];
 
     const sanitizePaymentMethod = (method: string): string => {
@@ -688,6 +689,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                              selectedPaymentMethod === "tarjeta" ? "Tarjeta" :
                                              selectedPaymentMethod === "efectivo" ? "Efectivo" :
                                              selectedPaymentMethod === "giftcard" ? "Gift Card" :
+                                             selectedPaymentMethod === "descuento_nomina" ? "Descuento por nómina" :
                                              selectedPaymentMethod === "transferencia" ? "Transferencia" :
                                              "Sin pago"}
                                         </span>

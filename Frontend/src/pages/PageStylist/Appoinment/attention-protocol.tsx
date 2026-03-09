@@ -36,6 +36,7 @@ type TipoFicha =
   | "VALORACION_PRUEBA_COLOR";
 
 type VistaPrincipal = "fichas" | "productos" | "calendario" | "menu-principal" | "ver-fichas";
+// Código de calificación del cliente desactivado temporalmente.
 
 // Interfaz para datos de fichas guardadas
 interface FichaGuardada {
@@ -59,6 +60,7 @@ interface FichaServidor {
   fecha_ficha: string;
   fecha_reserva: string;
   tipo_ficha: TipoFicha;
+  cita_id?: string;
   precio: number;
   estado: string;
   estado_pago: string;
@@ -90,6 +92,7 @@ export function AttentionProtocol({
   const [totalProductos, setTotalProductos] = useState(0);
   const [, setCitaConProductos] = useState<any>(citaSeleccionada);
   const [, setProductosCita] = useState<any[]>([]);
+  // const [calificacionCliente, setCalificacionCliente] = useState<CalificacionCliente | "">("");
   const [imagenAmpliada, setImagenAmpliada] = useState<{
     url: string;
     alt: string;
@@ -192,13 +195,65 @@ export function AttentionProtocol({
           return url;
         };
 
-        // 🔥 ARREGLAR URLs DE FOTOS
-        const fotosArregladas = ficha.fotos ? {
-          antes: ficha.fotos.antes?.map(fixS3Url) || [],
-          despues: ficha.fotos.despues?.map(fixS3Url) || [],
-          antes_urls: ficha.fotos.antes_urls?.map(fixS3Url) || [],
-          despues_urls: ficha.fotos.despues_urls?.map(fixS3Url) || []
-        } : undefined;
+        const normalizePhotos = (value: any): string[] => {
+          if (!value) return [];
+          const rawValues = Array.isArray(value) ? value : [value];
+
+          return rawValues
+            .map((item) => {
+              if (typeof item === "string") return item;
+              if (item && typeof item === "object") {
+                return item.url || item.src || item.location || item.path || "";
+              }
+              return "";
+            })
+            .filter((url: string) => Boolean(url))
+            .map(fixS3Url);
+        };
+
+        const rawFotos =
+          ficha.fotos ||
+          ficha.contenido?.fotos ||
+          ficha.datos_especificos?.fotos ||
+          ficha.contenido?.datos_especificos?.fotos ||
+          {};
+
+        const fotosAntes = Array.from(
+          new Set([
+            ...normalizePhotos(rawFotos.antes),
+            ...normalizePhotos(rawFotos.antes_urls),
+            ...normalizePhotos(rawFotos.antes_url),
+            ...normalizePhotos(rawFotos.fotos_antes),
+            ...normalizePhotos(rawFotos.fotos_actual),
+            ...normalizePhotos(rawFotos.fotos_estado_actual),
+            ...normalizePhotos(rawFotos.actual),
+            ...normalizePhotos(rawFotos.estado_actual),
+            ...normalizePhotos(ficha.antes_url),
+          ])
+        );
+
+        const fotosDespues = Array.from(
+          new Set([
+            ...normalizePhotos(rawFotos.despues),
+            ...normalizePhotos(rawFotos.despues_urls),
+            ...normalizePhotos(rawFotos.despues_url),
+            ...normalizePhotos(rawFotos.fotos_despues),
+            ...normalizePhotos(rawFotos.fotos_expectativa),
+            ...normalizePhotos(rawFotos.expectativa),
+            ...normalizePhotos(rawFotos.resultado),
+            ...normalizePhotos(rawFotos.resultado_final),
+            ...normalizePhotos(ficha.despues_url),
+          ])
+        );
+
+        const fotosArregladas = fotosAntes.length > 0 || fotosDespues.length > 0
+          ? {
+            antes: fotosAntes,
+            despues: fotosDespues,
+            antes_urls: fotosAntes,
+            despues_urls: fotosDespues,
+          }
+          : undefined;
 
         return {
           id: ficha._id,
@@ -213,10 +268,20 @@ export function AttentionProtocol({
           fecha_ficha: ficha.fecha_ficha,
           fecha_reserva: ficha.fecha_reserva,
           tipo_ficha: ficha.tipo_ficha as TipoFicha,
+          cita_id:
+            ficha.cita_id ||
+            ficha.datos_especificos?.cita_id ||
+            ficha.contenido?.cita_id ||
+            ficha.contenido?.datos_especificos?.cita_id,
           precio: ficha.precio || 0,
           estado: ficha.estado || 'completado',
           estado_pago: ficha.estado_pago || 'pagado',
           contenido: {
+            cita_id:
+              ficha.cita_id ||
+              ficha.datos_especificos?.cita_id ||
+              ficha.contenido?.cita_id ||
+              ficha.contenido?.datos_especificos?.cita_id,
             datos_especificos: {
               ...ficha.datos_especificos,
               fotos: fotosArregladas,
@@ -264,6 +329,7 @@ export function AttentionProtocol({
     const rawId = cita?.cita_id || cita?._id || "";
     return typeof rawId === "string" ? rawId : String(rawId || "");
   };
+  // Código de funciones de calificación del cliente desactivado temporalmente.
 
   const scrollBottomSheetToTop = () => {
     const scrollContainer = document.querySelector("[data-bottom-sheet-scroll]");
@@ -299,6 +365,245 @@ export function AttentionProtocol({
 
     return response.statusText || "Error desconocido";
   };
+
+  const toIdString = (value: unknown): string => {
+    if (typeof value === "string") return value.trim();
+    if (typeof value === "number") return String(value);
+
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      if (typeof record.$oid === "string") return record.$oid.trim();
+      if (typeof record._id === "string") return record._id.trim();
+      if (typeof record.id === "string") return record.id.trim();
+    }
+
+    return "";
+  };
+
+  const toPhotoArray = (value: unknown): string[] => {
+    if (Array.isArray(value)) {
+      return value.flatMap((item) => toPhotoArray(item)).filter(Boolean);
+    }
+
+    if (typeof value === "string" && value.trim()) {
+      return [value.trim()];
+    }
+
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      const candidates = [record.url, record.src, record.location, record.path, record.key, record.href];
+      for (const candidate of candidates) {
+        if (typeof candidate === "string" && candidate.trim()) {
+          return [candidate.trim()];
+        }
+      }
+    }
+
+    return [];
+  };
+
+  const getFichaCitaId = (ficha: any): string => {
+    const candidates = [
+      ficha?.cita_id,
+      ficha?.quote_id,
+      ficha?.contenido?.cita_id,
+      ficha?.contenido?.quote_id,
+      ficha?.datos_especificos?.cita_id,
+      ficha?.datos_especificos?.quote_id,
+      ficha?.contenido?.datos_especificos?.cita_id,
+      ficha?.contenido?.datos_especificos?.quote_id,
+    ];
+
+    for (const candidate of candidates) {
+      const parsedId = toIdString(candidate);
+      if (parsedId) return parsedId;
+    }
+
+    return "";
+  };
+
+  const extractFichaPhotos = (ficha: any): { antes: string[]; despues: string[] } => {
+    const beforeKeys = [
+      "antes",
+      "antes_urls",
+      "antes_url",
+      "fotos_antes",
+      "foto_antes",
+      "foto_antes_url",
+      "fotos_actual",
+      "fotos_estado_actual",
+      "actual",
+      "estado_actual",
+    ];
+    const afterKeys = [
+      "despues",
+      "despues_urls",
+      "despues_url",
+      "fotos_despues",
+      "foto_despues",
+      "foto_despues_url",
+      "fotos_expectativa",
+      "expectativa",
+      "resultado",
+      "resultado_final",
+    ];
+    const beforeSet = new Set<string>();
+    const afterSet = new Set<string>();
+
+    const addPhotosByKeys = (keys: string[], collector: Set<string>, source: any) => {
+      if (!source) return;
+
+      keys.forEach((key) => {
+        toPhotoArray(source?.[key]).forEach((url) => collector.add(url));
+      });
+    };
+
+    const photoSources = [
+      ficha,
+      ficha?.fotos,
+      ficha?.contenido,
+      ficha?.contenido?.fotos,
+      ficha?.contenido?.datos_especificos,
+      ficha?.contenido?.datos_especificos?.fotos,
+      ficha?.datos_especificos,
+      ficha?.datos_especificos?.fotos,
+    ].filter(Boolean);
+
+    photoSources.forEach((source) => {
+      addPhotosByKeys(beforeKeys, beforeSet, source);
+      addPhotosByKeys(afterKeys, afterSet, source);
+    });
+
+    return {
+      antes: Array.from(beforeSet),
+      despues: Array.from(afterSet),
+    };
+  };
+
+  const fetchFichasPorCita = async (clienteId: string, citaId: string, token: string): Promise<any[]> => {
+    const params = new URLSearchParams({
+      cliente_id: clienteId,
+      cita_id: citaId,
+    });
+
+    const response = await fetch(`${API_BASE_URL}scheduling/quotes/fichas?${params.toString()}`, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Error ${response.status}: ${await extractBackendErrorMessage(response)}`);
+    }
+
+    const payload = await response.json().catch(() => null);
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.fichas)) return payload.fichas;
+    if (Array.isArray(payload?.data)) return payload.data;
+    return [];
+  };
+
+  const fetchFichasClienteRaw = async (clienteId: string, token: string): Promise<any[]> => {
+    const response = await fetch(`${API_BASE_URL}clientes/fichas/${clienteId}`, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Error ${response.status}: ${await extractBackendErrorMessage(response)}`);
+    }
+
+    const payload = await response.json().catch(() => null);
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.fichas)) return payload.fichas;
+    if (Array.isArray(payload?.data)) return payload.data;
+    return [];
+  };
+
+  const validarFotosRequeridasParaFinalizar = async (
+    citaId: string,
+    token: string
+  ): Promise<{ esValido: boolean; mensaje: string }> => {
+    const clienteId = citaSeleccionada?.cliente?.cliente_id || citaSeleccionada?.cliente_id || "";
+    const fichasDeCita: any[] = [];
+
+    if (clienteId) {
+      let fichasPorCita: any[] = [];
+      let fichasRawCliente: any[] = [];
+
+      try {
+        fichasPorCita = await fetchFichasPorCita(clienteId, citaId, token);
+      } catch (error) {
+        console.warn("No se pudo consultar fichas por cita en scheduling/quotes/fichas:", error);
+      }
+
+      try {
+        fichasRawCliente = await fetchFichasClienteRaw(clienteId, token);
+      } catch (error) {
+        console.warn("No se pudo consultar fichas por cliente en clientes/fichas:", error);
+      }
+
+      fichasDeCita.push(...fichasPorCita);
+      fichasDeCita.push(...fichasRawCliente.filter((ficha) => getFichaCitaId(ficha) === citaId));
+    }
+
+    fichasDeCita.push(...fichasCliente.filter((ficha) => getFichaCitaId(ficha) === citaId));
+
+    if (fichasDeCita.length === 0) {
+      return {
+        esValido: false,
+        mensaje: "Debes registrar una ficha de esta cita con fotos de antes y después para poder finalizar.",
+      };
+    }
+
+    const fotosAntes = new Set<string>();
+    const fotosDespues = new Set<string>();
+
+    fichasDeCita.forEach((ficha) => {
+      const fotos = extractFichaPhotos(ficha);
+      fotos.antes.forEach((url) => fotosAntes.add(url));
+      fotos.despues.forEach((url) => fotosDespues.add(url));
+    });
+
+    console.log("📸 Resultado validación de fotos para finalizar:", {
+      citaId,
+      fichasEvaluadas: fichasDeCita.length,
+      fotosAntes: fotosAntes.size,
+      fotosDespues: fotosDespues.size,
+    });
+
+    if (fotosAntes.size > 0 && fotosDespues.size > 0) {
+      return { esValido: true, mensaje: "" };
+    }
+
+    if (fotosAntes.size === 0 && fotosDespues.size === 0) {
+      return {
+        esValido: false,
+        mensaje: "Debes cargar fotos de ANTES y DESPUÉS antes de finalizar la cita.",
+      };
+    }
+
+    if (fotosAntes.size === 0) {
+      return {
+        esValido: false,
+        mensaje: "Faltan fotos de ANTES. Debes cargarlas para finalizar la cita.",
+      };
+    }
+
+    return {
+      esValido: false,
+      mensaje: "Faltan fotos de DESPUÉS. Debes cargarlas para finalizar la cita.",
+    };
+  };
+
+  // useEffect(() => {
+  //   setCalificacionCliente(cargarCalificacionClienteGuardada(citaSeleccionada));
+  // }, [citaSeleccionada]);
 
   useEffect(() => {
     scrollBottomSheetToTop();
@@ -368,6 +673,15 @@ export function AttentionProtocol({
 
       if (!token) {
         throw new Error('No hay token de autenticación');
+      }
+
+      // if (!calificacionCliente) {
+      //   throw new Error("Debes asignar una puntuación al cliente antes de finalizar el servicio.");
+      // }
+
+      const validacionFotos = await validarFotosRequeridasParaFinalizar(citaId, token);
+      if (!validacionFotos.esValido) {
+        throw new Error(validacionFotos.mensaje);
       }
 
       console.log(`👤 Rol del usuario: ${usuarioRol}`);
@@ -1527,6 +1841,15 @@ export function AttentionProtocol({
       );
     }
 
+    const nombreCliente =
+      citaSeleccionada?.cliente?.nombre ||
+      citaSeleccionada?.cliente_nombre ||
+      "Cliente";
+    const correoCliente =
+      citaSeleccionada?.cliente?.email ||
+      citaSeleccionada?.cliente_email ||
+      "";
+
     return (
       <div className="rounded-lg border bg-white p-4">
         <div className="mb-3">
@@ -1553,7 +1876,7 @@ export function AttentionProtocol({
               <div>
                 <span className="font-medium text-gray-600">Cliente:</span>
                 <p className="font-semibold">
-                  {citaSeleccionada.cliente.nombre}
+                  {nombreCliente}
                 </p>
               </div>
               <div>
@@ -1562,6 +1885,12 @@ export function AttentionProtocol({
                   {citaSeleccionada.servicios?.map((s: any) => s.nombre).join(', ') || citaSeleccionada.servicio?.nombre || 'Sin servicio'}
                 </p>
               </div>
+              {correoCliente && (
+                <div className="col-span-2">
+                  <span className="font-medium text-gray-600">Correo:</span>
+                  <p className="truncate">{correoCliente}</p>
+                </div>
+              )}
               <div>
                 <span className="font-medium text-gray-600">Fecha:</span>
                 <p>{citaSeleccionada.fecha}</p>
@@ -1715,6 +2044,14 @@ export function AttentionProtocol({
   const renderVistaMenuPrincipal = () => {
     const estadoInfo = getEstadoCita(citaSeleccionada);
     const fichasCitaActual = getFichasGuardadasCitaActual();
+    const nombreCliente =
+      citaSeleccionada?.cliente?.nombre ||
+      citaSeleccionada?.cliente_nombre ||
+      "Cliente";
+    const correoCliente =
+      citaSeleccionada?.cliente?.email ||
+      citaSeleccionada?.cliente_email ||
+      "";
 
     // Extraer productos de la cita si existen
     const productosCita = citaSeleccionada?.productos || [];
@@ -1731,9 +2068,12 @@ export function AttentionProtocol({
           <div>
             <h2 className="text-lg font-bold">Protocolo de atención</h2>
             <p className="text-sm text-gray-600 mt-1">
-              {citaSeleccionada.cliente.nombre} - {
+              {nombreCliente} - {
                 citaSeleccionada.servicios?.map((s: any) => s.nombre).join(', ') ||  citaSeleccionada.servicio?.nombre || 'Sin servicio'}
             </p>
+            {correoCliente && (
+              <p className="text-xs text-gray-500 truncate">{correoCliente}</p>
+            )}
             <p className="text-xs text-gray-500">
               {citaSeleccionada.fecha} • {citaSeleccionada.hora_inicio} - {citaSeleccionada.hora_fin}
             </p>
@@ -1826,6 +2166,8 @@ export function AttentionProtocol({
             </div>
           </div>
         )}
+
+        {/* Bloque de calificación del cliente desactivado temporalmente. */}
 
         <div className="mb-4">
           <h3 className="mb-3 font-semibold text-sm">¿Qué deseas hacer?</h3>
@@ -1954,12 +2296,17 @@ export function AttentionProtocol({
       onGuardar: (datos: any) => guardarFicha(tipoFichaSeleccionada, datos),
       onSubmit: (_: any) => {
         const citaId = getCitaId(citaSeleccionada);
+        const clienteIdActual = citaSeleccionada?.cliente?.cliente_id || citaSeleccionada?.cliente_id;
         const tipoActual = tipoFichaSeleccionada;
 
         if (citaId && tipoActual) {
           setFichasGuardadas((prev) =>
             prev.filter((ficha) => !(ficha.citaId === citaId && ficha.tipo === tipoActual))
           );
+        }
+
+        if (clienteIdActual) {
+          fetchFichasCliente(clienteIdActual);
         }
 
         setTipoFichaSeleccionada(null);

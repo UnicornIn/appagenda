@@ -154,6 +154,11 @@ export function FichaAsesoriaCorte({ cita, datosIniciales, onGuardar, onSubmit, 
       return;
     }
 
+    if (formData.foto_antes.length === 0 || formData.foto_despues.length === 0) {
+      alert('Debe cargar al menos una foto de ANTES y una foto de DESPUÉS para crear la ficha');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -416,6 +421,8 @@ export function FichaAsesoriaCorte({ cita, datosIniciales, onGuardar, onSubmit, 
     );
   };
 
+  const tieneFotosAntesDespues = formData.foto_antes.length > 0 && formData.foto_despues.length > 0;
+
   return (
     <form onSubmit={handleSubmit} className="rounded-lg border bg-white p-6 space-y-6">
       {/* Header */}
@@ -528,8 +535,8 @@ export function FichaAsesoriaCorte({ cita, datosIniciales, onGuardar, onSubmit, 
 
         <button
           type="submit"
-          disabled={loading || !formData.firma_profesional || !formData.descripcion.trim()}
-          className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center ${loading || !formData.firma_profesional || !formData.descripcion.trim()
+          disabled={loading || !formData.firma_profesional || !formData.descripcion.trim() || !tieneFotosAntesDespues}
+          className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center ${loading || !formData.firma_profesional || !formData.descripcion.trim() || !tieneFotosAntesDespues
               ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
               : 'bg-gray-600 text-white hover:bg-gray-700'
             }`}
@@ -561,6 +568,14 @@ export function FichaAsesoriaCorte({ cita, datosIniciales, onGuardar, onSubmit, 
         <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
           <p className="text-gray-700 text-sm">
             ⚠️ Debe agregar una descripción del corte realizado.
+          </p>
+        </div>
+      )}
+
+      {!tieneFotosAntesDespues && (
+        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+          <p className="text-gray-700 text-sm">
+            ⚠️ Debe cargar mínimo una foto de antes y una foto de después.
           </p>
         </div>
       )}
