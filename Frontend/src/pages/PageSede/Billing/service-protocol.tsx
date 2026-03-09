@@ -186,7 +186,7 @@ export function ServiceProtocol({
       }
 
       const response = await fetch(
-        `${API_BASE_URL}fichas?${params.toString()}`,
+        `${API_BASE_URL}scheduling/quotes/fichas?${params.toString()}`,
         {
           method: 'GET',
           headers: {

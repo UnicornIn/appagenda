@@ -6,7 +6,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
-  Clock,
+  // Clock,
   CreditCard,
   LogOut,
   Menu,
@@ -97,6 +97,7 @@ const parseMinutes = (hora: string) => {
   return h * 60 + m;
 };
 
+/*
 const formatHoyTitulo = (isoDate: string) => {
   const [yearStr, monthStr, dayStr] = isoDate.split("-");
   const year = Number(yearStr);
@@ -119,6 +120,7 @@ const getEstadoUI = (estado?: string) => {
   }
   return { label: "Pendiente", className: "bg-gray-100 text-gray-700" };
 };
+*/
 
 // Helper: calcular precio total de cita
 const calcularPrecioTotalCita = (cita: any): number => {
@@ -143,7 +145,8 @@ export default function VistaEstilistaPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { logout } = useAuth();
-  const { citas, loading, error, refetchCitas } = useEstilistaData();
+  // const { citas, loading, error, refetchCitas } = useEstilistaData();
+  const { citas, refetchCitas } = useEstilistaData();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [citaSeleccionada, setCitaSeleccionada] = useState<any>(null);
@@ -311,10 +314,12 @@ export default function VistaEstilistaPage() {
     setRefrescarBloqueos((prev) => prev + 1);
   };
 
+  /*
   const handleRetryData = () => {
     refetchCitas();
     setRefrescarBloqueos((prev) => prev + 1);
   };
+  */
 
   const irMesAnterior = () => {
     setMonthCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
@@ -371,6 +376,7 @@ export default function VistaEstilistaPage() {
             </div>
           </section>
 
+          {/*
           <section className="rounded-2xl border border-gray-200 bg-white p-4">
             <div className="mb-3 flex items-center gap-2">
               <Clock className="h-4 w-4 text-gray-600" />
@@ -428,6 +434,7 @@ export default function VistaEstilistaPage() {
               </div>
             )}
           </section>
+          */}
 
           <section className="rounded-2xl border border-gray-200 bg-white p-4">
             <div className="mb-3 flex items-center justify-between">

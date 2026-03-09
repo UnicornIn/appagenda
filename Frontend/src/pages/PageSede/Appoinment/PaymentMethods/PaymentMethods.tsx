@@ -70,6 +70,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     const [step, setStep] = useState<1 | 2>(1);
     const [selectedProcessType, setSelectedProcessType] = useState<"reserva" | "pago">("reserva");
     const [selectedPaymentType, setSelectedPaymentType] = useState<"deposit" | "full">("full");
+    const [depositAmountInput, setDepositAmountInput] = useState<string>("");
     const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("sin_pago");
     const [giftCardCode, setGiftCardCode] = useState("");
     const [userCurrency, setUserCurrency] = useState<string>(getStoredCurrency("USD"));
@@ -86,6 +87,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         ...(isCopCurrency ? [{ id: "addi", name: "Addi", icon: <Wallet className="w-4 h-4" /> }] : []),
         { id: "efectivo", name: "Efectivo", icon: <DollarSign className="w-4 h-4" /> },
         { id: "transferencia", name: "Transferencia", icon: <Wallet className="w-4 h-4" /> },
+        { id: "descuento_nomina", name: "Descuento por nómina", icon: <Wallet className="w-4 h-4" /> },
     ];
 
     const sanitizePaymentMethod = (method: string): string => {
@@ -125,8 +127,24 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
     // 🔥 CALCULOS
     const FIXED_DEPOSIT = getFixedDepositByCurrency(userCurrency);
+    const totalAmount = citaData?.monto_total ?? 0;
     const canHaveDeposit = citaData?.monto_total ? citaData.monto_total > FIXED_DEPOSIT : false;
     const requiresFullPaymentNow = citaData?.monto_total ? requiresFullPayment(citaData.monto_total, userCurrency) : false;
+    const parsedDepositAmount = Number(depositAmountInput.replace(",", "."));
+    const hasValidDepositAmount =
+        Number.isFinite(parsedDepositAmount) &&
+        parsedDepositAmount > 0 &&
+        parsedDepositAmount <= totalAmount;
+    const selectedDepositAmount = hasValidDepositAmount
+        ? parsedDepositAmount
+        : Math.min(FIXED_DEPOSIT, totalAmount);
+
+    // 🔥 REINICIAR ABONO AL ABRIR CAMBIANDO CITA/MONEDA
+    useEffect(() => {
+        if (!isOpen || !citaData) return;
+        const initialDepositAmount = Math.min(FIXED_DEPOSIT, citaData.monto_total);
+        setDepositAmountInput(initialDepositAmount.toString());
+    }, [isOpen, citaData?.monto_total, FIXED_DEPOSIT]);
 
     // 🔥 FORMATO DE MONTO
     const formatAmount = (amount: number) => {
@@ -196,8 +214,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
             if (withPayment) {
                 if (selectedPaymentType === "deposit" && canHaveDeposit && !requiresFullPaymentNow) {
-                    abonoMonto = Number(FIXED_DEPOSIT);
-                    saldoPendiente = citaData.monto_total - abonoMonto;
+                    abonoMonto = Number(selectedDepositAmount);
+                    saldoPendiente = Math.max(citaData.monto_total - abonoMonto, 0);
                     estadoPago = saldoPendiente > 0 ? "pendiente" : "pagado";
                 } else {
                     abonoMonto = Number(citaData.monto_total);
@@ -245,7 +263,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             if (!withPayment) {
                 mensaje = `✅ Cita confirmada para ${citaData.cliente}`;
             } else if (selectedPaymentType === "deposit" && canHaveDeposit && !requiresFullPaymentNow) {
-                mensaje = `✅ Cita confirmada con abono de ${formatAmount(FIXED_DEPOSIT)}`;
+                mensaje = `✅ Cita confirmada con abono de ${formatAmount(selectedDepositAmount)}`;
             } else {
                 mensaje = `✅ Cita confirmada con pago completo de ${formatAmount(citaData.monto_total)}`;
             }
@@ -272,6 +290,17 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     };
 
     const handleConfirm = () => {
+        if (
+            selectedProcessType === "pago" &&
+            selectedPaymentType === "deposit" &&
+            canHaveDeposit &&
+            !requiresFullPaymentNow &&
+            !hasValidDepositAmount
+        ) {
+            setError(`Ingresa un monto de abono valido entre 1 y ${Math.round(totalAmount)}.`);
+            return;
+        }
+
         if (selectedProcessType === "pago" && selectedPaymentMethod === "giftcard" && !giftCardCode.trim()) {
             setError("Debes ingresar el codigo de la Gift Card para continuar.");
             return;
@@ -458,7 +487,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                     {selectedProcessType === "reserva"
                                         ? "Reserva directa sin pago"
                                         : selectedPaymentType === "deposit" && canHaveDeposit && !requiresFullPaymentNow
-                                        ? `Abono de ${formatAmount(FIXED_DEPOSIT)}`
+                                        ? `Abono de ${formatAmount(selectedDepositAmount)}`
                                         : `Pago completo de ${formatAmount(citaData.monto_total)}`
                                     }
                                 </div>
@@ -466,7 +495,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                     {selectedProcessType === "reserva"
                                         ? "La cita se confirmará sin procesar ningún pago."
                                         : selectedPaymentType === "deposit" && canHaveDeposit && !requiresFullPaymentNow
-                                        ? `El cliente deberá abonar ${formatAmount(FIXED_DEPOSIT)}`
+                                        ? `El cliente deberá abonar ${formatAmount(selectedDepositAmount)}`
                                         : `El cliente pagará el total del servicio.`
                                     }
                                 </div>
@@ -494,15 +523,15 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                             }`}
                                         >
                                             <div className="flex items-center justify-between">
-                                                <div>
-                                                    <div className="text-sm font-medium text-gray-900">Abono</div>
-                                                    <div className="text-xs text-gray-600 mt-0.5">
-                                                        {formatAmount(FIXED_DEPOSIT)}
-                                                    </div>
+                                            <div>
+                                                <div className="text-sm font-medium text-gray-900">Abono</div>
+                                                <div className="text-xs text-gray-600 mt-0.5">
+                                                        {formatAmount(selectedDepositAmount)}
                                                 </div>
-                                                <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                                                    selectedPaymentType === "deposit" 
-                                                        ? 'border-gray-900 bg-gray-900' 
+                                            </div>
+                                            <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                                                selectedPaymentType === "deposit" 
+                                                    ? 'border-gray-900 bg-gray-900' 
                                                         : 'border-gray-400'
                                                 }`}>
                                                     {selectedPaymentType === "deposit" && (
@@ -541,6 +570,48 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                     </button>
                                 </div>
                             </div>
+
+                            {selectedPaymentType === "deposit" && canHaveDeposit && !requiresFullPaymentNow && (
+                                <div className="p-3 border border-gray-300 rounded bg-gray-50">
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                                        Monto del abono
+                                    </label>
+                                    <input
+                                        type="number"
+                                        value={depositAmountInput}
+                                        onChange={(event) => {
+                                            const rawValue = event.target.value;
+                                            if (rawValue === "") {
+                                                setDepositAmountInput("");
+                                                setError(null);
+                                                return;
+                                            }
+
+                                            const numericValue = Number(rawValue.replace(",", "."));
+                                            if (!Number.isFinite(numericValue) || numericValue < 0) return;
+
+                                            const clampedValue = Math.min(numericValue, citaData.monto_total);
+                                            setDepositAmountInput(clampedValue.toString());
+                                            setError(null);
+                                        }}
+                                        onBlur={() => {
+                                            if (!hasValidDepositAmount) {
+                                                const initialDepositAmount = Math.min(FIXED_DEPOSIT, citaData.monto_total);
+                                                setDepositAmountInput(initialDepositAmount.toString());
+                                            }
+                                        }}
+                                        min="1"
+                                        max={citaData.monto_total}
+                                        step={isCopCurrency ? "1" : "0.01"}
+                                        disabled={loading}
+                                        className="w-full rounded border border-gray-300 px-2 py-2 text-sm text-gray-900 focus:border-gray-900 focus:outline-none disabled:opacity-50"
+                                        placeholder={Math.round(Math.min(FIXED_DEPOSIT, citaData.monto_total)).toString()}
+                                    />
+                                    <div className="text-[11px] text-gray-600 mt-1">
+                                        Maximo permitido: {formatAmount(citaData.monto_total)}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* MÉTODO DE PAGO */}
                             <div className="space-y-3">
@@ -603,7 +674,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                         <span>Monto:</span>
                                         <span className="font-medium text-gray-900">
                                             {selectedPaymentType === "deposit" && canHaveDeposit && !requiresFullPaymentNow
-                                                ? formatAmount(FIXED_DEPOSIT) + " (Abono)"
+                                                ? formatAmount(selectedDepositAmount) + " (Abono)"
                                                 : formatAmount(citaData.monto_total)
                                             }
                                         </span>
@@ -618,6 +689,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                              selectedPaymentMethod === "tarjeta" ? "Tarjeta" :
                                              selectedPaymentMethod === "efectivo" ? "Efectivo" :
                                              selectedPaymentMethod === "giftcard" ? "Gift Card" :
+                                             selectedPaymentMethod === "descuento_nomina" ? "Descuento por nómina" :
                                              selectedPaymentMethod === "transferencia" ? "Transferencia" :
                                              "Sin pago"}
                                         </span>

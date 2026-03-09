@@ -131,12 +131,12 @@ async def listar_clientes(
 ):
     try:
         rol = current_user.get("rol")
-        if rol not in ["admin_sede", "super_admin", "estilista"]:
+        if rol not in ["admin_sede", "super_admin", "estilista", "call_center", "recepcionista"]:
             raise HTTPException(403, "No autorizado")
 
         query = {}
 
-        if rol in ["admin_sede", "estilista"]:
+        if rol in ["admin_sede", "estilista", "call_center", "recepcionista"]:
             sede_id = current_user.get("sede_id")
             franquicia_id = await _get_franquicia_id_de_sede(sede_id)
 
@@ -187,7 +187,7 @@ async def listar_todos(
     try:
         rol = current_user.get("rol")
 
-        if rol not in ["super_admin", "admin_sede", "estilista"]:
+        if rol not in ["super_admin", "admin_sede", "estilista", "call_center", "recepcionista"]:
             raise HTTPException(403, "No tienes permisos para ver clientes")
 
         # ============================================================
@@ -195,7 +195,7 @@ async def listar_todos(
         # ============================================================
         query = {}
 
-        if rol in ["admin_sede", "estilista"]:
+        if rol in ["admin_sede", "estilista", "call_center", "recepcionista"]:
             sede_id = current_user.get("sede_id")
 
             if not sede_id:
@@ -334,10 +334,10 @@ async def listar_por_id(
     try:
         rol = current_user.get("rol")
 
-        if rol not in ["super_admin", "admin_sede", "estilista"]:
+        if rol not in ["super_admin", "admin_sede", "estilista", "call_center", "recepcionista"]:
             raise HTTPException(403, "No autorizado")
 
-        if rol in ["admin_sede", "estilista"]:
+        if rol in ["admin_sede", "estilista", "call_center", "recepcionista"]:
             if id != current_user.get("sede_id"):
                 raise HTTPException(403, "No tiene permisos para ver esos clientes")
 
@@ -363,7 +363,7 @@ async def obtener_cliente(
         rol = current_user.get("rol")
         user_sede_id = current_user.get("sede_id")
 
-        if rol not in ["admin_sede", "super_admin", "estilista"]:
+        if rol not in ["admin_sede", "super_admin", "estilista", "call_center", "recepcionista"]:
             raise HTTPException(status_code=403, detail="No autorizado")
 
         # Buscar cliente por cliente_id o _id
@@ -378,7 +378,7 @@ async def obtener_cliente(
             raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
         # Validación de acceso para admin_sede y estilista
-        if rol in ["admin_sede", "estilista"]:
+        if rol in ["admin_sede", "estilista", "call_center", "recepcionista"]:
             cliente_franquicia_id = cliente.get("franquicia_id")
             user_franquicia_id = await _get_franquicia_id_de_sede(user_sede_id)
 
@@ -410,7 +410,7 @@ async def editar_cliente(
 ):
     try:
         rol = current_user.get("rol")
-        if rol not in ["admin_sede", "super_admin"]:
+        if rol not in ["admin_sede", "super_admin", "call_center", "recepcionista"]:
             raise HTTPException(403, "No autorizado")
 
         cliente = await collection_clients.find_one({"cliente_id": id})
@@ -515,7 +515,7 @@ async def historial_cliente(
 ):
     try:
         rol = current_user.get("rol")
-        if rol not in ["admin_sede", "super_admin", "estilista"]:
+        if rol not in ["admin_sede", "super_admin", "estilista", "call_center", "recepcionista"]:
             raise HTTPException(403, "No autorizado")
 
         citas = await collection_citas.find({"cliente_id": id}).sort("fecha", -1).to_list(None)
@@ -539,7 +539,7 @@ async def obtener_fichas_cliente(
     try:
         rol = current_user.get("rol")
 
-        if rol not in ["admin_sede", "super_admin", "estilista"]:
+        if rol not in ["admin_sede", "super_admin", "estilista", "call_center", "recepcionista"]:
             raise HTTPException(403, "No autorizado")
 
         fichas = await collection_card.find(
@@ -550,7 +550,7 @@ async def obtener_fichas_cliente(
             return []
 
         # Filtrar por sede para roles no super_admin
-        if rol in ["admin_sede", "estilista"]:
+        if rol in ["admin_sede", "estilista", "call_center", "recepcionista"]:
             sede_usuario = current_user.get("sede_id")
             fichas = [f for f in fichas if f.get("sede_id") == sede_usuario]
 

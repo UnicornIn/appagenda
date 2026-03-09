@@ -94,32 +94,46 @@ async def obtener_citas(
     fecha: Optional[str] = Query(None, description="Fecha específica (YYYY-MM-DD)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Obtiene citas con datos enriquecidos.
-    ✅ Soporta nueva estructura (servicios con nombre/precio)
-    ✅ Compatible con estructuras antiguas
-    """
     try:
+        # ⭐ SEDE: usar la del usuario autenticado (ya viene dinámica del header X-Sede-Id)
+        # Si el frontend pasa sede_id en query, validar que coincida con la sede activa
+        sede_activa = current_user.get("sede_id")
+        es_super = current_user.get("rol") == "super_admin"
+
+        if sede_id and not es_super:
+            # Validar que no pida una sede diferente a la que tiene activa
+            sedes_autorizadas = list(set(
+                [sede_activa] + current_user.get("sedes_permitidas", [])
+            ))
+            if sede_id not in sedes_autorizadas:
+                raise HTTPException(status_code=403, detail="No tienes acceso a esa sede")
+            filtro_sede = sede_id
+        elif sede_id and es_super:
+            filtro_sede = sede_id  # super_admin puede pedir cualquier sede
+        else:
+            filtro_sede = sede_activa  # default: sede activa del token
+
         # === CONSTRUIR FILTRO ===
         filtro = {}
-        if sede_id:
-            filtro["sede_id"] = sede_id
+
+        # ⭐ Sede siempre presente (excepto super_admin sin sede_id)
+        if filtro_sede:
+            filtro["sede_id"] = filtro_sede
+
         if profesional_id:
             filtro["profesional_id"] = profesional_id
+
         if fecha:
             filtro["fecha"] = fecha
-        
-        # 🔥 IMPORTANTE: Si no hay filtros, agregar límite temporal
-        # Esto evita traer TODA la historia
-        if not filtro:
-            # Por defecto: solo últimos 30 días y próximos 60 días
+        else:
+            # Sin fecha específica: rango temporal para no traer toda la historia
             hoy = datetime.now()
             fecha_inicio = (hoy - timedelta(days=30)).strftime("%Y-%m-%d")
             fecha_fin = (hoy + timedelta(days=60)).strftime("%Y-%m-%d")
             filtro["fecha"] = {"$gte": fecha_inicio, "$lte": fecha_fin}
-            print(f"⚠️ Filtro vacío detectado, usando rango: {fecha_inicio} a {fecha_fin}")
 
         print(f"🔍 Buscando citas con filtro: {filtro}")
+
 
         # 🔥 OPCIÓN 1: Usar aggregate con allowDiskUse (solución rápida)
         pipeline = [
@@ -247,7 +261,7 @@ async def crear_cita(
     print(f"🔍 crear_cita invocada por {current_user.get('email')}")
 
     # Validar permisos
-    if current_user.get("rol") not in ["usuario", "admin_sede", "super_admin"]:
+    if current_user.get("rol") not in ["usuario", "admin_sede", "super_admin", "call_center", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     fecha_str = cita.fecha.strftime("%Y-%m-%d") if isinstance(cita.fecha, datetime) else str(cita.fecha)
@@ -1160,7 +1174,7 @@ async def editar_cita(
     ✅ Recalcula totales automáticamente
     ✅ Valida disponibilidad y conflictos de agenda
     """
-    if current_user.get("rol") not in ["admin_sede", "super_admin"]:
+    if current_user.get("rol") not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     cita_actual = await resolve_cita_by_id(cita_id)
@@ -1423,7 +1437,7 @@ async def editar_cita(
     profesional_id_final = str(cambios.get("profesional_id", cita_actual.get("profesional_id")))
     hora_fin_final = str(cambios.get("hora_fin", cita_actual.get("hora_fin")))
 
-    if "servicios" in cambios or "hora_inicio" in cambios:
+    if ("servicios" in cambios or "hora_inicio" in cambios) and "hora_fin" not in cambios:
         hora_fin_final = _sumar_minutos_hora(hora_inicio_final, duracion_total)
         cambios["hora_fin"] = hora_fin_final
 
@@ -2090,7 +2104,7 @@ def fix_mongo_id(doc):
 # ============================================================
 @router.get("/citas-sede", response_model=dict)
 async def get_citas_sede(current_user: dict = Depends(get_current_user)):
-    if current_user["rol"] not in ["admin_sede", "admin"]:
+    if current_user["rol"] not in ["admin_sede", "admin", "call_center", "recepcionista"]:
         raise HTTPException(
             status_code=403,
             detail="Solo los administradores de sede pueden ver esta información"
@@ -2135,7 +2149,7 @@ async def agregar_productos_a_cita(
     ⭐ Solo comisiona si lo agrega un ESTILISTA, no si es admin_sede.
     """
     # Solo admin sede, admin o estilista
-    if current_user["rol"] not in ["admin_sede", "admin", "estilista"]:
+    if current_user["rol"] not in ["admin_sede", "admin", "estilista", "call_center", "recepcionista"]:
         raise HTTPException(
             status_code=403,
             detail="No tienes permisos para agregar productos"
@@ -2303,7 +2317,7 @@ async def eliminar_producto_de_cita(
     ⭐ Aplica redondeo para corregir errores de punto flotante.
     """
     # Solo admin sede, admin o estilista
-    if current_user["rol"] not in ["admin_sede", "admin", "estilista"]:
+    if current_user["rol"] not in ["admin_sede", "admin", "estilista", "call_center", "recepcionista"]:
         raise HTTPException(
             status_code=403,
             detail="No tienes permisos para eliminar productos"
@@ -2397,7 +2411,7 @@ async def eliminar_todos_productos_de_cita(
     Elimina TODOS los productos de una cita y recalcula totales.
     """
     # Solo admin sede, admin o estilista
-    if current_user["rol"] not in ["admin_sede", "admin", "estilista"]:
+    if current_user["rol"] not in ["admin_sede", "admin", "estilista", "call_center", "recepcionista"]:
         raise HTTPException(
             status_code=403,
             detail="No tienes permisos para eliminar productos"

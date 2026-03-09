@@ -99,7 +99,7 @@ async def obtener_fichas_por_cliente(
     # 1. Validación de acceso
     # -----------------------------------------
     rol = current_user["rol"]
-    if rol not in ["super_admin", "admin_franquicia", "admin_sede", "estilista"]:
+    if rol not in ["super_admin", "admin_franquicia", "admin_sede", "estilista", "call_center", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     # -----------------------------------------

@@ -29,6 +29,7 @@ interface Appointment {
   estilista_nombre: string;
   estado: string;
   profesional_id?: string;
+  cliente_telefono?: string;
   notas_adicionales?: string;
   servicios_resumen?: string;
   servicios_detalle?: string;
@@ -104,6 +105,16 @@ const extractProfessionalName = (cita: any): string => {
   ) || '(Sin profesional)';
 };
 
+const extractClientPhone = (cita: any): string => {
+  return getFirstNonEmptyText(
+    cita?.cliente_telefono,
+    cita?.telefono_cliente,
+    cita?.cliente?.telefono,
+    cita?.cliente?.phone,
+    cita?.telefono
+  );
+};
+
 const extractServicesInfo = (cita: any): { detalle: string; resumen: string } => {
   const servicesSet = new Set<string>();
 
@@ -162,6 +173,13 @@ const CalendarScheduler: React.FC = () => {
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [selectedCell, setSelectedCell] = useState<{ estilista: EstilistaCompleto, hora: string } | null>(null);
   const [citaTooltip, setCitaTooltip] = useState({ visible: false, x: 0, y: 0, cita: null as Appointment | null });
+  const [bloqueoTooltip, setBloqueoTooltip] = useState({
+    visible: false,
+    x: 0,
+    y: 0,
+    bloqueo: null as BloqueoCalendario | null,
+    profesional: "",
+  });
   // const [hoveredCell, setHoveredCell] = useState<{ estilista: EstilistaCompleto, hora: string } | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showAppointmentDetails, setShowAppointmentDetails] = useState(false);
@@ -170,9 +188,11 @@ const CalendarScheduler: React.FC = () => {
   const [loadingBloqueos, setLoadingBloqueos] = useState(false);
   const [selectedBloqueo, setSelectedBloqueo] = useState<BloqueoCalendario | null>(null);
   const [deletingBloqueoId, setDeletingBloqueoId] = useState<string | null>(null);
+  const [calendarViewportWidth, setCalendarViewportWidth] = useState(0);
 
   const optionsRef = useRef<HTMLDivElement>(null);
   const tooltipTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const calendarViewportRef = useRef<HTMLDivElement | null>(null);
 
 
   const today = useMemo(() => {
@@ -556,11 +576,163 @@ const CalendarScheduler: React.FC = () => {
     return result;
   }, [estilistas]);
 
+  useEffect(() => {
+    const element = calendarViewportRef.current;
+    if (!element) return;
+
+    const updateWidth = () => {
+      setCalendarViewportWidth(element.clientWidth);
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => updateWidth());
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
+  }, [profesionales.length]);
+
+  const effectiveCellWidth = useMemo(() => {
+    if (profesionales.length === 0) return CELL_WIDTH;
+    const availableWidth = Math.max(calendarViewportWidth - TIME_COLUMN_WIDTH, 0);
+    if (availableWidth <= 0) return CELL_WIDTH;
+    return Math.max(CELL_WIDTH, availableWidth / profesionales.length);
+  }, [calendarViewportWidth, profesionales.length]);
+
+  const professionalsTrackWidth = useMemo(
+    () => effectiveCellWidth * profesionales.length,
+    [effectiveCellWidth, profesionales.length]
+  );
+
+  const calendarMinWidth = useMemo(
+    () => Math.max(TIME_COLUMN_WIDTH + professionalsTrackWidth, calendarViewportWidth || 0),
+    [calendarViewportWidth, professionalsTrackWidth]
+  );
+
+  const appointmentLayoutByProfessional = useMemo(() => {
+    type AppointmentLayoutItem = {
+      key: string;
+      start: number;
+      end: number;
+    };
+    type AppointmentLayoutInfo = {
+      column: number;
+      columns: number;
+      start: number;
+      end: number;
+    };
+
+    const groupedByProfessional = new Map<string, AppointmentLayoutItem[]>();
+    const normalizedDate = (value: unknown): string => {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      if (raw.includes("T")) return raw.split("T")[0];
+      if (raw.includes(" ")) return raw.split(" ")[0];
+      return raw;
+    };
+
+    const parseMinutesFromStart = (timeValue: unknown): number | null => {
+      const raw = String(timeValue || "").trim();
+      if (!raw) return null;
+      const [hours, minutes] = raw.split(":").map(Number);
+      if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+      return (hours - START_HOUR) * 60 + minutes;
+    };
+
+    (citas || []).forEach((cita: any) => {
+      const fecha = normalizedDate(cita?.fecha);
+      if (fecha !== selectedDateString) return;
+
+      const profesionalId = String(cita?.profesional_id || "").trim();
+      if (!profesionalId) return;
+
+      const start = parseMinutesFromStart(cita?.hora_inicio);
+      const end = parseMinutesFromStart(cita?.hora_fin);
+      if (start === null || end === null || end <= start) return;
+
+      const citaId = String(cita?._id || "").trim();
+      if (!citaId) return;
+
+      const key = `${citaId}-${cita.hora_inicio}-${cita.hora_fin}-${profesionalId}`;
+      const list = groupedByProfessional.get(profesionalId) || [];
+      list.push({ key, start, end });
+      groupedByProfessional.set(profesionalId, list);
+    });
+
+    const layoutByProfessional = new Map<string, Map<string, AppointmentLayoutInfo>>();
+
+    groupedByProfessional.forEach((items, profesionalId) => {
+      const sortedItems = [...items].sort((a, b) =>
+        a.start - b.start || a.end - b.end || a.key.localeCompare(b.key)
+      );
+
+      const layoutMap = new Map<string, AppointmentLayoutInfo>();
+      let group: AppointmentLayoutItem[] = [];
+      let groupEnd = -Infinity;
+
+      const commitGroup = () => {
+        if (group.length === 0) return;
+
+        const columnsEnd: number[] = [];
+        const assignedColumns = new Map<string, number>();
+
+        group.forEach((item) => {
+          let columnIndex = columnsEnd.findIndex((columnEnd) => columnEnd <= item.start);
+          if (columnIndex === -1) {
+            columnIndex = columnsEnd.length;
+            columnsEnd.push(item.end);
+          } else {
+            columnsEnd[columnIndex] = item.end;
+          }
+
+          assignedColumns.set(item.key, columnIndex);
+        });
+
+        const totalColumns = Math.max(columnsEnd.length, 1);
+        group.forEach((item) => {
+          layoutMap.set(item.key, {
+            column: assignedColumns.get(item.key) ?? 0,
+            columns: totalColumns,
+            start: item.start,
+            end: item.end,
+          });
+        });
+      };
+
+      sortedItems.forEach((item) => {
+        if (group.length === 0) {
+          group = [item];
+          groupEnd = item.end;
+          return;
+        }
+
+        if (item.start < groupEnd) {
+          group.push(item);
+          groupEnd = Math.max(groupEnd, item.end);
+          return;
+        }
+
+        commitGroup();
+        group = [item];
+        groupEnd = item.end;
+      });
+
+      commitGroup();
+      layoutByProfessional.set(profesionalId, layoutMap);
+    });
+
+    return layoutByProfessional;
+  }, [citas, selectedDateString]);
+
   const getAppointmentPosition = useCallback((apt: Appointment) => {
     console.log(`\n📐 CALCULANDO POSICIÓN PARA: ${apt.cliente_nombre} (${apt.profesional})`);
 
+    const citaProfesionalId = apt.profesional_id || apt.rawData?.profesional_id;
     const profIndex = profesionales.findIndex(p => {
-      const citaProfesionalId = apt.profesional_id || apt.rawData?.profesional_id;
       const estilistaId = p.estilista.profesional_id;
       return citaProfesionalId === estilistaId;
     });
@@ -587,16 +759,38 @@ const CalendarScheduler: React.FC = () => {
     const endBlock = endMinutesFrom5AM / SLOT_INTERVAL_MINUTES;
     const totalBlocks = endBlock - startBlock;
 
+    const tieneBloqueoSolapado = bloqueos.some((bloqueo) => {
+      if (bloqueo.profesional_id !== citaProfesionalId) return false;
+
+      const [bloqueoStartHour, bloqueoStartMin] = bloqueo.hora_inicio.split(':').map(Number);
+      const [bloqueoEndHour, bloqueoEndMin] = bloqueo.hora_fin.split(':').map(Number);
+      if ([bloqueoStartHour, bloqueoStartMin, bloqueoEndHour, bloqueoEndMin].some(Number.isNaN)) return false;
+
+      const bloqueoInicio = (bloqueoStartHour - START_HOUR) * 60 + bloqueoStartMin;
+      const bloqueoFin = (bloqueoEndHour - START_HOUR) * 60 + bloqueoEndMin;
+
+      return startMinutesFrom5AM < bloqueoFin && endMinutesFrom5AM > bloqueoInicio;
+    });
+
     const eventHeight = Math.max(totalBlocks * CELL_HEIGHT - 4, MIN_APPOINTMENT_HEIGHT);
 
-    const leftPosition = profIndex * CELL_WIDTH;
+    const aptKey = `${apt.id}-${apt.start}-${apt.end}-${citaProfesionalId}`;
+    const layoutInfo = appointmentLayoutByProfessional.get(citaProfesionalId)?.get(aptKey);
+    const appointmentColumnIndex = layoutInfo?.column ?? 0;
+    const appointmentColumns = Math.max(layoutInfo?.columns ?? 1, 1);
+
+    const baseLeft = profIndex * effectiveCellWidth;
     const topPosition = (startBlock * CELL_HEIGHT) + APPOINTMENT_VERTICAL_OFFSET;
+    const anchoTotalCelda = effectiveCellWidth - APPOINTMENT_BORDER_WIDTH;
+    const totalColumns = appointmentColumns + (tieneBloqueoSolapado ? 1 : 0);
+    const anchoCita = Math.max(anchoTotalCelda / totalColumns, 24);
+    const leftPosition = baseLeft + (appointmentColumnIndex * anchoCita);
 
     const position = {
       left: leftPosition,
       top: topPosition,
       height: eventHeight,
-      width: CELL_WIDTH - APPOINTMENT_BORDER_WIDTH,
+      width: anchoCita,
     };
 
     console.log(`✅ POSICIÓN CALCULADA:`, {
@@ -610,12 +804,15 @@ const CalendarScheduler: React.FC = () => {
       minHeight: eventHeight,
       leftPosition,
       topPosition,
+      tieneBloqueoSolapado,
+      appointmentColumnIndex,
+      appointmentColumns,
       columnaHoras: 64,
-      cellWidth: CELL_WIDTH
+      cellWidth: effectiveCellWidth
     });
 
     return position;
-  }, [profesionales]);
+  }, [profesionales, bloqueos, appointmentLayoutByProfessional, effectiveCellWidth]);
 
   const appointments = useMemo(() => {
     console.log('🔍 PROCESANDO CITAS CON DATOS COMPLETOS DEL BACKEND');
@@ -691,6 +888,7 @@ const CalendarScheduler: React.FC = () => {
         servicios_resumen: servicesInfo.resumen,
         servicios_detalle: servicesInfo.detalle,
         estilista_nombre: profesionalNombre,
+        cliente_telefono: extractClientPhone(cita),
         estado,
         profesional_id: cita.profesional_id,
         notas_adicionales: extractAgendaAdditionalNotes(cita),
@@ -705,12 +903,61 @@ const CalendarScheduler: React.FC = () => {
     return appointmentsResult;
   }, [citas, selectedDateString, estilistas]);
 
+  const getBloqueoPosition = useCallback((bloqueo: BloqueoCalendario) => {
+    const profIndex = profesionales.findIndex(
+      (profesional) => profesional.estilista.profesional_id === bloqueo.profesional_id
+    );
+
+    if (profIndex === -1) return null;
+
+    const [startHour, startMin] = bloqueo.hora_inicio.split(':').map(Number);
+    const [endHour, endMin] = bloqueo.hora_fin.split(':').map(Number);
+    if ([startHour, startMin, endHour, endMin].some(Number.isNaN)) return null;
+
+    const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
+    const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
+    const startBlock = startMinutesFrom5AM / SLOT_INTERVAL_MINUTES;
+    const endBlock = endMinutesFrom5AM / SLOT_INTERVAL_MINUTES;
+    const totalBlocks = Math.max(endBlock - startBlock, 1);
+
+    const layoutMap = appointmentLayoutByProfessional.get(bloqueo.profesional_id);
+    let maxAppointmentColumns = 0;
+    if (layoutMap) {
+      layoutMap.forEach((layoutInfo) => {
+        const overlaps =
+          startMinutesFrom5AM < layoutInfo.end &&
+          endMinutesFrom5AM > layoutInfo.start;
+        if (overlaps) {
+          maxAppointmentColumns = Math.max(maxAppointmentColumns, layoutInfo.columns);
+        }
+      });
+    }
+
+    const anchoTotalCelda = effectiveCellWidth - APPOINTMENT_BORDER_WIDTH;
+    const totalColumns = maxAppointmentColumns > 0 ? maxAppointmentColumns + 1 : 1;
+    const anchoBloqueo = Math.max(anchoTotalCelda / totalColumns, 24);
+    const leftBase = profIndex * effectiveCellWidth;
+    const leftPosition = maxAppointmentColumns > 0
+      ? leftBase + anchoTotalCelda - anchoBloqueo
+      : leftBase;
+
+    return {
+      left: leftPosition,
+      top: (startBlock * CELL_HEIGHT) + APPOINTMENT_VERTICAL_OFFSET,
+      height: Math.max(totalBlocks * CELL_HEIGHT - 4, 40),
+      width: anchoBloqueo,
+    };
+  }, [profesionales, appointmentLayoutByProfessional, effectiveCellWidth]);
+
   const handleClose = useCallback(() => {
+    if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
     setShowAppointmentModal(false);
     setShowBloqueoModal(false);
     setSelectedCell(null);
     setSelectedBloqueo(null);
     setShowOptions(false);
+    setCitaTooltip({ visible: false, x: 0, y: 0, cita: null });
+    setBloqueoTooltip({ visible: false, x: 0, y: 0, bloqueo: null, profesional: "" });
   }, []);
 
   const handleCitaCreada = useCallback(() => {
@@ -774,13 +1021,13 @@ const CalendarScheduler: React.FC = () => {
     return startMinutes < slotEndMinutes && endMinutes > slotStartMinutes;
   }, []);
 
-  const getBloqueoEnSlot = useCallback((profesionalId: string, hora: string): BloqueoCalendario | null => {
+  const getBloqueosEnSlot = useCallback((profesionalId: string, hora: string): BloqueoCalendario[] => {
     const [blockHour, blockMin] = hora.split(':').map(Number);
-    if (Number.isNaN(blockHour) || Number.isNaN(blockMin)) return null;
+    if (Number.isNaN(blockHour) || Number.isNaN(blockMin)) return [];
 
     const blockMinutesFrom5AM = (blockHour - START_HOUR) * 60 + blockMin;
 
-    return bloqueos.find((bloqueo) => {
+    return bloqueos.filter((bloqueo) => {
       if (bloqueo.profesional_id !== profesionalId) return false;
 
       const [startHour, startMin] = bloqueo.hora_inicio.split(':').map(Number);
@@ -792,50 +1039,29 @@ const CalendarScheduler: React.FC = () => {
       const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
 
       return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
-    }) || null;
+    });
   }, [bloqueos, overlapsSlot]);
 
-  const tieneCitaOBloqueo = useCallback((estilistaNombre: string, hora: string) => {
+  const getCitaEnSlot = useCallback((profesionalId: string, hora: string): Appointment | null => {
     const [blockHour, blockMin] = hora.split(':').map(Number);
+    if (Number.isNaN(blockHour) || Number.isNaN(blockMin)) return null;
+
     const blockMinutesFrom5AM = (blockHour - START_HOUR) * 60 + blockMin;
 
-    const tieneCitaActual = appointments.some(apt => {
-      const estilista = profesionales.find(p => p.name === estilistaNombre);
-      if (!estilista) return false;
-
+    return appointments.find((apt) => {
       const aptProfesionalId = apt.profesional_id || apt.rawData?.profesional_id;
-      const estilistaId = estilista.estilista.profesional_id;
-
-      if (aptProfesionalId !== estilistaId) return false;
+      if (aptProfesionalId !== profesionalId) return false;
 
       const [startHour, startMin] = apt.start.split(':').map(Number);
-      const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
-
       const [endHour, endMin] = apt.end.split(':').map(Number);
-      const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
+      if ([startHour, startMin, endHour, endMin].some(Number.isNaN)) return false;
 
-      return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
-    });
-
-    if (tieneCitaActual) return true;
-
-    const tieneBloqueo = bloqueos.some(bloqueo => {
-      const estilista = profesionales.find(p => p.name === estilistaNombre);
-      if (!estilista) return false;
-
-      if (bloqueo.profesional_id !== estilista.estilista.profesional_id) return false;
-
-      const [startHour, startMin] = bloqueo.hora_inicio.split(':').map(Number);
       const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
-
-      const [endHour, endMin] = bloqueo.hora_fin.split(':').map(Number);
       const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
 
       return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
-    });
-
-    return tieneBloqueo;
-  }, [appointments, profesionales, bloqueos, overlapsSlot]);
+    }) || null;
+  }, [appointments, overlapsSlot]);
 
   // const handleCellHover = useCallback((estilista: EstilistaCompleto, hora: string) => {
   //   setHoveredCell({ estilista, hora });
@@ -1050,15 +1276,36 @@ const CalendarScheduler: React.FC = () => {
     const [showButtons, setShowButtons] = useState(false);
     const cellRef = useRef<HTMLDivElement>(null);
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const profesionalId = prof.estilista.profesional_id;
 
-    const tieneCitaOBloqueoEnEstaHora = tieneCitaOBloqueo(prof.name, hour);
-
-    const bloqueoEnSlot = useMemo(
-      () => getBloqueoEnSlot(prof.estilista.profesional_id, hour),
-      [getBloqueoEnSlot, prof.estilista.profesional_id, hour]
+    const citaEnSlot = useMemo(
+      () => getCitaEnSlot(profesionalId, hour),
+      [getCitaEnSlot, profesionalId, hour]
     );
+    const bloqueosEnSlot = useMemo(
+      () => getBloqueosEnSlot(profesionalId, hour),
+      [getBloqueosEnSlot, profesionalId, hour]
+    );
+    const tieneCitaEnEstaHora = Boolean(citaEnSlot);
+    const tieneBloqueoEnEstaHora = bloqueosEnSlot.length > 0;
+    const userEmail = user?.email?.toLowerCase().trim() || "";
+    const userId = user?.id?.toLowerCase().trim() || "";
+    const bloqueoEditable = useMemo(() => {
+      if (!bloqueosEnSlot.length) return null;
+      if (user?.role === "super_admin") return bloqueosEnSlot[0];
 
-    const esBloqueo = Boolean(bloqueoEnSlot);
+      const editablePorAutor = bloqueosEnSlot.find((bloqueo) => {
+        const creadoPor = (bloqueo.creado_por || "").toLowerCase().trim();
+        if (!creadoPor) return false;
+        return creadoPor === userEmail || creadoPor === userId;
+      });
+
+      if (editablePorAutor) return editablePorAutor;
+
+      // Compatibilidad con bloqueos antiguos sin trazabilidad de autor.
+      const hayInfoDeAutor = bloqueosEnSlot.some((bloqueo) => Boolean((bloqueo.creado_por || "").trim()));
+      return hayInfoDeAutor ? null : bloqueosEnSlot[0];
+    }, [bloqueosEnSlot, user?.role, userEmail, userId]);
 
     // Limpiar timeout cuando el componente se desmonta
     useEffect(() => {
@@ -1070,39 +1317,15 @@ const CalendarScheduler: React.FC = () => {
     const handleCellClick = useCallback((e: React.MouseEvent) => {
       e.stopPropagation();
 
-      if (tieneCitaOBloqueoEnEstaHora) {
-        if (esBloqueo) {
-          openBloqueoModal(prof.estilista, hour, bloqueoEnSlot);
-          setShowButtons(false);
-          return;
-        }
-
-        if (!esBloqueo) {
-          const citaEnHora = appointments.find(apt => {
-            const aptProfesionalId = apt.profesional_id || apt.rawData?.profesional_id;
-            if (aptProfesionalId !== prof.estilista.profesional_id) return false;
-
-            const [startHour, startMin] = apt.start.split(':').map(Number);
-            const [endHour, endMin] = apt.end.split(':').map(Number);
-            const [blockHour, blockMin] = hour.split(':').map(Number);
-
-            const startMinutesFrom5AM = (startHour - START_HOUR) * 60 + startMin;
-            const endMinutesFrom5AM = (endHour - START_HOUR) * 60 + endMin;
-            const blockMinutesFrom5AM = (blockHour - START_HOUR) * 60 + blockMin;
-
-            return overlapsSlot(startMinutesFrom5AM, endMinutesFrom5AM, blockMinutesFrom5AM);
-          });
-
-          if (citaEnHora) {
-            handleCitaClick(citaEnHora);
-          }
-        }
-      } else {
-        // Mostrar botones al hacer clic
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        setShowButtons(true);
+      if (tieneCitaEnEstaHora && citaEnSlot) {
+        handleCitaClick(citaEnSlot);
+        setShowButtons(false);
+        return;
       }
-    }, [tieneCitaOBloqueoEnEstaHora, esBloqueo, appointments, prof.estilista.profesional_id, hour, handleCitaClick, overlapsSlot, openBloqueoModal, bloqueoEnSlot, prof.estilista]);
+
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      setShowButtons(true);
+    }, [tieneCitaEnEstaHora, citaEnSlot, handleCitaClick]);
 
     const handleReservarClick = useCallback((e: React.MouseEvent) => {
       e.stopPropagation();
@@ -1118,6 +1341,14 @@ const CalendarScheduler: React.FC = () => {
       openBloqueoModal(prof.estilista, hour);
       setShowButtons(false);
     }, [prof.estilista, hour, openBloqueoModal]);
+
+    const handleEditarBloqueoClick = useCallback((e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!bloqueoEditable) return;
+      openBloqueoModal(prof.estilista, hour, bloqueoEditable);
+      setShowButtons(false);
+    }, [bloqueoEditable, prof.estilista, hour, openBloqueoModal]);
 
     // Ocultar botones después de tiempo
     useEffect(() => {
@@ -1137,11 +1368,11 @@ const CalendarScheduler: React.FC = () => {
       // Limpiar timeout de ocultar
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
 
-      // Solo mostrar botones al hover si la celda está vacía
-      if (!tieneCitaOBloqueoEnEstaHora) {
+      // Mantener visible el detalle del bloqueo en hover; controles solo en celdas libres
+      if (!tieneCitaEnEstaHora && !tieneBloqueoEnEstaHora) {
         setShowButtons(true);
       }
-    }, [tieneCitaOBloqueoEnEstaHora]);
+    }, [tieneCitaEnEstaHora, tieneBloqueoEnEstaHora]);
 
     const handleMouseLeave = useCallback(() => {
       // Ocultar inmediatamente cuando el mouse sale
@@ -1166,28 +1397,16 @@ const CalendarScheduler: React.FC = () => {
         onClick={handleCellClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={`border-l border-gray-100 relative transition-all duration-150 ${tieneCitaOBloqueoEnEstaHora
-          ? esBloqueo
-            ? 'bg-gray-100/40 hover:bg-gray-200/50 border-gray-300 cursor-pointer'
+        className={`border-l border-gray-100 relative transition-all duration-150 ${tieneCitaEnEstaHora || tieneBloqueoEnEstaHora
+          ? tieneBloqueoEnEstaHora && !tieneCitaEnEstaHora
+            ? 'bg-red-50/30 hover:bg-red-50/50 border-red-100 cursor-pointer'
             : 'bg-white/30 hover:bg-gray-100/50 border-gray-200 cursor-pointer'
           : 'bg-white hover:bg-gray-50 hover:shadow-sm cursor-pointer'
           }`}
-        style={{ width: `${CELL_WIDTH}px`, height: `${CELL_HEIGHT}px` }}
+        style={{ width: `${effectiveCellWidth}px`, height: `${CELL_HEIGHT}px` }}
       >
-        {tieneCitaOBloqueoEnEstaHora && (
-          <div className={`absolute inset-0.5 rounded-md border flex items-center justify-center ${esBloqueo
-            ? 'bg-gradient-to-r from-gray-100/50 to-gray-200/40 border-gray-300/60'
-            : 'bg-white/40 border-gray-200/60'
-            }`}>
-            <div className={`text-[10px] font-semibold ${esBloqueo ? 'text-gray-700 opacity-70' : 'text-gray-600 opacity-70'
-              }`}>
-              {esBloqueo ? '🔒' : '●'}
-            </div>
-          </div>
-        )}
-
         {/* BOTONES DE RESERVAR Y BLOQUEAR */}
-        {!tieneCitaOBloqueoEnEstaHora && showButtons && (
+        {!tieneCitaEnEstaHora && showButtons && (
           <div
             className="absolute inset-0 flex items-center justify-center z-[50]"
             onMouseEnter={handleButtonContainerMouseEnter}
@@ -1197,13 +1416,15 @@ const CalendarScheduler: React.FC = () => {
               className="flex gap-0.5 bg-white/95 backdrop-blur-sm rounded-md p-0.5 shadow-lg border border-gray-300 animate-fadeIn"
               onClick={(e) => e.stopPropagation()}
             >
-              <button
-                onClick={handleReservarClick}
-                className="group flex items-center justify-center gap-0.5 bg-white text-gray-900 hover:bg-gray-900 hover:text-white active:bg-gray-800 active:text-white border border-gray-300 hover:border-gray-900 px-1.5 py-0.5 rounded text-[10px] font-medium min-w-[50px] transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer focus:outline-none focus:ring-1 focus:ring-gray-900"
-              >
-                <Plus className="w-2.5 h-2.5 transition-colors" />
-                Reservar
-              </button>
+              {!tieneBloqueoEnEstaHora && (
+                <button
+                  onClick={handleReservarClick}
+                  className="group flex items-center justify-center gap-0.5 bg-white text-gray-900 hover:bg-gray-900 hover:text-white active:bg-gray-800 active:text-white border border-gray-300 hover:border-gray-900 px-1.5 py-0.5 rounded text-[10px] font-medium min-w-[50px] transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer focus:outline-none focus:ring-1 focus:ring-gray-900"
+                >
+                  <Plus className="w-2.5 h-2.5 transition-colors" />
+                  Reservar
+                </button>
+              )}
 
               <button
                 onClick={handleBloquearClick}
@@ -1212,6 +1433,15 @@ const CalendarScheduler: React.FC = () => {
                 <X className="w-2.5 h-2.5 transition-colors" />
                 Bloquear
               </button>
+
+              {tieneBloqueoEnEstaHora && bloqueoEditable && (
+                <button
+                  onClick={handleEditarBloqueoClick}
+                  className="group flex items-center justify-center gap-0.5 bg-white text-gray-900 hover:bg-gray-900 hover:text-white active:bg-gray-800 active:text-white border border-gray-300 hover:border-gray-900 px-1.5 py-0.5 rounded text-[10px] font-medium min-w-[50px] transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer focus:outline-none focus:ring-1 focus:ring-gray-900"
+                >
+                  Editar
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1238,6 +1468,7 @@ const CalendarScheduler: React.FC = () => {
     const handleEventMouseEnter = (e: React.MouseEvent<HTMLDivElement>) => {
       if (!supportsHoverTooltips()) return;
       if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
+      setBloqueoTooltip({ visible: false, x: 0, y: 0, bloqueo: null, profesional: "" });
       setCitaTooltip({
         visible: true,
         x: e.clientX,
@@ -1266,6 +1497,7 @@ const CalendarScheduler: React.FC = () => {
     const handleEventClick = () => {
       if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
       setCitaTooltip({ visible: false, x: 0, y: 0, cita: null });
+      setBloqueoTooltip({ visible: false, x: 0, y: 0, bloqueo: null, profesional: "" });
       handleCitaClick(apt);
     };
 
@@ -1306,6 +1538,78 @@ const CalendarScheduler: React.FC = () => {
         {isSelected && (
           <div className="absolute inset-0 border-1 border-white shadow-inner pointer-events-none"></div>
         )}
+      </div>
+    );
+  });
+
+  const BloqueoComponent = React.memo(({ bloqueo }: { bloqueo: BloqueoCalendario }) => {
+    const position = getBloqueoPosition(bloqueo);
+    if (!position) return null;
+
+    const motivo = bloqueo.motivo?.trim() || "Bloqueo de agenda";
+    const profesional = profesionales.find(
+      (item) => item.estilista.profesional_id === bloqueo.profesional_id
+    );
+    const nombreProfesional = profesional?.name || bloqueo.profesional_id;
+
+    const handleBloqueoClick = (event: React.MouseEvent<HTMLDivElement>) => {
+      event.stopPropagation();
+      if (!profesional?.estilista) return;
+      if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
+      setBloqueoTooltip({ visible: false, x: 0, y: 0, bloqueo: null, profesional: "" });
+      openBloqueoModal(profesional.estilista, bloqueo.hora_inicio, bloqueo);
+    };
+
+    const handleBloqueoMouseEnter = (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!supportsHoverTooltips()) return;
+      if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
+      setCitaTooltip({ visible: false, x: 0, y: 0, cita: null });
+      setBloqueoTooltip({
+        visible: true,
+        x: event.clientX,
+        y: event.clientY,
+        bloqueo,
+        profesional: nombreProfesional,
+      });
+    };
+
+    const handleBloqueoMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!supportsHoverTooltips()) return;
+      setBloqueoTooltip((prev) => {
+        if (!prev.visible || prev.bloqueo?._id !== bloqueo._id) return prev;
+        if (prev.x === event.clientX && prev.y === event.clientY) return prev;
+        return { ...prev, x: event.clientX, y: event.clientY };
+      });
+    };
+
+    const handleBloqueoMouseLeave = () => {
+      if (!supportsHoverTooltips()) return;
+      if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
+      tooltipTimeoutRef.current = setTimeout(() => {
+        setBloqueoTooltip({ visible: false, x: 0, y: 0, bloqueo: null, profesional: "" });
+      }, 120);
+    };
+
+    return (
+      <div
+        className="absolute z-10 rounded-md border border-red-300/90 bg-gradient-to-b from-red-100 to-red-50 shadow-sm overflow-hidden pointer-events-auto cursor-pointer"
+        style={{ ...position, minHeight: 40 }}
+        onClick={handleBloqueoClick}
+        onMouseEnter={handleBloqueoMouseEnter}
+        onMouseMove={handleBloqueoMouseMove}
+        onMouseLeave={handleBloqueoMouseLeave}
+      >
+        <div className="h-full w-full px-2 py-1 flex flex-col overflow-hidden">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-red-800 truncate">
+            Bloq
+          </div>
+          <div className="text-[10px] leading-4 font-medium text-red-900 truncate">
+            {motivo}
+          </div>
+          <div className="mt-auto text-[9px] leading-3.5 text-red-800/90 truncate">
+            {`${bloqueo.hora_inicio}-${bloqueo.hora_fin} · ${nombreProfesional}`}
+          </div>
+        </div>
       </div>
     );
   });
@@ -1462,18 +1766,18 @@ const CalendarScheduler: React.FC = () => {
 
           {/* CALENDARIO PRINCIPAL */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-auto bg-white/60 backdrop-blur-sm">
-              <div className="min-w-max">
+            <div ref={calendarViewportRef} className="flex-1 overflow-auto bg-white/60 backdrop-blur-sm">
+              <div className="min-w-max" style={{ minWidth: `${calendarMinWidth}px` }}>
                 {/* ENCABEZADO DE ESTILISTAS MÁS COMPACTO */}
                 <div className="flex bg-white/95 backdrop-blur-lg border-b border-gray-200/60 sticky top-0 z-20 shadow-sm">
                   <div className="w-16 flex-shrink-0" />
                   {profesionales.length > 0 ? (
-                    <div className="flex">
+                    <div className="flex" style={{ width: `${professionalsTrackWidth}px` }}>
                       {profesionales.map((prof) => (
                         <div
                           key={prof.estilista.unique_key}
                           className="flex-shrink-0 p-2 border-l border-gray-200/60 text-center bg-white/80"
-                          style={{ width: `${CELL_WIDTH}px` }}
+                          style={{ width: `${effectiveCellWidth}px` }}
                         >
                           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 mx-auto mb-1 flex items-center justify-center text-xs font-bold text-white shadow-sm">{prof.initials}</div>
                           <div className="text-xs font-semibold text-gray-900 truncate px-1">{prof.name}</div>
@@ -1533,6 +1837,16 @@ const CalendarScheduler: React.FC = () => {
                       });
                     })()}
 
+                    {/* BLOQUEOS */}
+                    <div
+                      className="absolute top-0 right-0 bottom-0 z-10 pointer-events-none"
+                      style={{ left: `${TIME_COLUMN_WIDTH}px` }}
+                    >
+                      {bloqueos.map((bloqueo) => (
+                        <BloqueoComponent key={`bloqueo-${bloqueo._id}`} bloqueo={bloqueo} />
+                      ))}
+                    </div>
+
                     {/* CITAS */}
                     <div
                       className="absolute top-0 right-0 bottom-0 z-0 pointer-events-none"
@@ -1553,9 +1867,9 @@ const CalendarScheduler: React.FC = () => {
       {/* MODALES */}
       {citaTooltip.visible && citaTooltip.cita && (
         <div
-          className="fixed z-50 bg-white/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-xl p-3 max-w-xs transform -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
+          className="fixed z-50 bg-white/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-lg p-2.5 max-w-[18rem] transform -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
           style={{
-            left: `${Math.min(citaTooltip.x + 10, window.innerWidth - 320)}px`,
+            left: `${Math.min(citaTooltip.x + 10, window.innerWidth - 300)}px`,
             top: `${citaTooltip.y}px`
           }}
           onMouseEnter={() => {
@@ -1566,21 +1880,23 @@ const CalendarScheduler: React.FC = () => {
             setCitaTooltip({ visible: false, x: 0, y: 0, cita: null });
           }}
         >
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-gray-700 to-gray-900 rounded-lg flex items-center justify-center shadow-sm">
-              <User className="w-4 h-4 text-white" />
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <div className="w-7 h-7 bg-gradient-to-br from-gray-700 to-gray-900 rounded-lg flex items-center justify-center shadow-sm">
+              <User className="w-3.5 h-3.5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="font-bold text-gray-900 text-sm truncate">
+              <h3 className="font-bold text-gray-900 text-[13px] truncate">
                 {getTextValue(citaTooltip.cita.cliente_nombre) || '(Sin nombre)'}
               </h3>
               <p className="text-xs text-gray-600 truncate">
-                {citaTooltip.cita.start} - {citaTooltip.cita.end}
+                {getTextValue(citaTooltip.cita.cliente_telefono)
+                  ? `📞 ${getTextValue(citaTooltip.cita.cliente_telefono)}`
+                  : `${citaTooltip.cita.start} - ${citaTooltip.cita.end}`}
               </p>
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex items-center gap-2 text-xs">
               <Clock className="w-3 h-3 text-gray-600" />
               <span className="font-medium text-gray-700">
@@ -1619,7 +1935,7 @@ const CalendarScheduler: React.FC = () => {
             )}
           </div>
 
-          <div className="mt-2 pt-2 border-t border-gray-100">
+          <div className="mt-1.5 pt-1.5 border-t border-gray-100">
             {(() => {
               const estadoTooltip = (getTextValue(citaTooltip.cita.estado) || 'pendiente').toLowerCase();
               const estadoLabel = getTextValue(citaTooltip.cita.estado) || 'Pendiente';
@@ -1640,6 +1956,80 @@ const CalendarScheduler: React.FC = () => {
                 </div>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {bloqueoTooltip.visible && bloqueoTooltip.bloqueo && (
+        <div
+          className="fixed z-50 bg-white/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-xl p-3 max-w-xs transform -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
+          style={{
+            left: `${Math.min(bloqueoTooltip.x + 10, window.innerWidth - 320)}px`,
+            top: `${bloqueoTooltip.y}px`
+          }}
+          onMouseEnter={() => {
+            if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
+          }}
+          onMouseLeave={() => {
+            if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
+            setBloqueoTooltip({ visible: false, x: 0, y: 0, bloqueo: null, profesional: "" });
+          }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-red-600 to-red-800 rounded-lg flex items-center justify-center shadow-sm">
+              <X className="w-4 h-4 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-gray-900 text-sm truncate">
+                Bloqueo de horario
+              </h3>
+              <p className="text-xs text-gray-600 truncate">
+                {bloqueoTooltip.bloqueo.hora_inicio} - {bloqueoTooltip.bloqueo.hora_fin}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs">
+              <Clock className="w-3 h-3 text-gray-600" />
+              <span className="font-medium text-gray-700">
+                {bloqueoTooltip.bloqueo.hora_inicio} - {bloqueoTooltip.bloqueo.hora_fin}
+              </span>
+              <span className="text-gray-500">
+                {(() => {
+                  const [startHour, startMinute] = bloqueoTooltip.bloqueo!.hora_inicio.split(':').map(Number);
+                  const [endHour, endMinute] = bloqueoTooltip.bloqueo!.hora_fin.split(':').map(Number);
+                  if ([startHour, startMinute, endHour, endMinute].some(Number.isNaN)) return "";
+                  const duration = Math.max(((endHour * 60 + endMinute) - (startHour * 60 + startMinute)), 0);
+                  return `(${duration}min)`;
+                })()}
+              </span>
+            </div>
+
+            <div className="flex items-start gap-2 text-xs">
+              <svg className="w-3 h-3 text-gray-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m-6-8h6M5 7h.01M5 11h.01M5 15h.01" />
+              </svg>
+              <span className="text-gray-700 break-words">
+                <strong>Motivo:</strong> {bloqueoTooltip.bloqueo.motivo || "Bloqueo de agenda"}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <svg className="w-3 h-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              <span className="text-gray-700 truncate">
+                <strong>Profesional:</strong> {bloqueoTooltip.profesional || '(Sin profesional)'}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-2 pt-2 border-t border-gray-100">
+            <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium bg-red-100 text-red-700">
+              <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+              bloqueado
+            </div>
           </div>
         </div>
       )}

@@ -7,14 +7,6 @@ import { formatSedeNombre } from "../../lib/sede";
 import TimeInputWithPicker from "../ui/time-input-with-picker";
 import { formatAgendaTime, normalizeAgendaTimeValue } from "../../lib/agenda";
 
-interface CitaHorario {
-  cita_id?: string;
-  fecha: string;
-  hora_inicio: string;
-  hora_fin: string;
-  estado?: string;
-}
-
 interface BloqueosProps {
   onClose: () => void;
   estilistaId?: string;
@@ -22,7 +14,7 @@ interface BloqueosProps {
   horaInicio?: string;
   compact?: boolean;
   editingBloqueo?: Bloqueo | null;
-  citasExistentes?: CitaHorario[];
+  citasExistentes?: unknown[];
   onBloqueoGuardado?: (bloqueo: Bloqueo, action: "create" | "update") => void;
 }
 
@@ -47,14 +39,6 @@ const toMinutes = (hora: string) => {
   return h * 60 + m;
 };
 
-const ESTADOS_NO_BLOQUEANTES = new Set([
-  "cancelada",
-  "cancelado",
-  "no asistio",
-  "no_asistio",
-  "no asistió",
-]);
-
 const Bloqueos: React.FC<BloqueosProps> = ({
   onClose,
   estilistaId,
@@ -62,7 +46,7 @@ const Bloqueos: React.FC<BloqueosProps> = ({
   horaInicio,
   compact = false,
   editingBloqueo = null,
-  citasExistentes = [],
+  citasExistentes: _citasExistentes = [],
   onBloqueoGuardado,
 }) => {
   const { user } = useAuth();
@@ -74,7 +58,8 @@ const Bloqueos: React.FC<BloqueosProps> = ({
   // Determinar si el usuario actual es un estilista
   const esEstilista = user?.role === 'estilista';
   const useCompactView = compact || esEstilista;
-  const isEditing = Boolean(editingBloqueo?._id);
+  const [createFromExisting, setCreateFromExisting] = useState(false);
+  const isEditing = Boolean(editingBloqueo?._id) && !createFromExisting;
   
   const [formData, setFormData] = useState({
     profesional_id: editingBloqueo?.profesional_id || estilistaId || "",
@@ -257,6 +242,7 @@ const Bloqueos: React.FC<BloqueosProps> = ({
   }, [formData.sede_id, cargarEstilistas, estilistaId, esEstilista]);
 
   useEffect(() => {
+    setCreateFromExisting(false);
     if (editingBloqueo?._id) {
       setFormData((prev) => ({
         ...prev,
@@ -280,6 +266,17 @@ const Bloqueos: React.FC<BloqueosProps> = ({
       hora_inicio: horaInicio || prev.hora_inicio,
     }));
   }, [editingBloqueo, fecha, horaInicio]);
+
+  const handleCreateFromExisting = useCallback(() => {
+    if (!editingBloqueo?._id) return;
+    setCreateFromExisting(true);
+    setMensaje("ℹ️ Modo crear: se guardará un nuevo bloqueo superpuesto.");
+  }, [editingBloqueo]);
+
+  const handleReturnToEdit = useCallback(() => {
+    setCreateFromExisting(false);
+    setMensaje("");
+  }, []);
 
   const handleInputChange = useCallback((field: string, value: any) => {
     if (isEditing && (field === "sede_id" || field === "profesional_id" || field === "fecha")) {
@@ -367,24 +364,6 @@ const Bloqueos: React.FC<BloqueosProps> = ({
 
     if (inicioMinutos === null || finMinutos === null) {
       setMensaje("❌ Horario inválido");
-      return;
-    }
-
-    const citasDelDia = citasExistentes.filter((cita) => {
-      const estado = (cita.estado || "").toLowerCase().trim();
-      return normalizeFecha(cita.fecha) === formData.fecha && !ESTADOS_NO_BLOQUEANTES.has(estado);
-    });
-
-    const haySolapamiento = citasDelDia.some((cita) => {
-      const citaInicio = toMinutes(cita.hora_inicio);
-      const citaFin = toMinutes(cita.hora_fin);
-
-      if (citaInicio === null || citaFin === null) return false;
-      return inicioMinutos < citaFin && finMinutos > citaInicio;
-    });
-
-    if (haySolapamiento) {
-      setMensaje("❌ No puedes bloquear un horario que se solapa con una cita existente");
       return;
     }
 
@@ -512,7 +491,18 @@ const Bloqueos: React.FC<BloqueosProps> = ({
       setTimeout(onClose, 1200);
     } catch (err: any) {
       console.error("Error guardando bloqueo:", err);
-      setMensaje(`❌ ${err?.message || "Error al guardar el bloqueo"}`);
+      const rawMessage = String(err?.message || "").trim();
+      const lowerMessage = rawMessage.toLowerCase();
+      const isUnauthorized =
+        lowerMessage.includes("no autorizado") ||
+        lowerMessage.includes("forbidden") ||
+        lowerMessage.includes("http 403");
+
+      if (isEditing && isUnauthorized) {
+        setMensaje("❌ No tienes permisos para editar este bloqueo.");
+      } else {
+        setMensaje(`❌ ${rawMessage || "Error al guardar el bloqueo"}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -527,7 +517,6 @@ const Bloqueos: React.FC<BloqueosProps> = ({
     isEditing,
     editingBloqueo,
     onBloqueoGuardado,
-    citasExistentes,
   ]);
 
   // Calcular hora mínima para fin
@@ -570,6 +559,28 @@ const Bloqueos: React.FC<BloqueosProps> = ({
         {isEditing ? "Editar bloqueo" : "Bloqueo de horario"}
       </h2>
 
+      {editingBloqueo?._id && (
+        <div className={`${useCompactView ? "mb-3" : "mb-4"} flex items-center justify-end`}>
+          {isEditing ? (
+            <button
+              type="button"
+              onClick={handleCreateFromExisting}
+              className={`${useCompactView ? "px-3 py-1.5 text-xs rounded-md" : "px-3 py-2 text-sm rounded-lg"} border border-gray-300 text-gray-800 font-medium hover:bg-gray-100 transition-colors`}
+            >
+              Crear nuevo superpuesto
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleReturnToEdit}
+              className={`${useCompactView ? "px-3 py-1.5 text-xs rounded-md" : "px-3 py-2 text-sm rounded-lg"} border border-gray-300 text-gray-800 font-medium hover:bg-gray-100 transition-colors`}
+            >
+              Volver a edición
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Información del usuario */}
       <div className={`${useCompactView ? "mb-3 p-2.5 rounded-md" : "mb-4 p-3 rounded-lg"} bg-gray-100 border border-gray-300`}>
         <p className={useCompactView ? "text-xs text-gray-700" : "text-sm text-gray-800"}>
@@ -579,12 +590,14 @@ const Bloqueos: React.FC<BloqueosProps> = ({
           <span className="font-semibold">Rol:</span> {getRolDisplay()}
         </p>
         
-        {(estilistaId || esEstilista || isEditing) && (
+        {(estilistaId || esEstilista || editingBloqueo?._id) && (
           <div className="mt-2 pt-2 border-t border-gray-300">
             <p className={`${useCompactView ? "text-[11px]" : "text-xs"} text-gray-700`}>
               <span className="font-semibold">⚠️ Modo especial:</span> 
               {isEditing
                 ? " Editando bloqueo existente"
+                : createFromExisting
+                  ? " Creando nuevo bloqueo superpuesto"
                 : estilistaId
                   ? " Creando bloqueo para estilista específico"
                   : esEstilista

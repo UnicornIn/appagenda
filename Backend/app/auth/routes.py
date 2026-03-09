@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Form, Depends, status
 from datetime import datetime, timedelta
 from typing import List, Optional
 from bson import ObjectId
-from fastapi import Cookie, Response
+from fastapi import Cookie, Response, Header
 from jose import jwt, JWTError
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import Response
@@ -30,7 +30,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 # ==============================================================
 # ✅ Obtener usuario autenticado (con sede_id y franquicia_id)
 # ==============================================================
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    x_sede_id: Optional[str] = Header(None)  # ← el frontend envía X-Sede-Id
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="No se pudieron validar las credenciales",
@@ -44,24 +47,43 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         if not email or not rol:
             raise credentials_exception
 
-        # ✅ TODOS los usuarios están en collection_auth
         user = await collection_auth.find_one({"correo_electronico": email})
         if not user:
             raise credentials_exception
 
-        # ✅ Devolver también la sede_id y franquicia_id
+        # ── Sede activa con scope dinámico ──────────────────────────────
+        sede_id_principal = user.get("sede_id")
+        sedes_permitidas  = user.get("sedes_permitidas", [])
+
+        if x_sede_id:
+            # super_admin puede pedir cualquier sede sin restricción
+            es_super        = (rol == "super_admin")
+            en_principal    = (x_sede_id == sede_id_principal)
+            en_permitidas   = (x_sede_id in sedes_permitidas)
+
+            if not (es_super or en_principal or en_permitidas):
+                raise HTTPException(
+                    status_code=403,
+                    detail="No tienes acceso a esta sede"
+                )
+            sede_activa = x_sede_id
+        else:
+            # Sin header → usa la sede principal del usuario
+            sede_activa = sede_id_principal
+
         return {
             "email": email,
             "rol": rol,
             "nombre": user.get("nombre"),
-            "sede_id": user.get("sede_id"),    # ⭐ Para admin_sede
-            "franquicia_id": user.get("franquicia_id"),  # ⭐ Para admin_franquicia
-            "user_id": str(user.get("_id")),    # ⭐ Para validaciones
+            "sede_id": sede_activa,               # ⭐ dinámica o principal
+            "sede_id_principal": sede_id_principal, # ⭐ siempre la original
+            "sedes_permitidas": sedes_permitidas,
+            "franquicia_id": user.get("franquicia_id"),
+            "user_id": str(user.get("_id")),
             "profesional_id": user.get("profesional_id"),
         }
     except JWTError:
         raise credentials_exception
-
 
 # =========================================================
 # 👤 CREATE NEW USER (only super_admin)
@@ -81,7 +103,7 @@ async def create_user(
         raise HTTPException(status_code=403, detail="No autorizado para crear usuarios")
 
     # Verificar rol válido
-    valid_roles = ["super_admin", "admin_franquicia", "admin_sede", "estilista", "usuario"]
+    valid_roles = ["super_admin", "admin_franquicia", "admin_sede", "estilista", "usuario", "recepcionista", "call_center"]
     if rol not in valid_roles:
         raise HTTPException(status_code=400, detail="Rol inválido")
 
@@ -245,6 +267,7 @@ async def login(
         nombre=user.get("nombre"),
         email=user.get("correo_electronico"),
         sede_id=user.get("sede_id"),
+        sedes_permitidas=user.get("sedes_permitidas", []),  # ← NUEVO
     )
 
 
@@ -310,7 +333,7 @@ async def create_initial_superadmin(
 # ✏️ EDITAR USUARIO  PATCH /auth/users/{user_id}
 # =========================================================
 
-VALID_ROLES = ["super_admin", "admin_franquicia", "admin_sede", "estilista", "usuario"]
+VALID_ROLES = ["super_admin", "admin_franquicia", "admin_sede", "estilista", "usuario", "recepcionista", "call_center"]
 
 
 @router.patch("/users/{user_id}", response_model=UserUpdateResponse)
@@ -343,7 +366,7 @@ async def update_user(
     # ── 4. Permisos por rol del editor ──────────────────────────────────
     if editor_rol == "admin_sede":
         # Solo puede editar estilistas de su misma sede
-        if target_rol not in ("estilista", "usuario"):
+        if target_rol not in ("estilista", "usuario", "recepcionista", "call_center"):
             raise HTTPException(
                 status_code=403,
                 detail="admin_sede solo puede editar estilistas y usuarios"

@@ -16,42 +16,42 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../Auth/AuthContext';
+import { APP_MODULES, AGENDA_PATHS, canAccess, type AppModule } from '../../lib/access-control';
 
 interface NavItem {
   title: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
-  roles?: string[];
+  module: AppModule;
   currencies?: string[];
 }
 
 const navItems: NavItem[] = [
-  { title: 'Dashboard', href: '/superadmin/dashboard', icon: LayoutDashboard, roles: ['super_admin'] },
-  { title: 'Agenda', href: '/superadmin/appointments', icon: Users, roles: ['super_admin'] },
-  { title: 'Productos', href: '/superadmin/products', icon: Package, roles: ['super_admin'] },
-  { title: 'Clientes', href: '/superadmin/clients', icon: Users, roles: ['super_admin'] },
-  { title: 'Comisiones', href: '/superadmin/commissions', icon: CreditCard, roles: ['super_admin'] },
-  { title: 'Sedes', href: '/superadmin/sedes', icon: Home, roles: ['super_admin'] },
-  { title: 'Estilistas', href: '/superadmin/stylists', icon: Users, roles: ['super_admin'] },
-  { title: 'Usuarios Sistema', href: '/superadmin/system-users', icon: Users, roles: ['super_admin', 'superadmin'] },
-  { title: 'Servicios', href: '/superadmin/services', icon: Package, roles: ['super_admin'] },
-  { title: 'Ventas Facturadas', href: '/superadmin/sales-invoices', icon: CreditCard, roles: ['super_admin'] },
-  { title: 'Gift Cards', href: '/superadmin/gift-cards', icon: Gift, roles: ['super_admin', 'superadmin'] },
-  { title: 'Cierre de Caja', href: '/superadmin/cierre-caja', icon: Wallet, roles: ['super_admin'] },
+  { title: 'Dashboard', href: '/superadmin/dashboard', icon: LayoutDashboard, module: APP_MODULES.SUPER_DASHBOARD },
+  { title: 'Dashboard', href: '/sede/dashboard', icon: LayoutDashboard, module: APP_MODULES.SEDE_DASHBOARD },
+  { title: 'Agenda', href: '/agenda', icon: Users, module: APP_MODULES.AGENDA_HOME },
 
-  { title: 'Dashboard', href: '/sede/dashboard', icon: LayoutDashboard, roles: ['admin_sede'] },
-  { title: 'Agenda', href: '/sede/appointments', icon: Users, roles: ['admin_sede'] },
-  { title: 'Productos', href: '/sede/products', icon: Package, roles: ['admin_sede'] },
-  { title: 'Clientes', href: '/sede/clients', icon: Users, roles: ['admin_sede'] },
-  { title: 'Facturación', href: '/sede/billing', icon: CreditCard, roles: ['admin_sede'] },
-  { title: 'Gift Cards', href: '/sede/gift-cards', icon: Gift, roles: ['admin_sede'] },
-  { title: 'Estilistas', href: '/sede/stylists', icon: Users, roles: ['admin_sede'] },
-  { title: 'Comisiones', href: '/sede/commissions', icon: CreditCard, roles: ['admin_sede'] },
-  { title: 'Ventas Facturadas', href: '/sede/sales-invoiced', icon: CreditCard, roles: ['admin_sede'] },
-  { title: 'Cierre de Caja', href: '/sede/cierre-caja', icon: Wallet, roles: ['admin_sede'] },
+  { title: 'Productos', href: '/superadmin/products', icon: Package, module: APP_MODULES.SUPER_PRODUCTS },
+  { title: 'Clientes', href: '/superadmin/clients', icon: Users, module: APP_MODULES.SUPER_CLIENTS },
+  { title: 'Comisiones', href: '/superadmin/commissions', icon: CreditCard, module: APP_MODULES.SUPER_COMMISSIONS },
+  { title: 'Sedes', href: '/superadmin/sedes', icon: Home, module: APP_MODULES.SUPER_SEDES },
+  { title: 'Estilistas', href: '/superadmin/stylists', icon: Users, module: APP_MODULES.SUPER_STYLISTS },
+  { title: 'Usuarios Sistema', href: '/superadmin/system-users', icon: Users, module: APP_MODULES.SUPER_SYSTEM_USERS },
+  { title: 'Servicios', href: '/superadmin/services', icon: Package, module: APP_MODULES.SUPER_SERVICES },
+  { title: 'Ventas Facturadas', href: '/superadmin/sales-invoices', icon: CreditCard, module: APP_MODULES.SUPER_SALES_INVOICES },
+  { title: 'Gift Cards', href: '/superadmin/gift-cards', icon: Gift, module: APP_MODULES.SUPER_GIFT_CARDS },
+  { title: 'Cierre de Caja', href: '/superadmin/cierre-caja', icon: Wallet, module: APP_MODULES.SUPER_CIERRE_CAJA },
 
-  { title: 'Agenda', href: '/stylist/appointments', icon: Users, roles: ['estilista'] },
-  { title: 'Comisiones', href: '/stylist/commissions', icon: CreditCard, roles: ['estilista'] },
+  { title: 'Productos', href: '/sede/products', icon: Package, module: APP_MODULES.SEDE_PRODUCTS },
+  { title: 'Clientes', href: '/sede/clients', icon: Users, module: APP_MODULES.SEDE_CLIENTS },
+  { title: 'Facturación', href: '/sede/billing', icon: CreditCard, module: APP_MODULES.SEDE_BILLING },
+  { title: 'Gift Cards', href: '/sede/gift-cards', icon: Gift, module: APP_MODULES.SEDE_GIFT_CARDS },
+  { title: 'Estilistas', href: '/sede/stylists', icon: Users, module: APP_MODULES.SEDE_STYLISTS },
+  { title: 'Comisiones', href: '/sede/commissions', icon: CreditCard, module: APP_MODULES.SEDE_COMMISSIONS },
+  { title: 'Ventas Facturadas', href: '/sede/sales-invoiced', icon: CreditCard, module: APP_MODULES.SEDE_SALES_INVOICED },
+  { title: 'Cierre de Caja', href: '/sede/cierre-caja', icon: Wallet, module: APP_MODULES.SEDE_CIERRE_CAJA },
+
+  { title: 'Comisiones', href: '/stylist/commissions', icon: CreditCard, module: APP_MODULES.STYLIST_COMMISSIONS },
 ];
 
 export function Sidebar() {
@@ -89,13 +89,13 @@ export function Sidebar() {
     localStorage.clear();
     sessionStorage.clear();
     logout?.();
-    navigate('/login');
+    navigate('/');
   };
 
   const visibleItems = navItems.filter((item) => {
     const role = getStoredRole() || '';
     const currency = getStoredCurrency();
-    const roleAllowed = item.roles?.includes(role) ?? false;
+    const roleAllowed = canAccess(item.module, role);
     const currencyAllowed = item.currencies ? item.currencies.includes(currency) : true;
     return roleAllowed && currencyAllowed;
   });
@@ -136,7 +136,10 @@ export function Sidebar() {
         <nav className="flex-1 px-2 py-4 space-y-1">
           {visibleItems.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.href;
+            const isActive =
+              location.pathname === item.href ||
+              (item.module === APP_MODULES.AGENDA_HOME &&
+                AGENDA_PATHS.includes(location.pathname as (typeof AGENDA_PATHS)[number]));
 
             return (
               <button

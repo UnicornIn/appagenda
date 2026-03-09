@@ -30,6 +30,7 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
     autorizacion_publicacion: false,
     firma_profesional: false,
     foto_actual: [] as File[],
+    foto_despues: [] as File[],
     observaciones_personalizadas: "",
     tenga_en_cuenta: "",
     recomendaciones_seleccionadas: recomendacionesPredeterminadas.map(() => false)
@@ -38,9 +39,11 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
   const [loading, setLoading] = useState(false);
   const [previewImages, setPreviewImages] = useState<{
     actual: string[];
-  }>({ actual: [] });
+    despues: string[];
+  }>({ actual: [], despues: [] });
 
   const fileInputRefActual = useRef<HTMLInputElement>(null);
+  const fileInputRefDespues = useRef<HTMLInputElement>(null);
 
   // Cargar datos iniciales del localStorage al montar
   useEffect(() => {
@@ -51,7 +54,8 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
       // Nota: No podemos guardar Files en localStorage, solo el estado del formulario
       setFormData({
         ...parsedData,
-        foto_actual: [] // Los archivos no se pueden guardar, se limpian
+        foto_actual: [], // Los archivos no se pueden guardar, se limpian
+        foto_despues: [] // Los archivos no se pueden guardar, se limpian
       });
     } else if (datosIniciales) {
       setFormData(datosIniciales);
@@ -63,7 +67,8 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
     // No guardamos los archivos en localStorage (son demasiado grandes)
     const dataToSave = {
       ...formData,
-      foto_actual: [] // No guardamos archivos
+      foto_actual: [], // No guardamos archivos
+      foto_despues: [] // No guardamos archivos
     };
     localStorage.setItem(`ficha_cuidado_post_color_${cita.cita_id}`, JSON.stringify(dataToSave));
   }, [formData, cita.cita_id]);
@@ -72,19 +77,20 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
   useEffect(() => {
     return () => {
       previewImages.actual.forEach(url => URL.revokeObjectURL(url));
+      previewImages.despues.forEach(url => URL.revokeObjectURL(url));
     };
   }, [previewImages]);
 
-  const handleFileSelect = (files: FileList | null) => {
+  const handleFileSelect = (tipo: 'actual' | 'despues', files: FileList | null) => {
     if (!files) return;
 
     const newFiles = Array.from(files);
-    const currentFiles = formData.foto_actual;
+    const currentFiles = tipo === 'actual' ? formData.foto_actual : formData.foto_despues;
 
     // Limitar a 5 imágenes máximo
     const remainingSlots = 5 - currentFiles.length;
     if (remainingSlots <= 0) {
-      alert(`Máximo 5 imágenes permitidas`);
+      alert(`Máximo 5 imágenes permitidas para ${tipo === 'actual' ? 'antes' : 'después'}`);
       return;
     }
 
@@ -93,37 +99,43 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
     // Actualizar estado de archivos
     setFormData(prev => ({
       ...prev,
-      foto_actual: [...currentFiles, ...filesToAdd]
+      [tipo === 'actual' ? 'foto_actual' : 'foto_despues']: [...currentFiles, ...filesToAdd]
     }));
 
     // Crear URLs para preview
     const newPreviews = filesToAdd.map(file => URL.createObjectURL(file));
     setPreviewImages(prev => ({
       ...prev,
-      actual: [...prev.actual, ...newPreviews]
+      [tipo]: [...prev[tipo], ...newPreviews]
     }));
   };
 
-  const handleRemoveImage = (index: number) => {
+  const handleRemoveImage = (tipo: 'actual' | 'despues', index: number) => {
+    const key = tipo === 'actual' ? 'foto_actual' : 'foto_despues';
+
     // Revocar URL
-    if (previewImages.actual[index]) {
-      URL.revokeObjectURL(previewImages.actual[index]);
+    if (previewImages[tipo][index]) {
+      URL.revokeObjectURL(previewImages[tipo][index]);
     }
 
     // Actualizar estado
     setFormData(prev => ({
       ...prev,
-      foto_actual: prev.foto_actual.filter((_, i) => i !== index)
+      [key]: prev[key].filter((_: File, i: number) => i !== index)
     }));
 
     setPreviewImages(prev => ({
       ...prev,
-      actual: prev.actual.filter((_, i) => i !== index)
+      [tipo]: prev[tipo].filter((_: string, i: number) => i !== index)
     }));
   };
 
-  const openFileSelector = () => {
-    fileInputRefActual.current?.click();
+  const openFileSelector = (tipo: 'actual' | 'despues') => {
+    if (tipo === 'actual') {
+      fileInputRefActual.current?.click();
+    } else {
+      fileInputRefDespues.current?.click();
+    }
   };
 
   const handleInputChange = (field: string, value: any) => {
@@ -162,6 +174,11 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
     const alMenosUnaRecomendacion = formData.recomendaciones_seleccionadas.some(r => r === true);
     if (!alMenosUnaRecomendacion) {
       alert('Debe seleccionar al menos una recomendación de cuidado');
+      return;
+    }
+
+    if (formData.foto_actual.length === 0 || formData.foto_despues.length === 0) {
+      alert('Debe cargar al menos una foto de ANTES y una foto de DESPUÉS para crear la ficha');
       return;
     }
 
@@ -221,6 +238,10 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
       // 2. Agregar archivos
       formData.foto_actual.forEach((file) => {
         formDataToSend.append('fotos_actual', file);
+      });
+
+      formData.foto_despues.forEach((file) => {
+        formDataToSend.append('fotos_despues', file);
       });
 
       // 3. Obtener recomendaciones aplicadas
@@ -333,6 +354,7 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
       if (data.success) {
         // Limpiar previews y datos del localStorage
         previewImages.actual.forEach(url => URL.revokeObjectURL(url));
+        previewImages.despues.forEach(url => URL.revokeObjectURL(url));
         localStorage.removeItem(`ficha_cuidado_post_color_${cita.cita_id}`);
 
         // Notificar éxito
@@ -350,14 +372,14 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
     }
   };
 
-  const renderImageUploader = () => {
-    const files = formData.foto_actual;
-    const previews = previewImages.actual;
-    const fileInputRef = fileInputRefActual;
+  const renderImageUploader = (tipo: 'actual' | 'despues', label: string) => {
+    const files = tipo === 'actual' ? formData.foto_actual : formData.foto_despues;
+    const previews = tipo === 'actual' ? previewImages.actual : previewImages.despues;
+    const fileInputRef = tipo === 'actual' ? fileInputRefActual : fileInputRefDespues;
 
     return (
       <div>
-        <h3 className="mb-3 font-semibold">Estado actual del color</h3>
+        <h3 className="mb-3 font-semibold">{label}</h3>
 
         {/* Input de archivo oculto */}
         <input
@@ -366,14 +388,14 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
           multiple
           accept="image/*"
           className="hidden"
-          onChange={(e) => handleFileSelect(e.target.files)}
+          onChange={(e) => handleFileSelect(tipo, e.target.files)}
         />
 
         {/* Área de subida - LA IMAGEN SALE AQUÍ */}
         <div className="space-y-4">
           <div
             className="relative flex flex-col items-center justify-center h-48 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
-            onClick={openFileSelector}
+            onClick={() => openFileSelector(tipo)}
           >
             {previews.length > 0 ? (
               // Mostrar primera imagen si hay
@@ -414,13 +436,13 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
                     <div className="aspect-square rounded-lg overflow-hidden border bg-gray-100">
                       <img
                         src={previews[index + 1]}
-                        alt={`Estado actual ${index + 2}`}
+                        alt={`${label} ${index + 2}`}
                         className="w-full h-full object-cover"
                       />
                     </div>
                     <button
                       type="button"
-                      onClick={() => handleRemoveImage(index + 1)}
+                      onClick={() => handleRemoveImage(tipo, index + 1)}
                       className="absolute -top-2 -right-2 w-6 h-6 bg-gray-500 text-white rounded-full flex items-center justify-center hover:bg-gray-600"
                     >
                       <X className="h-3 w-3" />
@@ -437,6 +459,7 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
 
   // Verificar si se ha seleccionado al menos una recomendación
   const alMenosUnaRecomendacion = formData.recomendaciones_seleccionadas.some(r => r === true);
+  const tieneFotosAntesDespues = formData.foto_actual.length > 0 && formData.foto_despues.length > 0;
 
   return (
     <form onSubmit={handleSubmit} className="rounded-lg border bg-white p-6 space-y-6">
@@ -471,8 +494,9 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
       </div>
 
       {/* Sección de imágenes */}
-      <div>
-        {renderImageUploader()}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {renderImageUploader('actual', '📸 Estado actual del color (Antes)')}
+        {renderImageUploader('despues', '📸 Resultado del cuidado (Después)')}
       </div>
 
       {/* Recomendaciones de Cuidado */}
@@ -572,8 +596,8 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
 
         <button
           type="submit"
-          disabled={loading || !formData.firma_profesional || !alMenosUnaRecomendacion}
-          className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center ${loading || !formData.firma_profesional || !alMenosUnaRecomendacion
+          disabled={loading || !formData.firma_profesional || !alMenosUnaRecomendacion || !tieneFotosAntesDespues}
+          className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center ${loading || !formData.firma_profesional || !alMenosUnaRecomendacion || !tieneFotosAntesDespues
               ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
               : 'bg-gray-600 text-white hover:bg-gray-700'
             }`}
@@ -605,6 +629,14 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
         <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
           <p className="text-gray-700 text-sm">
             ⚠️ Debe seleccionar al menos una recomendación de cuidado.
+          </p>
+        </div>
+      )}
+
+      {!tieneFotosAntesDespues && (
+        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+          <p className="text-gray-700 text-sm">
+            ⚠️ Debe cargar mínimo una foto de antes y una foto de después.
           </p>
         </div>
       )}

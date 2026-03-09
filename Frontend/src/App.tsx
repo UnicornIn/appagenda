@@ -1,6 +1,14 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import BeauxLogin from "./pages/LoginPage/LoginPage";
 import { AuthProvider, useAuth } from "./components/Auth/AuthContext";
+import {
+  APP_MODULES,
+  APP_ROLES,
+  canAccess,
+  getDefaultRouteForRole,
+  resolveAppRole,
+  type AppModule,
+} from "./lib/access-control";
 import "./index.css";
 
 /* --- Super Admin Pages --- */
@@ -38,11 +46,11 @@ import StylistCommissions from "./pages/PageStylist/Comisiones/Comisiones";
 /** 🔒 RUTA PRIVADA: Verifica usuario y rol */
 const PrivateRoute = ({
   children,
-  allowedRoles,
+  requiredAccess,
   allowedCurrencies,
 }: {
   children: JSX.Element;
-  allowedRoles: string[];
+  requiredAccess: AppModule | string;
   allowedCurrencies?: string[];
 }) => {
   const { user, isLoading } = useAuth();
@@ -59,9 +67,8 @@ const PrivateRoute = ({
     return <Navigate to="/" replace />;
   }
 
-  // Si el rol del usuario no está permitido
-  if (!allowedRoles.includes(user.role)) {
-    return <Navigate to="/unauthorized" replace />;
+  if (!canAccess(requiredAccess, user.role)) {
+    return <Navigate to={getDefaultRouteForRole(user.role)} replace />;
   }
 
   if (allowedCurrencies && allowedCurrencies.length > 0) {
@@ -77,6 +84,25 @@ const PrivateRoute = ({
   return children;
 };
 
+const AgendaRoute = () => {
+  const { user } = useAuth();
+  const role = resolveAppRole(user?.role);
+
+  if (role === APP_ROLES.SUPER_ADMIN || role === APP_ROLES.CALL_CENTER) {
+    return <SuperAppointment />;
+  }
+
+  if (role === APP_ROLES.ADMIN_SEDE || role === APP_ROLES.RECEPCIONISTA) {
+    return <SedeAppointment />;
+  }
+
+  if (role === APP_ROLES.ESTILISTA) {
+    return <StylistAppointment />;
+  }
+
+  return <Navigate to="/unauthorized" replace />;
+};
+
 function App() {
   return (
     <Router>
@@ -85,12 +111,20 @@ function App() {
           <Routes>
             {/* --- LOGIN --- */}
             <Route path="/" element={<BeauxLogin />} />
+            <Route
+              path="/agenda"
+              element={
+                <PrivateRoute requiredAccess={APP_MODULES.AGENDA_HOME}>
+                  <AgendaRoute />
+                </PrivateRoute>
+              }
+            />
 
             {/* --- SUPER ADMIN --- */}
             <Route
               path="/superadmin/dashboard"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_DASHBOARD}>
                   <SuperDashboard />
                 </PrivateRoute>
               }
@@ -98,7 +132,7 @@ function App() {
             <Route
               path="/superadmin/sales-invoices"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_SALES_INVOICES}>
                   <SuperInvoices />
                 </PrivateRoute>
               }
@@ -106,7 +140,7 @@ function App() {
             <Route
               path="/superadmin/paymethods"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_PAYMETHODS}>
                   <SuperPay />
                 </PrivateRoute>
               }
@@ -114,7 +148,7 @@ function App() {
             <Route
               path="/superadmin/performance"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_PERFORMANCE}>
                   <SuperPerformance />
                 </PrivateRoute>
               }
@@ -122,7 +156,7 @@ function App() {
             <Route
               path="/superadmin/appointments"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.AGENDA_GLOBAL}>
                   <SuperAppointment />
                 </PrivateRoute>
               }
@@ -130,7 +164,7 @@ function App() {
             <Route
               path="/superadmin/products"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_PRODUCTS}>
                   <SuperProducts />
                 </PrivateRoute>
               }
@@ -138,7 +172,7 @@ function App() {
             <Route
               path="/superadmin/sedes"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_SEDES}>
                   <SuperSede />
                 </PrivateRoute>
               }
@@ -146,7 +180,7 @@ function App() {
             <Route
               path="/superadmin/stylists"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_STYLISTS}>
                   <SuperStylist />
                 </PrivateRoute>
               }
@@ -154,7 +188,7 @@ function App() {
             <Route
               path="/superadmin/services"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_SERVICES}>
                   <SuperServices />
                 </PrivateRoute>
               }
@@ -162,7 +196,7 @@ function App() {
             <Route
               path="/superadmin/commissions"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_COMMISSIONS}>
                   <SuperComisiones />
                 </PrivateRoute>
               }
@@ -170,7 +204,7 @@ function App() {
             <Route
               path="/superadmin/clients"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_CLIENTS}>
                   <SuperClients />
                 </PrivateRoute>
               }
@@ -178,7 +212,7 @@ function App() {
             <Route
               path="/superadmin/system-users"
               element={
-                <PrivateRoute allowedRoles={["super_admin", "superadmin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_SYSTEM_USERS}>
                   <SuperSystemUsers />
                 </PrivateRoute>
               }
@@ -186,7 +220,7 @@ function App() {
             <Route
               path="/superadmin/cierre-caja"
               element={
-                <PrivateRoute allowedRoles={["super_admin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_CIERRE_CAJA}>
                   <CierreCajaPage />
                 </PrivateRoute>
               }
@@ -194,7 +228,7 @@ function App() {
             <Route
               path="/superadmin/gift-cards"
               element={
-                <PrivateRoute allowedRoles={["super_admin", "superadmin"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SUPER_GIFT_CARDS}>
                   <GiftCardsPage />
                 </PrivateRoute>
               }
@@ -205,7 +239,7 @@ function App() {
             <Route
               path="/sede/dashboard"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SEDE_DASHBOARD}>
                   <SedeDashboard />
                 </PrivateRoute>
               }
@@ -213,7 +247,7 @@ function App() {
             <Route
               path="/sede/sales-invoiced"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SEDE_SALES_INVOICED}>
                   <SedeInvoices />
                 </PrivateRoute>
               }
@@ -221,7 +255,7 @@ function App() {
             <Route
               path="/sede/cierre-caja"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SEDE_CIERRE_CAJA}>
                   <CierreCajaPage />
                 </PrivateRoute>
               }
@@ -229,7 +263,7 @@ function App() {
             <Route
               path="/sede/commissions"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SEDE_COMMISSIONS}>
                   <SedeCommissions />
                 </PrivateRoute>
               }
@@ -237,7 +271,7 @@ function App() {
             <Route
               path="/sede/billing"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SEDE_BILLING}>
                   <SedeBilling />
                 </PrivateRoute>
               }
@@ -245,7 +279,7 @@ function App() {
             <Route
               path="/sede/gift-cards"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SEDE_GIFT_CARDS}>
                   <GiftCardsPage />
                 </PrivateRoute>
               }
@@ -253,7 +287,7 @@ function App() {
             <Route
               path="/sede/performance"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SEDE_PERFORMANCE}>
                   <SedePerformance />
                 </PrivateRoute>
               }
@@ -261,7 +295,7 @@ function App() {
             <Route
               path="/sede/appointments"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.AGENDA_SEDE}>
                   <SedeAppointment />
                 </PrivateRoute>
               }
@@ -269,7 +303,7 @@ function App() {
             <Route
               path="/sede/products"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SEDE_PRODUCTS}>
                   <ProductsList />
                 </PrivateRoute>
               }
@@ -277,7 +311,7 @@ function App() {
             <Route
               path="/sede/clients"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SEDE_CLIENTS}>
                   <SedeClients />
                 </PrivateRoute>
               }
@@ -285,7 +319,7 @@ function App() {
             <Route
               path="/sede/services"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SEDE_SERVICES}>
                   <SedeServices />
                 </PrivateRoute>
               }
@@ -293,7 +327,7 @@ function App() {
             <Route
               path="/sede/stylists"
               element={
-                <PrivateRoute allowedRoles={["admin_sede"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.SEDE_STYLISTS}>
                   <SedeStylists />
                 </PrivateRoute>
               }
@@ -303,7 +337,7 @@ function App() {
             <Route
               path="/stylist/appointments"
               element={
-                <PrivateRoute allowedRoles={["estilista"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.AGENDA_STYLIST}>
                   <StylistAppointment />
                 </PrivateRoute>
               }
@@ -311,7 +345,7 @@ function App() {
             <Route
               path="/stylist/commissions"
               element={
-                <PrivateRoute allowedRoles={["estilista"]}>
+                <PrivateRoute requiredAccess={APP_MODULES.STYLIST_COMMISSIONS}>
                   <StylistCommissions />
                 </PrivateRoute>
               }
