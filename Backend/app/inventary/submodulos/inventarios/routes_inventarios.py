@@ -26,44 +26,41 @@ async def listar_inventario(
     stock_bajo: Optional[bool] = Query(None, description="Solo productos con stock bajo"),
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Lista el inventario según el rol:
-    - admin_sede: Ve solo el inventario de SU sede (filtro automático)
-    - super_admin: Ve inventario consolidado de todas las sedes o filtra por sede_id
-    """
     rol = current_user.get("rol")
     
-    if rol not in ["admin_sede", "super_admin"]:
+    if rol not in ["admin_sede", "super_admin", "call_center", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No autorizado para consultar inventario")
     
-    # 🔐 Filtro automático por sede para admin_sede
     query = {}
-    if rol == "admin_sede":
+    if rol == ["admin_sede", "call_center", "recepcionista"]:
         user_sede_id = current_user.get("sede_id")
         if not user_sede_id:
             raise HTTPException(status_code=403, detail="Usuario sin sede asignada")
         query["sede_id"] = user_sede_id
-    elif sede_id:  # super_admin puede filtrar por sede
+    elif sede_id:
         query["sede_id"] = sede_id
     
-    # Filtro de stock bajo
     if stock_bajo:
         inventarios = await collection_inventarios.find(query).to_list(None)
         inventarios = [inv for inv in inventarios if inv["stock_actual"] < inv["stock_minimo"]]
     else:
         inventarios = await collection_inventarios.find(query).to_list(None)
     
-    # Enriquecer con info del producto
     resultado = []
     for inv in inventarios:
         inv_dict = inventario_to_dict(inv)
         
-        # Buscar info del producto usando 'id'
         producto = await collection_productos.find_one({"id": inv["producto_id"]})
         if producto:
             inv_dict["producto_nombre"] = producto.get("nombre")
             inv_dict["producto_codigo"] = producto.get("tipo_codigo")
             inv_dict["categoria"] = producto.get("categoria")
+            # ⭐ Mostrar comisión efectiva: override de sede si existe, global como fallback
+            comision_global = float(producto.get("comision", 0))
+            comision_override = inv_dict.get("comision")
+            inv_dict["comision_efectiva"] = float(comision_override) if comision_override is not None else comision_global
+            inv_dict["comision_global"] = comision_global
+            inv_dict["tiene_comision_override"] = comision_override is not None
         
         resultado.append(inv_dict)
     
@@ -77,16 +74,10 @@ async def listar_inventario(
 async def inventario_consolidado(
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Muestra el stock total de cada producto sumando todas las sedes.
-    Solo super_admin puede ver esto.
-    """
     rol = current_user.get("rol")
-    
     if rol != "super_admin":
         raise HTTPException(status_code=403, detail="Solo super_admin puede ver inventario consolidado")
     
-    # Agregación: suma stock por producto_id
     pipeline = [
         {
             "$group": {
@@ -100,7 +91,6 @@ async def inventario_consolidado(
     
     resultado = await collection_inventarios.aggregate(pipeline).to_list(None)
     
-    # Enriquecer con info del producto
     consolidado = []
     for item in resultado:
         producto = await collection_productos.find_one({"id": item["_id"]})
@@ -126,11 +116,6 @@ async def crear_inventario(
     inventario: Inventario,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Crea el registro inicial de inventario para un producto en una sede.
-    admin_sede: Solo puede crear para SU sede (filtro automático)
-    super_admin: Puede crear para cualquier sede
-    """
     rol = current_user.get("rol")
     
     if rol not in ["admin_sede", "super_admin"]:
@@ -138,58 +123,52 @@ async def crear_inventario(
     
     data = inventario.dict()
     
-    # 🔐 Filtro automático: admin_sede solo puede crear para su sede
     if rol == "admin_sede":
         user_sede_id = current_user.get("sede_id")
         if not user_sede_id:
             raise HTTPException(status_code=403, detail="Usuario sin sede asignada")
-        data["sede_id"] = user_sede_id  # Forzar sede del usuario
+        data["sede_id"] = user_sede_id
     elif not data.get("sede_id"):
         raise HTTPException(status_code=400, detail="Debe especificar sede_id")
     
-    # Validar que el producto existe
     producto = await collection_productos.find_one({"id": data["producto_id"]})
     if not producto:
         raise HTTPException(status_code=404, detail=f"Producto {data['producto_id']} no encontrado")
     
-    # Validar que no exista ya un inventario para ese producto en esa sede
     existe = await collection_inventarios.find_one({
         "producto_id": data["producto_id"],
         "sede_id": data["sede_id"]
     })
-    
     if existe:
         raise HTTPException(
             status_code=400, 
             detail=f"Ya existe inventario para {producto['nombre']} en la sede {data['sede_id']}. Use el endpoint de ajuste para modificar el stock."
         )
     
-    # Construir documento en el orden correcto
     documento = {
         "nombre": producto["nombre"],
         "producto_id": data["producto_id"],
         "sede_id": data["sede_id"],
         "stock_actual": data["stock_actual"],
         "stock_minimo": data["stock_minimo"],
+        # ⭐ comision: None por defecto → usará el global del producto
+        # Se puede configurar después con PATCH /{sede_id}/{producto_id}/comision
+        "comision": None,
         "fecha_creacion": datetime.now(),
         "fecha_ultima_actualizacion": datetime.now(),
         "creado_por": current_user["email"]
     }
     
-    # Insertar
     result = await collection_inventarios.insert_one(documento)
     documento["_id"] = str(result.inserted_id)
     
     print(f"✅ Inventario creado: {producto['nombre']} - Sede {documento['sede_id']} - Stock inicial: {documento['stock_actual']}")
     
-    return {
-        "msg": "Inventario creado exitosamente",
-        "inventario": documento
-    }
+    return {"msg": "Inventario creado exitosamente", "inventario": documento}
 
 
 # =========================================================
-# 🔧 Ajuste manual de inventario (admin_sede y super_admin)
+# 🔧 Ajuste manual de inventario
 # =========================================================
 @router.patch("/{inventario_id}/ajustar", response_model=dict)
 async def ajustar_inventario(
@@ -197,57 +176,33 @@ async def ajustar_inventario(
     ajuste: AjusteInventario,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Permite ajustes manuales de stock (sumar o restar).
-    admin_sede: Solo puede ajustar inventario de SU sede
-    super_admin: Puede ajustar cualquier sede
-    
-    Nota: Los ajustes NO se registran en inventory_motions para mantener
-    esa colección limpia solo con movimientos operacionales (ventas, pedidos).
-    """
     rol = current_user.get("rol")
     
-    if rol not in ["admin_sede", "super_admin"]:
+    if rol not in ["admin_sede", "super_admin", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No autorizado para ajustar inventario")
     
-    # Buscar inventario
     inventario = await collection_inventarios.find_one({"_id": ObjectId(inventario_id)})
     if not inventario:
         raise HTTPException(status_code=404, detail="Inventario no encontrado")
     
-    # 🔐 Validar que admin_sede solo ajuste su propia sede
-    if rol == "admin_sede":
+    if rol == ["admin_sede", "recepcionista"]:
         user_sede_id = current_user.get("sede_id")
         if not user_sede_id:
             raise HTTPException(status_code=403, detail="Usuario sin sede asignada")
         if inventario["sede_id"] != user_sede_id:
-            raise HTTPException(
-                status_code=403, 
-                detail="No puede ajustar inventario de otra sede"
-            )
+            raise HTTPException(status_code=403, detail="No puede ajustar inventario de otra sede")
     
-    # Calcular nuevo stock
     nuevo_stock = inventario["stock_actual"] + ajuste.cantidad_ajuste
-    
     if nuevo_stock < 0:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"El ajuste resultaría en stock negativo ({nuevo_stock})"
-        )
+        raise HTTPException(status_code=400, detail=f"El ajuste resultaría en stock negativo ({nuevo_stock})")
     
-    # Actualizar
     await collection_inventarios.update_one(
         {"_id": ObjectId(inventario_id)},
-        {
-            "$set": {
-                "stock_actual": nuevo_stock,
-                "fecha_ultima_actualizacion": datetime.now()
-            }
-        }
+        {"$set": {"stock_actual": nuevo_stock, "fecha_ultima_actualizacion": datetime.now()}}
     )
     
     operacion = "agregó" if ajuste.cantidad_ajuste > 0 else "restó"
-    print(f"🔧 AJUSTE MANUAL: {inventario['sede_id']} - {inventario.get('nombre', 'N/A')} - Se {operacion} {abs(ajuste.cantidad_ajuste)} unidades (Usuario: {current_user['email']})")
+    print(f"🔧 AJUSTE MANUAL: {inventario['sede_id']} - {inventario.get('nombre', 'N/A')} - Se {operacion} {abs(ajuste.cantidad_ajuste)} unidades")
     
     return {
         "msg": "Ajuste aplicado correctamente",
@@ -265,39 +220,29 @@ async def ajustar_inventario(
 async def alertas_stock_bajo(
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Lista productos con stock bajo en la sede del usuario.
-    admin_sede: Solo su sede
-    super_admin: Todas las sedes
-    """
     rol = current_user.get("rol")
     
-    if rol not in ["admin_sede", "super_admin"]:
+    if rol not in ["admin_sede", "super_admin", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
     
-    # Filtro por sede si es admin_sede
     query = {}
-    if rol == "admin_sede":
+    if rol == ["admin_sede", "recepcionista"]:
         user_sede_id = current_user.get("sede_id")
         if not user_sede_id:
             raise HTTPException(status_code=403, detail="Usuario sin sede asignada")
         query["sede_id"] = user_sede_id
     
-    # Buscar productos con stock bajo
     inventarios = await collection_inventarios.find(query).to_list(None)
     alertas = []
     
     for inv in inventarios:
         if inv["stock_actual"] < inv["stock_minimo"]:
             inv_dict = inventario_to_dict(inv)
-            
-            # Enriquecer con info del producto usando 'id'
             producto = await collection_productos.find_one({"id": inv["producto_id"]})
             if producto:
                 inv_dict["producto_nombre"] = producto.get("nombre")
                 inv_dict["producto_codigo"] = producto.get("tipo_codigo")
                 inv_dict["diferencia"] = inv["stock_minimo"] - inv["stock_actual"]
-            
             alertas.append(inv_dict)
             print(f"⚠️ ALERTA STOCK BAJO: {inv['sede_id']} - {producto.get('nombre', 'N/A')} ({inv['stock_actual']}/{inv['stock_minimo']})")
     
@@ -312,18 +257,13 @@ async def obtener_inventario_producto(
     producto_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Obtiene el inventario de un producto específico en la sede del usuario.
-    """
     rol = current_user.get("rol")
     
-    if rol not in ["admin_sede", "super_admin"]:
+    if rol not in ["admin_sede", "super_admin", "call_center", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
     
-    # Construir query
     query = {"producto_id": producto_id}
-    
-    if rol == "admin_sede":
+    if rol == ["admin_sede", "call_center", "recepcionista"]:
         user_sede_id = current_user.get("sede_id")
         if not user_sede_id:
             raise HTTPException(status_code=403, detail="Usuario sin sede asignada")
@@ -334,7 +274,7 @@ async def obtener_inventario_producto(
     if not inventario:
         return {
             "producto_id": producto_id,
-            "sede_id": current_user.get("sede_id") if rol == "admin_sede" else None,
+            "sede_id": current_user.get("sede_id") if rol == ["admin_sede", "call_center", "recepcionista"] else None,
             "stock_actual": 0,
             "stock_minimo": 0,
             "existe_registro": False
@@ -343,10 +283,204 @@ async def obtener_inventario_producto(
     inv_dict = inventario_to_dict(inventario)
     inv_dict["existe_registro"] = True
     
-    # Agregar info del producto usando 'id'
     producto = await collection_productos.find_one({"id": producto_id})
     if producto:
         inv_dict["producto_nombre"] = producto.get("nombre")
         inv_dict["producto_codigo"] = producto.get("tipo_codigo")
+        # ⭐ Enriquecer con info de comisión
+        comision_global = float(producto.get("comision", 0))
+        comision_override = inv_dict.get("comision")
+        inv_dict["comision_efectiva"] = float(comision_override) if comision_override is not None else comision_global
+        inv_dict["comision_global"] = comision_global
+        inv_dict["tiene_comision_override"] = comision_override is not None
     
     return inv_dict
+
+
+# =========================================================
+# ⭐ NUEVO: Configurar comisión por sede (override)
+# =========================================================
+@router.patch("/{sede_id}/{producto_id}/comision", response_model=dict)
+async def actualizar_comision_sede(
+    sede_id: str,
+    producto_id: str,
+    comision: Optional[float] = Query(
+        None,
+        ge=0,
+        le=100,
+        description="Porcentaje de comisión para esta sede (0-100)"
+    ),
+    eliminar_override: bool = Query(
+        False,
+        description="Si True, elimina el override y vuelve al % global del producto"
+    ),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Configura (o elimina) el porcentaje de comisión de un producto
+    específicamente para esta sede, sin afectar las demás.
+
+    Resolución en ventas y citas:
+      1. inventario.comision  → override de esta sede   ← este endpoint
+      2. producto.comision    → % global del producto   ← fallback automático
+
+    Ejemplos:
+      PATCH /inventarios/SEDE01/PROD001/comision?comision=20
+        → Esta sede paga 20% al estilista por este producto
+      PATCH /inventarios/SEDE01/PROD001/comision?eliminar_override=true
+        → Vuelve al % global del producto
+    """
+    rol = current_user.get("rol")
+    if rol not in ["super_admin", "admin_sede"]:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    # admin_sede solo puede editar su propia sede
+    if rol == "admin_sede" and current_user.get("sede_id") != sede_id:
+        raise HTTPException(status_code=403, detail="Solo puedes gestionar comisiones de tu propia sede")
+
+    inventario = await collection_inventarios.find_one(
+        {"producto_id": producto_id, "sede_id": sede_id}
+    )
+    if not inventario:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No existe inventario para producto '{producto_id}' en sede '{sede_id}'"
+        )
+
+    producto = await collection_productos.find_one({"id": producto_id})
+    comision_global = float(producto.get("comision", 0)) if producto else 0
+
+    if eliminar_override:
+        await collection_inventarios.update_one(
+            {"producto_id": producto_id, "sede_id": sede_id},
+            {
+                "$unset": {"comision": "", "comision_actualizada_por": "", "comision_actualizada_en": ""},
+            }
+        )
+        return {
+            "msg": "Override eliminado. Se usará la comisión global del producto.",
+            "sede_id": sede_id,
+            "producto_id": producto_id,
+            "comision_efectiva": comision_global,
+            "tiene_override": False,
+        }
+
+    if comision is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Envía ?comision=<valor> para configurar, o ?eliminar_override=true para quitar el override"
+        )
+
+    comision_anterior = inventario.get("comision")
+
+    await collection_inventarios.update_one(
+        {"producto_id": producto_id, "sede_id": sede_id},
+        {"$set": {
+            "comision": comision,
+            "comision_actualizada_por": current_user.get("email"),
+            "comision_actualizada_en": datetime.now(),
+        }}
+    )
+
+    return {
+        "msg": "Comisión de sede actualizada correctamente",
+        "sede_id": sede_id,
+        "producto_id": producto_id,
+        "producto_nombre": producto.get("nombre") if producto else None,
+        "comision_anterior": comision_anterior,        # None = no había override antes
+        "comision_nueva": comision,
+        "comision_global": comision_global,            # referencia del global
+        "tiene_override": True,
+        "actualizado_por": current_user.get("email"),
+    }
+
+# =========================================================
+# ⭐ Agregar este endpoint al router de INVENTARIOS
+#    para gestionar el override de comisión por sede
+# =========================================================
+
+# PATCH /inventarios/{sede_id}/{producto_id}/comision
+@router.patch("/{sede_id}/{producto_id}/comision", response_model=dict)
+async def actualizar_comision_sede(
+    sede_id: str,
+    producto_id: str,
+    comision: Optional[float] = Query(
+        None,
+        ge=0,
+        le=100,
+        description="Porcentaje de comisión para esta sede (0-100). Enviar null para eliminar el override y usar el global."
+    ),
+    eliminar_override: bool = Query(
+        False,
+        description="Si True, elimina el override de esta sede y vuelve al global del producto."
+    ),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Establece (o elimina) el override de comisión de un producto en una sede específica.
+
+    Ejemplos de uso:
+      • PATCH /inventarios/SEDE01/PROD001/comision?comision=20
+          → Esta sede pagará 20% al estilista por este producto
+      • PATCH /inventarios/SEDE01/PROD001/comision?eliminar_override=true
+          → Vuelve a usar el porcentaje global del producto
+
+    La resolución en ventas/citas usa siempre:
+      1. override de sede  (este campo en inventarios)
+      2. fallback global   (campo comision en productos)
+    """
+    rol = current_user.get("rol")
+    if rol not in ["super_admin", "admin_sede"]:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    # admin_sede solo puede editar su propia sede
+    if rol == "admin_sede" and current_user.get("sede_id") != sede_id:
+        raise HTTPException(status_code=403, detail="Solo puedes gestionar tu propia sede")
+
+    inventario = await collection_inventarios.find_one(
+        {"producto_id": producto_id, "sede_id": sede_id}
+    )
+    if not inventario:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No existe inventario para producto '{producto_id}' en sede '{sede_id}'"
+        )
+
+    if eliminar_override:
+        # Quitar el campo comision del inventario → vuelve al global
+        await collection_inventarios.update_one(
+            {"producto_id": producto_id, "sede_id": sede_id},
+            {"$unset": {"comision": ""}}
+        )
+        return {
+            "msg": "Override eliminado. Esta sede usará ahora la comisión global del producto.",
+            "sede_id": sede_id,
+            "producto_id": producto_id,
+            "comision_efectiva": "global",
+        }
+
+    if comision is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Debes enviar ?comision=<valor> o ?eliminar_override=true"
+        )
+
+    comision_anterior = inventario.get("comision")  # puede ser None si no había override
+
+    await collection_inventarios.update_one(
+        {"producto_id": producto_id, "sede_id": sede_id},
+        {"$set": {
+            "comision": comision,
+            "comision_actualizada_por": current_user.get("email"),
+            "comision_actualizada_en": datetime.now(),
+        }}
+    )
+
+    return {
+        "msg": "Override de comisión actualizado para esta sede.",
+        "sede_id": sede_id,
+        "producto_id": producto_id,
+        "comision_anterior": comision_anterior,  # None si es la primera vez
+        "comision_nueva": comision,
+        "actualizado_por": current_user.get("email"),
+    }

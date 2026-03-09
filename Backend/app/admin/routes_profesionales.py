@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime
 from bson import ObjectId
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from app.admin.models import Profesional
 from app.auth.routes import get_current_user
@@ -629,4 +629,72 @@ async def get_estadisticas_profesional(
         },
         "especialidades": professional.get("especialidades", True),
         "activo": professional.get("activo", True)
+    }
+
+# ===================================================
+# 💰 Actualizar comisiones por categoría
+# Agregar este endpoint en app/admin/routes/profesionales.py
+# ===================================================
+
+@router.patch("/{profesional_id}/comisiones", response_model=dict)
+async def actualizar_comisiones_profesional(
+    profesional_id: str,
+    comisiones_por_categoria: Dict[str, float],
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Actualiza las comisiones por categoría de un profesional.
+    
+    Body ejemplo:
+    {
+        "Peluquería": 35,
+        "Color": 45,
+        "Tratamientos": 30
+    }
+    
+    Permisos: super_admin, admin_sede
+    """
+    if current_user["rol"] not in ["super_admin", "admin_sede"]:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    # Validar rangos
+    for categoria, porcentaje in comisiones_por_categoria.items():
+        if not categoria.strip():
+            raise HTTPException(status_code=400, detail="Cada categoría debe ser un texto no vacío")
+        if porcentaje < 0 or porcentaje > 100:
+            raise HTTPException(
+                status_code=400,
+                detail=f'Comisión de "{categoria}" debe estar entre 0 y 100'
+            )
+
+    # Buscar profesional
+    profesional = await collection_estilista.find_one({"profesional_id": profesional_id, "rol": "estilista"})
+    if not profesional:
+        try:
+            profesional = await collection_estilista.find_one({"_id": ObjectId(profesional_id), "rol": "estilista"})
+        except Exception:
+            pass
+
+    if not profesional:
+        raise HTTPException(status_code=404, detail=f"Profesional no encontrado: {profesional_id}")
+
+    # Validar que admin_sede solo edite su propia sede
+    if current_user["rol"] == "admin_sede":
+        if profesional.get("sede_id") != current_user.get("sede_id"):
+            raise HTTPException(status_code=403, detail="No puedes editar profesionales de otra sede")
+
+    result = await collection_estilista.update_one(
+        {"profesional_id": profesional_id, "rol": "estilista"},
+        {"$set": {
+            "comisiones_por_categoria": comisiones_por_categoria,
+            "updated_at": datetime.now(),
+            "updated_by": current_user["email"]
+        }}
+    )
+
+    return {
+        "msg": "✅ Comisiones actualizadas correctamente",
+        "profesional_id": profesional_id,
+        "nombre": profesional.get("nombre"),
+        "comisiones_por_categoria": comisiones_por_categoria
     }

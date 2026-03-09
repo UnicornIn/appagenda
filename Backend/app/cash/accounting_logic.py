@@ -47,6 +47,7 @@ MAPEO_METODOS_PAGO = {
     "online"                                : "otros",
     "caja_fuerte"                           : "otros",
     "otro"                                  : "otros",
+    "descuento_por_nomina"                 : "descuento_por_nomina",
 
     # Variantes del sistema migrado (texto del CSV ya sin tildes)
     "tarjeta de credito"                    : "tarjeta_credito",
@@ -497,11 +498,14 @@ async def calcular_ingresos_efectivo_appointments(
     sede_id: str,
     fecha: str
 ) -> Dict:
+    fecha_dt     = datetime.strptime(fecha, "%Y-%m-%d" or "%d-%m-%Y")
+    fecha_inicio = fecha_dt.replace(hour=0,  minute=0,  second=0,  microsecond=0)
+    fecha_fin    = fecha_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
     pipeline = [
         {
             "$match": {
                 "sede_id": sede_id,
-                "fecha": fecha,
+                # ✅ Ya NO filtramos por fecha de cita aquí, porque el pago puede ser en otro día
                 "historial_pagos": {"$exists": True, "$ne": []},
                 "$or": [
                     {"estado_factura": {"$exists": False}},
@@ -510,7 +514,16 @@ async def calcular_ingresos_efectivo_appointments(
             }
         },
         {"$unwind": "$historial_pagos"},
-        {"$match": {"historial_pagos.metodo": "efectivo"}},
+        {
+            "$match": {
+                "historial_pagos.metodo": "efectivo",
+                # ✅ Filtramos por fecha del PAGO, no de la cita
+                "historial_pagos.fecha": {
+                    "$gte": fecha_inicio,
+                    "$lte": fecha_fin
+                }
+            }
+        },
         {
             "$group": {
                 "_id": None,
@@ -595,7 +608,7 @@ async def calcular_ingresos_por_metodo_pago(
     sede_id: str,
     fecha: str
 ) -> Dict:
-    fecha_dt     = datetime.strptime(fecha, "%Y-%m-%d")
+    fecha_dt     = datetime.strptime(fecha, "%Y-%m-%d" or "%d-%m-%Y")
     fecha_inicio = fecha_dt.replace(hour=0,  minute=0,  second=0,  microsecond=0)
     fecha_fin    = fecha_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
 
@@ -606,7 +619,7 @@ async def calcular_ingresos_por_metodo_pago(
         {
             "$match": {
                 "sede_id": sede_id,
-                "fecha": fecha,
+                # ✅ Sin filtro de fecha de cita
                 "historial_pagos": {"$exists": True, "$ne": []},
                 "$or": [
                     {"estado_factura": {"$exists": False}},
@@ -615,6 +628,14 @@ async def calcular_ingresos_por_metodo_pago(
             }
         },
         {"$unwind": "$historial_pagos"},
+        {
+            "$match": {
+                "historial_pagos.fecha": {
+                    "$gte": fecha_inicio,
+                    "$lte": fecha_fin
+                }
+            }
+        },
         {
             "$group": {
                 "_id"  : "$historial_pagos.metodo",

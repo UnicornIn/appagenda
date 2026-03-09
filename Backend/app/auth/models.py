@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, ConfigDict
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -46,6 +46,7 @@ class TokenResponse(BaseModel):
     nombre: str
     email: str
     sede_id: Optional[str] = None
+    sedes_permitidas: Optional[List[str]] = []  # ← NUEVO
 
 
 class TokenData(BaseModel):

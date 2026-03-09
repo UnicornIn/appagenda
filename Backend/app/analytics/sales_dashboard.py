@@ -163,6 +163,7 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
                     "link_de_pago": 0,
                     "tarjeta_credito": 0,
                     "tarjeta_debito": 0,
+                    "descuento_por_nomina"
                     "abonos": 0
                 }
             }
@@ -359,7 +360,7 @@ async def ventas_dashboard(
     """
     try:
         # ========= VALIDACIÓN DE PERMISOS =========
-        allowed_roles = ["admin_sede", "admin_franquicia", "super_admin"]
+        allowed_roles = ["admin_sede", "admin_franquicia", "super_admin", "recepcionista", "call_center"]
         
         if current_user.get("rol") not in allowed_roles:
             raise HTTPException(
@@ -377,13 +378,29 @@ async def ventas_dashboard(
                     detail="Usuario admin_sede sin sede asignada."
                 )
             
-            if sede_id and sede_id != user_sede_id:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"No puede ver ventas de otra sede. Solo: {user_sede_id}"
-                )
-            
-            sede_id = user_sede_id
+            # ========= VALIDACIÓN DE SEDE (admin_sede) =========
+            if current_user.get("rol") == "admin_sede":
+                user_sede_id = current_user.get("sede_id")
+                sedes_permitidas = current_user.get("sedes_permitidas", [])
+
+                if not user_sede_id:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Usuario admin_sede sin sede asignada."
+                    )
+
+                # ✅ Construir lista completa de sedes autorizadas
+                sedes_autorizadas = list(set([user_sede_id] + sedes_permitidas))
+
+                if sede_id and sede_id not in sedes_autorizadas:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"No tiene acceso a esta sede. Sedes permitidas: {sedes_autorizadas}"
+                    )
+
+                # Si no mandó sede_id, usar la sede activa del header (X-Sede-Id) o la principal
+                if not sede_id:
+                    sede_id = user_sede_id
         
         # ========= CALCULAR RANGOS =========
         try:
