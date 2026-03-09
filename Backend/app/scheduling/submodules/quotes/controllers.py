@@ -236,9 +236,25 @@ def crear_seccion_diagnostico(datos_especificos, estilos):
     
     datos_tabla = []
     for campo_key, campo_label in campos_diagnostico:
-        valor = datos_especificos.get(campo_key)
-        if valor and str(valor).strip() and str(valor).lower() != 'no especificado':
-            datos_tabla.append([f"{campo_label}:", str(valor)])
+        valor = str(datos_especificos.get(campo_key, "")).strip()
+        detalle = str(datos_especificos.get(f"{campo_key}_detalle", "")).strip()
+
+        if not detalle:
+            descripcion = str(datos_especificos.get(f"{campo_key}_descripcion", "")).strip()
+            acciones = str(datos_especificos.get(f"{campo_key}_acciones", "")).strip()
+            if descripcion or acciones:
+                partes_detalle = []
+                if descripcion:
+                    partes_detalle.append(f"Definición: {descripcion}")
+                if acciones:
+                    partes_detalle.append(f"Acciones: {acciones}")
+                detalle = " ".join(partes_detalle)
+
+        if valor and valor.lower() != 'no especificado':
+            valor_final = valor
+            if detalle:
+                valor_final = f"{valor}. {detalle}"
+            datos_tabla.append([f"{campo_label}:", valor_final])
     
     if datos_tabla:
         secciones.append(Paragraph("DIAGNÓSTICO TÉCNICO", estilos['section_style']))
@@ -606,14 +622,29 @@ async def generar_pdf_ficha(ficha_data: dict, cita_data: dict) -> bytes:
         rizo_data = []
         
         for campo_key, campo_label in campos_rizo:
-            valor = datos_especificos.get(campo_key, '').strip()
-            if valor and valor.lower() != 'no especificado':
-                if isinstance(valor, str):
-                    if valor.upper() in ['ALTA', 'MEDIA', 'BAJA']:
-                        valor = valor.upper()
-                    else:
-                        valor = valor.title()
-                
+            valor_raw = str(datos_especificos.get(campo_key, '')).strip()
+            detalle = str(datos_especificos.get(f"{campo_key}_detalle", "")).strip()
+
+            if not detalle:
+                descripcion = str(datos_especificos.get(f"{campo_key}_descripcion", "")).strip()
+                acciones = str(datos_especificos.get(f"{campo_key}_acciones", "")).strip()
+                if descripcion or acciones:
+                    partes_detalle = []
+                    if descripcion:
+                        partes_detalle.append(f"Definición: {descripcion}")
+                    if acciones:
+                        partes_detalle.append(f"Acciones: {acciones}")
+                    detalle = " ".join(partes_detalle)
+
+            if valor_raw and valor_raw.lower() != 'no especificado':
+                if valor_raw.upper() in ['ALTA', 'MEDIA', 'BAJA']:
+                    valor = valor_raw.upper()
+                else:
+                    valor = valor_raw.title()
+
+                if detalle:
+                    valor = f"{valor}. {detalle}"
+
                 rizo_data.append([
                     Paragraph(f"<b>{campo_label}:</b>", label_style),
                     Paragraph(valor, value_style)

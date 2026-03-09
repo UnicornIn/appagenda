@@ -142,7 +142,7 @@ async def listar_servicios(
     admin_sede sin franquicia_id → globales + su sede
     super_admin                  → todos
     """
-    if current_user["rol"] == "admin_sede":
+    if current_user["rol"] == ["admin_sede", "call_center", "recepcionista"]:
         sede_id = current_user.get("sede_id")
 
         # ⭐ Intentar obtener franquicia_id (primero del token, luego de la sede)
@@ -341,7 +341,7 @@ async def listar_servicios_por_categoria(
 ):
     query = {"categoria": categoria, "activo": True}
 
-    if current_user["rol"] == "admin_sede":
+    if current_user["rol"] == ["admin_sede", "call_center", "recepcionista"]:
         sede_id = current_user.get("sede_id")
         franquicia_id = current_user.get("franquicia_id") or await _get_franquicia_id_de_sede(sede_id)
 
