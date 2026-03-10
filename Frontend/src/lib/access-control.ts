@@ -55,6 +55,8 @@ const ROLE_ALIASES: Record<string, AppRole> = {
   superadmin: APP_ROLES.SUPERADMIN,
   admin_sede: APP_ROLES.ADMIN_SEDE,
   estilista: APP_ROLES.ESTILISTA,
+  stylist: APP_ROLES.ESTILISTA,
+  profesional: APP_ROLES.ESTILISTA,
   call_center: APP_ROLES.CALL_CENTER,
   callcenter: APP_ROLES.CALL_CENTER,
   recepcionista: APP_ROLES.RECEPCIONISTA,

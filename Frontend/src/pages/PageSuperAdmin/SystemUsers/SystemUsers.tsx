@@ -15,6 +15,7 @@ const roleBadgeClasses: Record<string, string> = {
   admin_sede: "bg-blue-50 text-blue-700",
   recepcionista: "bg-amber-50 text-amber-700",
   call_center: "bg-emerald-50 text-emerald-700",
+  estilista: "bg-fuchsia-50 text-fuchsia-700",
 };
 
 const roleLabels: Record<string, string> = {
@@ -22,6 +23,7 @@ const roleLabels: Record<string, string> = {
   admin_sede: "admin_sede",
   recepcionista: "recepcionista",
   call_center: "call_center",
+  estilista: "estilista",
 };
 
 const normalizeRoleKey = (role: string) => role.trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -149,9 +151,15 @@ export default function SystemUsersPage() {
 
     setIsSaving(true);
     try {
-      await systemUsersService.createSystemUser(user.access_token, payload);
+      const result = await systemUsersService.createSystemUser(user.access_token, payload);
       await loadSystemUsers();
-      setSuccessMessage("Usuario creado correctamente.");
+      if (result.warning) {
+        setError(null);
+        setSuccessMessage(`Usuario creado correctamente. Nota: ${result.warning}`);
+      } else {
+        setError(null);
+        setSuccessMessage("Usuario creado correctamente.");
+      }
       closeModal();
     } finally {
       setIsSaving(false);
@@ -171,9 +179,15 @@ export default function SystemUsersPage() {
 
     setIsSaving(true);
     try {
-      await systemUsersService.updateSystemUser(user.access_token, editingUser._id, payload);
+      const result = await systemUsersService.updateSystemUser(user.access_token, editingUser._id, payload);
       await loadSystemUsers();
-      setSuccessMessage("Usuario actualizado correctamente.");
+      if (result.warning) {
+        setError(null);
+        setSuccessMessage(`Usuario actualizado correctamente. Nota: ${result.warning}`);
+      } else {
+        setError(null);
+        setSuccessMessage("Usuario actualizado correctamente.");
+      }
       closeModal();
     } finally {
       setIsSaving(false);

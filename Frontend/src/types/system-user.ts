@@ -2,7 +2,8 @@ export type SystemUserRole =
   | "super_admin"
   | "admin_sede"
   | "recepcionista"
-  | "call_center";
+  | "call_center"
+  | "estilista";
 
 export interface SystemUser {
   _id: string;

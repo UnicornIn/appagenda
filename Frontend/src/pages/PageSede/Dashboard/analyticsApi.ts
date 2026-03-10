@@ -168,6 +168,7 @@ export async function getVentasDashboard(
     start_date?: string;
     end_date?: string;
     sede_id?: string;
+    sede_header_id?: string;
   }
 ): Promise<VentasDashboardResponse> {
   const queryParams = new URLSearchParams();
@@ -187,6 +188,7 @@ export async function getVentasDashboard(
     headers: {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/json',
+      ...(params.sede_header_id ? { 'X-Sede-Id': params.sede_header_id } : {}),
     },
   });
 

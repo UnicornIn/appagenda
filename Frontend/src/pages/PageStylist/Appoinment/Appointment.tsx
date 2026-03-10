@@ -22,6 +22,8 @@ import BloqueosModal from "../../../components/Quotes/Bloqueos";
 import BottomSheet from "../../../components/ui/bottom-sheet";
 import { getBloqueosProfesional, Bloqueo } from "../../../components/Quotes/bloqueosApi";
 import { formatDateDMY } from "../../../lib/dateFormat";
+import { formatSedeNombre } from "../../../lib/sede";
+import { sedeService, type Sede } from "../../PageSuperAdmin/Sedes/sedeService";
 
 const MONTH_NAMES = [
   "Enero",
@@ -97,6 +99,13 @@ const parseMinutes = (hora: string) => {
   return h * 60 + m;
 };
 
+const normalizeSedeId = (value: string | null | undefined): string => String(value ?? "").trim();
+
+type SedeOption = {
+  sede_id: string;
+  nombre: string;
+};
+
 /*
 const formatHoyTitulo = (isoDate: string) => {
   const [yearStr, monthStr, dayStr] = isoDate.split("-");
@@ -144,13 +153,15 @@ const obtenerNombresServicios = (cita: any): string => {
 export default function VistaEstilistaPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { user, activeSedeId, setActiveSedeId, logout } = useAuth();
   // const { citas, loading, error, refetchCitas } = useEstilistaData();
   const { citas, refetchCitas } = useEstilistaData();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [citaSeleccionada, setCitaSeleccionada] = useState<any>(null);
   const [bloqueos, setBloqueos] = useState<Bloqueo[]>([]);
+  const [sedeOptions, setSedeOptions] = useState<SedeOption[]>([]);
+  const [loadingSedes, setLoadingSedes] = useState(false);
   const [profesionalId, setProfesionalId] = useState<string>("");
   const [refrescarBloqueos, setRefrescarBloqueos] = useState(0);
   const [loadingBloqueos, setLoadingBloqueos] = useState(false);
@@ -162,6 +173,42 @@ export default function VistaEstilistaPage() {
     const date = new Date();
     return new Date(date.getFullYear(), date.getMonth(), 1);
   });
+
+  const allowedSedeIds = useMemo(() => {
+    const ids = new Set<string>();
+
+    const addSedeId = (value: string | null | undefined) => {
+      const normalized = normalizeSedeId(value);
+      if (normalized) ids.add(normalized);
+    };
+
+    addSedeId(user?.sede_id_principal);
+    addSedeId(user?.sede_id);
+    addSedeId(activeSedeId);
+
+    if (Array.isArray(user?.sedes_permitidas)) {
+      user.sedes_permitidas.forEach((sedeId) => addSedeId(sedeId));
+    }
+
+    return Array.from(ids);
+  }, [activeSedeId, user?.sede_id, user?.sede_id_principal, user?.sedes_permitidas]);
+
+  const selectedSedeId = useMemo(() => {
+    const active = normalizeSedeId(activeSedeId);
+    if (active) return active;
+
+    const current = normalizeSedeId(user?.sede_id);
+    if (current) return current;
+
+    return allowedSedeIds[0] || "";
+  }, [activeSedeId, user?.sede_id, allowedSedeIds]);
+
+  const selectedSedeName = useMemo(() => {
+    const current = sedeOptions.find((option) => option.sede_id === selectedSedeId);
+    if (current?.nombre) return current.nombre;
+    return selectedSedeId || "Sin sede";
+  }, [selectedSedeId, sedeOptions]);
+  const shouldShowSedeSelector = sedeOptions.length > 1;
 
   useEffect(() => {
     setMenuOpen(false);
@@ -175,6 +222,69 @@ export default function VistaEstilistaPage() {
       document.body.style.overflow = previousOverflow;
     };
   }, [menuOpen]);
+
+  useEffect(() => {
+    const fallbackOptions = allowedSedeIds.map((sedeId) => ({
+      sede_id: sedeId,
+      nombre: sedeId,
+    }));
+
+    if (!user?.access_token || allowedSedeIds.length === 0) {
+      setSedeOptions(fallbackOptions);
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadSedes = async () => {
+      try {
+        setLoadingSedes(true);
+        const data = await sedeService.getSedes(user.access_token);
+        const allowedSet = new Set(allowedSedeIds.map((sedeId) => sedeId.toUpperCase()));
+
+        const optionsFromApi = (Array.isArray(data) ? data : [])
+          .map((sede: Sede) => ({
+            sede_id: normalizeSedeId(sede?.sede_id),
+            nombre: formatSedeNombre(sede?.nombre, sede?.sede_id || "Sede"),
+          }))
+          .filter((sede) => sede.sede_id && allowedSet.has(sede.sede_id.toUpperCase()))
+          .map((sede) => ({ sede_id: sede.sede_id, nombre: sede.nombre }));
+
+        const included = new Set(optionsFromApi.map((option) => option.sede_id.toUpperCase()));
+        const merged = [...optionsFromApi];
+
+        allowedSedeIds.forEach((sedeId) => {
+          if (included.has(sedeId.toUpperCase())) return;
+          merged.push({ sede_id: sedeId, nombre: sedeId });
+        });
+
+        if (isMounted) {
+          setSedeOptions(merged.length > 0 ? merged : fallbackOptions);
+        }
+      } catch (error) {
+        console.error("Error cargando sedes para perfil de estilista:", error);
+        if (isMounted) {
+          setSedeOptions(fallbackOptions);
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingSedes(false);
+        }
+      }
+    };
+
+    loadSedes();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [allowedSedeIds, user?.access_token]);
+
+  useEffect(() => {
+    if (!selectedSedeId) return;
+    if (selectedSedeId === normalizeSedeId(activeSedeId)) return;
+    setActiveSedeId(selectedSedeId);
+  }, [activeSedeId, selectedSedeId, setActiveSedeId]);
 
   useEffect(() => {
     const obtenerProfesionalId = () => {
@@ -332,6 +442,16 @@ export default function VistaEstilistaPage() {
   const abrirBloqueoDelDia = () => {
     if (!selectedDate) return;
     setShowCrearBloqueo(true);
+  };
+
+  const handleSedeChange = (nextSedeId: string) => {
+    const normalizedSedeId = normalizeSedeId(nextSedeId);
+    if (!normalizedSedeId) return;
+    if (normalizedSedeId === normalizeSedeId(activeSedeId)) return;
+
+    setActiveSedeId(normalizedSedeId);
+    setRefrescarBloqueos((prev) => prev + 1);
+    refetchCitas();
   };
 
   const handleLogout = () => {
@@ -644,6 +764,28 @@ export default function VistaEstilistaPage() {
               <X className="h-5 w-5" />
             </button>
           </div>
+
+          {shouldShowSedeSelector && (
+            <div className="border-b border-gray-200 bg-white p-2.5">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">Sede activa</p>
+              <select
+                value={selectedSedeId}
+                onChange={(e) => handleSedeChange(e.target.value)}
+                className="mt-2 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-gray-900 focus:outline-none"
+                disabled={loadingSedes || sedeOptions.length <= 1}
+              >
+                {sedeOptions.length === 0 && <option value="">Sin sede disponible</option>}
+                {sedeOptions.map((sede) => (
+                  <option key={sede.sede_id} value={sede.sede_id}>
+                    {sede.nombre}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-gray-500">
+                {loadingSedes ? "Cargando sedes..." : `Contexto actual: ${selectedSedeName}`}
+              </p>
+            </div>
+          )}
 
           <nav className="space-y-1.5 p-2.5">
             <button

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { cn } from "../../lib/utils";
 import {
@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "../Auth/AuthContext";
 import { APP_MODULES, AGENDA_PATHS, canAccess, type AppModule } from "../../lib/access-control";
+import { formatSedeNombre } from "../../lib/sede";
+import { getSedes, type Sede as BranchSede } from "../Branch/sedesApi";
 
 interface NavItem {
   title: string;
@@ -25,6 +27,21 @@ interface NavItem {
   module: AppModule;
   currencies?: string[];
 }
+
+type SedeOption = {
+  sede_id: string;
+  nombre: string;
+};
+
+const normalizeRole = (value: string | null | undefined): string =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+const normalizeSedeId = (value: string | null | undefined): string => String(value ?? "").trim();
+
+const MULTI_SEDE_ROLES = new Set(["admin_sede", "call_center", "estilista"]);
 
 const navItems: NavItem[] = [
   { title: "Dashboard", href: "/superadmin/dashboard", icon: LayoutDashboard, module: APP_MODULES.SUPER_DASHBOARD },
@@ -57,7 +74,9 @@ const navItems: NavItem[] = [
 export function Sidebar() {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const { user, logout } = useAuth();
+  const { user, activeSedeId, setActiveSedeId, logout } = useAuth();
+  const [sedeOptions, setSedeOptions] = useState<SedeOption[]>([]);
+  const [loadingSedeOptions, setLoadingSedeOptions] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -78,6 +97,126 @@ export function Sidebar() {
         user?.moneda ||
         ""
     ).toUpperCase();
+  };
+
+  const allowedSedeIds = useMemo(() => {
+    const values = new Set<string>();
+    const addSedeId = (candidate: string | null | undefined) => {
+      const normalized = normalizeSedeId(candidate);
+      if (normalized) values.add(normalized);
+    };
+
+    addSedeId(user?.sede_id_principal);
+    addSedeId(user?.sede_id);
+    addSedeId(activeSedeId);
+
+    if (Array.isArray(user?.sedes_permitidas)) {
+      user.sedes_permitidas.forEach((sedeId) => addSedeId(sedeId));
+    }
+
+    return Array.from(values);
+  }, [activeSedeId, user?.sede_id, user?.sede_id_principal, user?.sedes_permitidas]);
+
+  const isSuperAdmin = useMemo(() => {
+    const role = normalizeRole(getStoredRole() || "");
+    return role === "super_admin" || role === "superadmin";
+  }, [user?.role]);
+
+  const supportsMultiSedeSelector = useMemo(() => {
+    const role = normalizeRole(getStoredRole() || "");
+    return MULTI_SEDE_ROLES.has(role);
+  }, [user?.role]);
+
+  const selectedSedeId = useMemo(() => {
+    const active = normalizeSedeId(activeSedeId);
+    if (active) return active;
+
+    const current = normalizeSedeId(user?.sede_id);
+    if (current) return current;
+
+    const primary = normalizeSedeId(user?.sede_id_principal);
+    if (primary) return primary;
+
+    return sedeOptions[0]?.sede_id || "";
+  }, [activeSedeId, user?.sede_id, user?.sede_id_principal, sedeOptions]);
+
+  const shouldShowSedeSelector = !collapsed && supportsMultiSedeSelector && sedeOptions.length > 1;
+
+  useEffect(() => {
+    const fallbackOptions = allowedSedeIds.map((sedeId) => ({ sede_id: sedeId, nombre: sedeId }));
+
+    if (!user?.access_token) {
+      setSedeOptions(fallbackOptions);
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadSedeOptions = async () => {
+      try {
+        setLoadingSedeOptions(true);
+        const sedes = await getSedes(user.access_token);
+        const normalizedSedes = (Array.isArray(sedes) ? sedes : [])
+          .map((sede: BranchSede) => {
+            const sedeId = normalizeSedeId(sede.sede_id ?? sede.unique_id ?? sede._id);
+            if (!sedeId) return null;
+            return {
+              sede_id: sedeId,
+              nombre: formatSedeNombre(sede.nombre, sedeId),
+            };
+          })
+          .filter((sede): sede is SedeOption => Boolean(sede));
+
+        const allowedSet = new Set(allowedSedeIds.map((sedeId) => sedeId.toUpperCase()));
+        const scopedSedes = isSuperAdmin
+          ? normalizedSedes
+          : normalizedSedes.filter((sede) => allowedSet.has(sede.sede_id.toUpperCase()));
+
+        const mergedById = new Map<string, SedeOption>();
+        scopedSedes.forEach((sede) => {
+          mergedById.set(sede.sede_id.toUpperCase(), sede);
+        });
+
+        if (!isSuperAdmin) {
+          allowedSedeIds.forEach((sedeId) => {
+            if (mergedById.has(sedeId.toUpperCase())) return;
+            mergedById.set(sedeId.toUpperCase(), { sede_id: sedeId, nombre: sedeId });
+          });
+        }
+
+        const nextOptions = Array.from(mergedById.values());
+        if (isMounted) {
+          setSedeOptions(nextOptions.length > 0 ? nextOptions : fallbackOptions);
+        }
+      } catch (error) {
+        console.error("Error cargando sedes en sidebar:", error);
+        if (isMounted) {
+          setSedeOptions(isSuperAdmin ? [] : fallbackOptions);
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingSedeOptions(false);
+        }
+      }
+    };
+
+    loadSedeOptions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [allowedSedeIds, isSuperAdmin, user?.access_token]);
+
+  useEffect(() => {
+    if (!selectedSedeId) return;
+    if (normalizeSedeId(activeSedeId) === selectedSedeId) return;
+    setActiveSedeId(selectedSedeId);
+  }, [activeSedeId, selectedSedeId, setActiveSedeId]);
+
+  const handleSedeChange = (sedeId: string) => {
+    const normalized = normalizeSedeId(sedeId);
+    if (!normalized) return;
+    setActiveSedeId(normalized);
   };
 
   const handleNavigation = (item: NavItem) => {
@@ -123,6 +262,24 @@ export function Sidebar() {
           </button>
         </div>
 
+        {shouldShowSedeSelector && (
+          <div className="border-b border-gray-200 bg-white px-3 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">Sede activa</p>
+            <select
+              value={selectedSedeId}
+              onChange={(e) => handleSedeChange(e.target.value)}
+              className="mt-2 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-gray-900 focus:outline-none"
+              disabled={loadingSedeOptions}
+            >
+              {sedeOptions.map((sede) => (
+                <option key={sede.sede_id} value={sede.sede_id}>
+                  {sede.nombre}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <nav className="flex-1 px-2 py-4 space-y-1">
           {visibleItems.map((item) => {
             const Icon = item.icon;
@@ -166,4 +323,3 @@ export function Sidebar() {
     </>
   );
 }
-

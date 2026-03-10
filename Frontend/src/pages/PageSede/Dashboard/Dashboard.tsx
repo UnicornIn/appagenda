@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Sidebar } from "../../../components/Layout/Sidebar";
 import { PageHeader } from "../../../components/Layout/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
@@ -17,14 +17,23 @@ import {
   getChurnClientes,
   getSedes,
   type VentasDashboardResponse,
+  type VentasMetricas,
   type Sede,
   type PeriodOption
 } from "./analyticsApi";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../../components/ui/select";
 import {
   BarChart3,
   Users,
   RefreshCw,
   Building2,
+  Globe,
   DollarSign,
   Package,
   CreditCard,
@@ -47,8 +56,29 @@ interface DateRange {
   end_date: string;
 }
 
+const createEmptyMetricas = (): VentasMetricas => ({
+  ventas_totales: 0,
+  cantidad_ventas: 0,
+  ventas_servicios: 0,
+  ventas_productos: 0,
+  metodos_pago: {
+    efectivo: 0,
+    transferencia: 0,
+    tarjeta: 0,
+    tarjeta_credito: 0,
+    tarjeta_debito: 0,
+    addi: 0,
+    sin_pago: 0,
+    otros: 0,
+  },
+  ticket_promedio: 0,
+  crecimiento_ventas: "0%",
+});
+
+const normalizeSedeId = (value: string | null | undefined) => String(value ?? "").trim();
+
 export default function DashboardPage() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, activeSedeId, setActiveSedeId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [loadingSedes, setLoadingSedes] = useState(true);
   const [dashboardData, setDashboardData] = useState<VentasDashboardResponse | null>(null);
@@ -67,6 +97,32 @@ export default function DashboardPage() {
   const [showDateModal, setShowDateModal] = useState(false);
   const [tempDateRange, setTempDateRange] = useState<DateRange>({ start_date: "", end_date: "" });
   const [dateRange, setDateRange] = useState<DateRange>({ start_date: "", end_date: "" });
+
+  const allowedSedeIds = useMemo(() => {
+    const values = new Set<string>();
+    const add = (candidate: string | null | undefined) => {
+      const normalized = normalizeSedeId(candidate);
+      if (normalized) values.add(normalized);
+    };
+
+    add(user?.sede_id_principal);
+    add(user?.sede_id);
+    add(activeSedeId);
+
+    if (Array.isArray(user?.sedes_permitidas)) {
+      user.sedes_permitidas.forEach((sedeId) => add(sedeId));
+    }
+
+    return Array.from(values);
+  }, [activeSedeId, user?.sede_id, user?.sede_id_principal, user?.sedes_permitidas]);
+
+  const isAdminSede = useMemo(() => {
+    const normalizedRole = String(user?.role ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
+    return normalizedRole === "admin_sede" || normalizedRole === "adminsede" || normalizedRole === "admin";
+  }, [user?.role]);
 
   // Datos para gráficos basados en métricas reales de ventas
   const [salesChartData, setSalesChartData] = useState<
@@ -96,7 +152,8 @@ export default function DashboardPage() {
       return { metricas: undefined, moneda: fallbackCurrency };
     }
 
-    const sedeActual = sedes.find((sede) => sede.sede_id === selectedSede);
+    const sedeActual =
+      selectedSede === "global" ? undefined : sedes.find((sede) => sede.sede_id === selectedSede);
     const sedeCurrency = resolveCurrencyFromSede(sedeActual, fallbackCurrency);
     const countryCurrency = resolveCurrencyFromCountry(user?.pais, sedeCurrency);
 
@@ -153,38 +210,183 @@ export default function DashboardPage() {
     }
   }, [selectedSede, selectedPeriod, dateRange, monedaUsuario]);
 
+  useEffect(() => {
+    if (!selectedSede || selectedSede === "global") return;
+    if (normalizeSedeId(activeSedeId) === normalizeSedeId(selectedSede)) return;
+    setActiveSedeId(selectedSede);
+  }, [activeSedeId, selectedSede, setActiveSedeId]);
+
   const loadSedes = async () => {
     try {
       setLoadingSedes(true);
       const sedesData = await getSedes(user!.access_token, true);
-      setSedes(sedesData);
+      const allowedSet =
+        allowedSedeIds.length > 0 ? new Set(allowedSedeIds.map((sedeId) => sedeId.toUpperCase())) : null;
 
-      // Determinar la sede del usuario
-      let userSedeId = "";
+      const filteredSedes = sedesData.filter((sede) => {
+        const sedeId = normalizeSedeId(sede.sede_id);
+        if (!sedeId) return false;
+        if (!isAdminSede) return true;
+        if (!allowedSet) return false;
+        return allowedSet.has(sedeId.toUpperCase());
+      });
 
-      // Opción 1: Si el contexto de autenticación tiene sede_id
-      if (user && 'sede_id' in user && user.sede_id) {
-        userSedeId = user.sede_id as string;
-      }
-      // Opción 2: Si hay datos del dashboard cargados previamente
-      else if (dashboardData?.usuario?.sede_asignada) {
-        userSedeId = dashboardData.usuario.sede_asignada;
-      }
-      // Opción 3: Usar la primera sede como fallback
-      else if (sedesData.length > 0) {
-        userSedeId = sedesData[0].sede_id;
+      setSedes(filteredSedes);
+
+      if (filteredSedes.length === 0) {
+        setSelectedSede("");
+        return;
       }
 
-      if (userSedeId) {
-        setSelectedSede(userSedeId);
-        console.log('Sede seleccionada:', userSedeId);
+      const preferredSedeId =
+        normalizeSedeId(activeSedeId) ||
+        normalizeSedeId(user?.sede_id) ||
+        normalizeSedeId(user?.sede_id_principal) ||
+        "";
+
+      const preferredExists = filteredSedes.some((sede) => sede.sede_id === preferredSedeId);
+
+      if (filteredSedes.length > 1) {
+        setSelectedSede((current) => {
+          if (current === "global") return "global";
+          if (current && filteredSedes.some((sede) => sede.sede_id === current)) return current;
+          return "global";
+        });
       } else {
-        console.error('No se pudo determinar la sede del usuario');
+        const onlySedeId = filteredSedes[0].sede_id;
+        setSelectedSede(preferredExists ? preferredSedeId : onlySedeId);
       }
     } catch (error) {
       console.error("Error cargando sedes:", error);
     } finally {
       setLoadingSedes(false);
+    }
+  };
+
+  const buildDashboardParams = () => {
+    const params: {
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+    } = {};
+
+    if (selectedPeriod === "custom") {
+      if (!dateRange.start_date || !dateRange.end_date) {
+        throw new Error("Por favor selecciona un rango de fechas");
+      }
+      params.start_date = dateRange.start_date;
+      params.end_date = dateRange.end_date;
+      params.period = "custom";
+      return params;
+    }
+
+    if (selectedPeriod === "today") {
+      const todayLocal = toLocalYMD(new Date());
+      params.period = "custom";
+      params.start_date = todayLocal;
+      params.end_date = todayLocal;
+      return params;
+    }
+
+    params.period = selectedPeriod;
+    return params;
+  };
+
+  const aggregateMetricasByCurrency = (responses: VentasDashboardResponse[]) => {
+    const aggregatedByCurrency: Record<string, VentasMetricas> = {};
+
+    responses.forEach((response) => {
+      const metricasPorMoneda = response.metricas_por_moneda || {};
+      Object.entries(metricasPorMoneda).forEach(([currency, metricas]) => {
+        const normalizedCurrency = normalizeCurrencyCode(currency);
+        if (!aggregatedByCurrency[normalizedCurrency]) {
+          aggregatedByCurrency[normalizedCurrency] = createEmptyMetricas();
+        }
+
+        const target = aggregatedByCurrency[normalizedCurrency];
+        target.ventas_totales += metricas.ventas_totales || 0;
+        target.cantidad_ventas += metricas.cantidad_ventas || 0;
+        target.ventas_servicios += metricas.ventas_servicios || 0;
+        target.ventas_productos += metricas.ventas_productos || 0;
+        target.metodos_pago.efectivo += metricas.metodos_pago?.efectivo || 0;
+        target.metodos_pago.transferencia += metricas.metodos_pago?.transferencia || 0;
+        target.metodos_pago.tarjeta = (target.metodos_pago.tarjeta || 0) + (metricas.metodos_pago?.tarjeta || 0);
+        target.metodos_pago.tarjeta_credito =
+          (target.metodos_pago.tarjeta_credito || 0) + (metricas.metodos_pago?.tarjeta_credito || 0);
+        target.metodos_pago.tarjeta_debito =
+          (target.metodos_pago.tarjeta_debito || 0) + (metricas.metodos_pago?.tarjeta_debito || 0);
+        target.metodos_pago.addi = (target.metodos_pago.addi || 0) + (metricas.metodos_pago?.addi || 0);
+        target.metodos_pago.sin_pago =
+          (target.metodos_pago.sin_pago || 0) + (metricas.metodos_pago?.sin_pago || 0);
+        target.metodos_pago.otros = (target.metodos_pago.otros || 0) + (metricas.metodos_pago?.otros || 0);
+      });
+    });
+
+    Object.values(aggregatedByCurrency).forEach((metricas) => {
+      metricas.ticket_promedio =
+        metricas.cantidad_ventas > 0 ? metricas.ventas_totales / metricas.cantidad_ventas : 0;
+      metricas.crecimiento_ventas = "0%";
+    });
+
+    return aggregatedByCurrency;
+  };
+
+  const loadGlobalDashboardData = async () => {
+    if (!user?.access_token) return;
+
+    const sedesIds = sedes.map((sede) => normalizeSedeId(sede.sede_id)).filter(Boolean);
+    if (sedesIds.length === 0) {
+      setDashboardData(null);
+      setChurnData([]);
+      return;
+    }
+
+    const baseParams = buildDashboardParams();
+    const responseList = await Promise.all(
+      sedesIds.map(async (sedeId) => {
+        try {
+          return await getVentasDashboard(user.access_token, {
+            ...baseParams,
+            sede_id: sedeId,
+            sede_header_id: sedeId,
+          });
+        } catch (sedeError) {
+          console.error(`Error cargando dashboard global para sede ${sedeId}:`, sedeError);
+          return null;
+        }
+      })
+    );
+
+    const validResponses = responseList.filter(
+      (response): response is VentasDashboardResponse => Boolean(response && response.metricas_por_moneda)
+    );
+
+    if (validResponses.length === 0) {
+      throw new Error("No se pudieron cargar métricas para las sedes permitidas.");
+    }
+
+    const baseRange = validResponses.find((item) => item.range)?.range;
+    const aggregatedData: VentasDashboardResponse = {
+      success: true,
+      descripcion: `Vista global consolidada de ${validResponses.length} sede(s)`,
+      range: baseRange,
+      usuario: {
+        sede_asignada: "global",
+        nombre_sede: "Vista Global",
+      },
+      metricas_por_moneda: aggregateMetricasByCurrency(validResponses),
+      debug_info: {
+        source: "frontend_multi_sede_aggregation",
+        sedes_incluidas: validResponses.length,
+      },
+    };
+
+    setDashboardData(aggregatedData);
+
+    if (baseRange?.start && baseRange?.end) {
+      await loadChurnData(baseRange.start, baseRange.end, undefined);
+    } else {
+      await loadChurnData(undefined, undefined, undefined);
     }
   };
 
@@ -199,32 +401,22 @@ export default function DashboardPage() {
       setError(null);
       console.log('Cargando dashboard de ventas para sede:', selectedSede, 'período:', selectedPeriod, 'moneda:', monedaUsuario);
 
-      const params: any = {
-        sede_id: selectedSede,
-        moneda: monedaUsuario // Enviar moneda a la API
-      };
-
-      // Si es rango personalizado, agregar fechas
-      if (selectedPeriod === "custom") {
-        if (!dateRange.start_date || !dateRange.end_date) {
-          console.log("Por favor selecciona un rango de fechas");
-          return;
-        }
-        params.start_date = dateRange.start_date;
-        params.end_date = dateRange.end_date;
-        params.period = "custom";
-      } else if (selectedPeriod === "today") {
-        const todayLocal = toLocalYMD(new Date());
-        params.period = "custom";
-        params.start_date = todayLocal;
-        params.end_date = todayLocal;
-      } else {
-        params.period = selectedPeriod;
+      if (selectedSede === "global") {
+        await loadGlobalDashboardData();
+        return;
       }
+
+      const params = {
+        ...buildDashboardParams(),
+        sede_id: selectedSede,
+      };
 
       console.log('📤 Parámetros enviados a la API:', params);
 
-      const data = await getVentasDashboard(user.access_token, params);
+      const data = await getVentasDashboard(user.access_token, {
+        ...params,
+        sede_header_id: selectedSede,
+      });
 
       console.log('📥 Respuesta de la API:', data);
 
@@ -245,9 +437,9 @@ export default function DashboardPage() {
 
       // Cargar datos de churn
       if (data.range?.start && data.range?.end) {
-        await loadChurnData(data.range.start, data.range.end);
+        await loadChurnData(data.range.start, data.range.end, selectedSede);
       } else {
-        await loadChurnData();
+        await loadChurnData(undefined, undefined, selectedSede);
       }
 
     } catch (error: any) {
@@ -269,13 +461,15 @@ export default function DashboardPage() {
     }
   };
 
-  const loadChurnData = async (startDate?: string, endDate?: string) => {
-    if (!selectedSede || !user?.access_token) {
-      console.log('No hay sede seleccionada o token para cargar churn');
+  const loadChurnData = async (startDate?: string, endDate?: string, sedeId?: string) => {
+    if (!user?.access_token) {
+      console.log('No hay token para cargar churn');
       return;
     }
 
     try {
+      const targetSedeId = sedeId !== undefined ? sedeId : selectedSede !== "global" ? selectedSede : undefined;
+
       let finalStartDate = startDate;
       let finalEndDate = endDate;
 
@@ -288,11 +482,16 @@ export default function DashboardPage() {
         finalEndDate = toLocalYMD(today);
       }
 
-      const data = await getChurnClientes(user.access_token, {
-        sede_id: selectedSede,
+      const churnParams: { sede_id?: string; start_date?: string; end_date?: string } = {
         start_date: finalStartDate,
-        end_date: finalEndDate
-      });
+        end_date: finalEndDate,
+      };
+
+      if (targetSedeId) {
+        churnParams.sede_id = targetSedeId;
+      }
+
+      const data = await getChurnClientes(user.access_token, churnParams);
 
       if (data.clientes && Array.isArray(data.clientes)) {
         setChurnData(data.clientes.slice(0, 10));
@@ -429,6 +628,13 @@ export default function DashboardPage() {
     // Si se selecciona "Rango personalizado", mostrar modal
     if (period === "custom") {
       handleOpenDateModal();
+    }
+  };
+
+  const handleSedeChange = (sedeId: string) => {
+    setSelectedSede(sedeId);
+    if (sedeId !== "global") {
+      setActiveSedeId(sedeId);
     }
   };
 
@@ -709,8 +915,11 @@ export default function DashboardPage() {
     };
   };
 
-  const currentSede = getSedeInfo(selectedSede);
-  const sedeNombreDisplay = formatSedeNombre(currentSede?.nombre, "Sede seleccionada");
+  const isGlobalView = selectedSede === "global";
+  const currentSede = isGlobalView ? undefined : getSedeInfo(selectedSede);
+  const sedeNombreDisplay = isGlobalView
+    ? "Vista Global"
+    : formatSedeNombre(currentSede?.nombre, "Sede seleccionada");
   const metricas = getMetricas();
 
   if (!isAuthenticated) {
@@ -758,7 +967,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (!currentSede) {
+  if (!isGlobalView && !currentSede) {
     return (
       <div className="flex h-screen items-center justify-center">
           <div className="text-center">
@@ -805,7 +1014,26 @@ export default function DashboardPage() {
                   ))}
                 </div>
               </div>
-              
+
+              {sedes.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-gray-600" />
+                  <span className="text-sm text-gray-600">Vista:</span>
+                  <Select value={selectedSede} onValueChange={handleSedeChange}>
+                    <SelectTrigger className="w-[230px] border border-gray-300">
+                      <SelectValue placeholder="Seleccionar vista" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="global">Vista Global</SelectItem>
+                      {sedes.map((sede) => (
+                        <SelectItem key={sede.sede_id} value={sede.sede_id}>
+                          {formatSedeNombre(sede.nombre, sede.sede_id)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -851,12 +1079,21 @@ export default function DashboardPage() {
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                     <div className="flex items-start gap-4">
                       <div className="p-3 bg-gray-100 rounded-xl">
-                        <Building2 className="w-6 h-6 text-gray-800" />
+                        {isGlobalView ? (
+                          <Globe className="w-6 h-6 text-gray-800" />
+                        ) : (
+                          <Building2 className="w-6 h-6 text-gray-800" />
+                        )}
                       </div>
                       <div>
                         <h3 className="text-xl font-bold">
-                          {currentSede.nombre}
+                          {isGlobalView ? "Vista Global (Ventas)" : currentSede?.nombre}
                         </h3>
+                        {isGlobalView && (
+                          <div className="mt-2 text-sm text-gray-500">
+                            {sedes.length} sedes habilitadas para este perfil
+                          </div>
+                        )}
                         {dashboardData.range && (
                           <div className="mt-3 text-sm text-gray-500">
                             <span className="font-medium">Período seleccionado:</span>{" "}

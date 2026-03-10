@@ -22,6 +22,7 @@ const ROLE_OPTIONS: Array<{ label: string; value: SystemUserRole }> = [
   { label: "super_admin", value: "super_admin" },
   { label: "admin_sede", value: "admin_sede" },
   { label: "recepcionista", value: "recepcionista" },
+  { label: "estilista", value: "estilista" },
   { label: "call_center", value: "call_center" },
 ];
 
@@ -33,9 +34,11 @@ const toSystemUserRole = (role: string): SystemUserRole => {
   if (normalizedRole === "adminsede" || normalizedRole === "admin") return "admin_sede";
   if (normalizedRole === "callcenter" || normalizedRole === "soporte") return "call_center";
   if (normalizedRole === "recepcionoista") return "recepcionista";
+  if (normalizedRole === "stylist" || normalizedRole === "profesional") return "estilista";
   if (normalizedRole === "admin_sede") return "admin_sede";
   if (normalizedRole === "recepcionista") return "recepcionista";
   if (normalizedRole === "call_center") return "call_center";
+  if (normalizedRole === "estilista") return "estilista";
   return "admin_sede";
 };
 
@@ -55,6 +58,7 @@ export function SystemUserFormModal({
     email: "",
     role: "admin_sede" as SystemUserRole,
     sede_id: "",
+    sedes_permitidas: [] as string[],
     especialidades: [] as string[],
     password: "",
     confirm_password: "",
@@ -66,10 +70,12 @@ export function SystemUserFormModal({
   const [isLoadingSedes, setIsLoadingSedes] = useState(false);
   const [isLoadingServicios, setIsLoadingServicios] = useState(false);
   const [isSedeDropdownOpen, setIsSedeDropdownOpen] = useState(false);
+  const [isSedesPermitidasDropdownOpen, setIsSedesPermitidasDropdownOpen] = useState(false);
   const [isServiciosDropdownOpen, setIsServiciosDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const requiresPrimarySede = formData.role !== "super_admin";
+  const canConfigureSedesPermitidas = formData.role === "admin_sede";
 
   const canSubmit = useMemo(() => {
     const nombre = formData.nombre.trim();
@@ -98,11 +104,24 @@ export function SystemUserFormModal({
     if (!isOpen) return;
 
     if (isEditMode && initialUser) {
+      const primarySedeId = initialUser.sede_id?.trim() || "";
+      const initialSedesPermitidas = Array.from(
+        new Set(
+          [
+            ...(Array.isArray(initialUser.sedes_permitidas)
+              ? initialUser.sedes_permitidas.map((sedeId) => String(sedeId ?? "").trim())
+              : []),
+            primarySedeId,
+          ].filter(Boolean)
+        )
+      );
+
       setFormData({
         nombre: initialUser.nombre || "",
         email: initialUser.email || "",
         role: toSystemUserRole(initialUser.role),
-        sede_id: initialUser.sede_id?.trim() || "",
+        sede_id: primarySedeId,
+        sedes_permitidas: initialSedesPermitidas,
         especialidades: Array.isArray(initialUser.especialidades)
           ? initialUser.especialidades.map((esp) => esp.trim()).filter(Boolean)
           : [],
@@ -116,6 +135,7 @@ export function SystemUserFormModal({
         email: "",
         role: "admin_sede",
         sede_id: "",
+        sedes_permitidas: [],
         especialidades: [],
         password: "",
         confirm_password: "",
@@ -153,6 +173,7 @@ export function SystemUserFormModal({
   useEffect(() => {
     const handleClickOutside = () => {
       setIsSedeDropdownOpen(false);
+      setIsSedesPermitidasDropdownOpen(false);
       setIsServiciosDropdownOpen(false);
     };
 
@@ -165,6 +186,33 @@ export function SystemUserFormModal({
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    if (canConfigureSedesPermitidas) {
+      return;
+    }
+
+    setFormData((prev) => {
+      if (prev.sedes_permitidas.length === 0) return prev;
+      return {
+        ...prev,
+        sedes_permitidas: [],
+      };
+    });
+    setIsSedesPermitidasDropdownOpen(false);
+  }, [canConfigureSedesPermitidas]);
+
+  useEffect(() => {
+    if (!canConfigureSedesPermitidas) return;
+    const sedePrincipal = formData.sede_id.trim();
+    if (!sedePrincipal) return;
+    if (formData.sedes_permitidas.includes(sedePrincipal)) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      sedes_permitidas: [...prev.sedes_permitidas, sedePrincipal],
+    }));
+  }, [canConfigureSedesPermitidas, formData.sede_id, formData.sedes_permitidas]);
+
   if (!isOpen) return null;
 
   const stopPropagation = (e: React.MouseEvent) => {
@@ -172,7 +220,17 @@ export function SystemUserFormModal({
   };
 
   const handleSelectSede = (sede: Sede) => {
-    setFormData((prev) => ({ ...prev, sede_id: sede.sede_id }));
+    setFormData((prev) => {
+      const nextSedesPermitidas = canConfigureSedesPermitidas
+        ? Array.from(new Set([...prev.sedes_permitidas, sede.sede_id]))
+        : prev.sedes_permitidas;
+
+      return {
+        ...prev,
+        sede_id: sede.sede_id,
+        sedes_permitidas: nextSedesPermitidas,
+      };
+    });
     setIsSedeDropdownOpen(false);
   };
 
@@ -190,6 +248,25 @@ export function SystemUserFormModal({
         ? prev.especialidades.filter((id) => id !== servicioId)
         : [...prev.especialidades, servicioId],
     }));
+  };
+
+  const handleToggleSedePermitida = (sedeId: string) => {
+    const normalizedSedeId = sedeId.trim();
+    if (!normalizedSedeId) return;
+
+    setFormData((prev) => {
+      const isSelected = prev.sedes_permitidas.includes(normalizedSedeId);
+      if (isSelected && normalizedSedeId === prev.sede_id) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        sedes_permitidas: isSelected
+          ? prev.sedes_permitidas.filter((id) => id !== normalizedSedeId)
+          : [...prev.sedes_permitidas, normalizedSedeId],
+      };
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -236,12 +313,24 @@ export function SystemUserFormModal({
     const especialidadesValidas = (formData.especialidades || [])
       .map((esp) => esp.trim())
       .filter((esp) => Boolean(esp));
+    const sedesPermitidasValidas = Array.from(
+      new Set(
+        (formData.sedes_permitidas || [])
+          .map((sedePermitida) => sedePermitida.trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (canConfigureSedesPermitidas && sedeId && !sedesPermitidasValidas.includes(sedeId)) {
+      sedesPermitidasValidas.push(sedeId);
+    }
 
     const payload: CreateSystemUserPayload = {
       nombre,
       email,
       role: formData.role,
       sede_id: requiresPrimarySede ? sedeId : undefined,
+      sedes_permitidas: canConfigureSedesPermitidas ? sedesPermitidasValidas : undefined,
       especialidades: especialidadesValidas,
       password: password || undefined,
       activo: formData.activo,
@@ -326,6 +415,7 @@ export function SystemUserFormModal({
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsSedeDropdownOpen(!isSedeDropdownOpen);
+                    setIsSedesPermitidasDropdownOpen(false);
                     setIsServiciosDropdownOpen(false);
                   }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20 text-left flex justify-between items-center"
@@ -367,6 +457,70 @@ export function SystemUserFormModal({
               </div>
             )}
 
+            {canConfigureSedesPermitidas && (
+              <div className="relative">
+                <label className="block text-sm font-medium mb-2">Sedes permitidas</label>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsSedesPermitidasDropdownOpen(!isSedesPermitidasDropdownOpen);
+                    setIsSedeDropdownOpen(false);
+                    setIsServiciosDropdownOpen(false);
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20 text-left flex justify-between items-center"
+                  disabled={isSaving || isLoadingSedes}
+                >
+                  <span className={formData.sedes_permitidas.length > 0 ? "text-gray-900" : "text-gray-500"}>
+                    {isLoadingSedes
+                      ? "Cargando sedes..."
+                      : formData.sedes_permitidas.length === 0
+                      ? "Seleccionar sedes permitidas"
+                      : `${formData.sedes_permitidas.length} sede(s) seleccionada(s)`}
+                  </span>
+                  {isLoadingSedes ? (
+                    <Loader className="h-4 w-4 animate-spin text-gray-400" />
+                  ) : isSedesPermitidasDropdownOpen ? (
+                    <ChevronUp className="h-4 w-4 text-gray-400" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-gray-400" />
+                  )}
+                </button>
+
+                {isSedesPermitidasDropdownOpen && !isLoadingSedes && (
+                  <div
+                    className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                    onClick={stopPropagation}
+                  >
+                    {sedes.map((sede) => (
+                      <label
+                        key={`permitida-${sede.sede_id}`}
+                        className="flex items-start gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={formData.sedes_permitidas.includes(sede.sede_id)}
+                          onChange={() => handleToggleSedePermitida(sede.sede_id)}
+                          className="mt-1 h-4 w-4 rounded border-gray-300 text-[oklch(0.65_0.25_280)] focus:ring-[oklch(0.65_0.25_280)]"
+                          disabled={isSaving}
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900">{formatSedeNombre(sede.nombre)}</p>
+                          <p className="text-xs text-gray-500">{sede.sede_id}</p>
+                        </div>
+                      </label>
+                    ))}
+                    {sedes.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">No hay sedes disponibles</div>
+                    )}
+                  </div>
+                )}
+                <p className="mt-1 text-xs text-gray-500">
+                  Para `admin_sede`, la sede principal se incluye automáticamente en permitidas.
+                </p>
+              </div>
+            )}
+
             {!requiresPrimarySede && (
               <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
                 Para `super_admin` la sede principal no es obligatoria en el contrato actual.
@@ -374,8 +528,8 @@ export function SystemUserFormModal({
             )}
 
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-              El contrato actual de `POST /auth/register` no admite `sedes_permitidas`; solo se envía `sede_id`
-              principal cuando aplica.
+              El contrato actual usa `sede_id` principal. Si `PATCH /auth/users/:user_id` no soporta
+              `sedes_permitidas`, el formulario mostrará error para evitar guardar cambios incompletos.
             </div>
 
             <div className="relative">
@@ -386,6 +540,7 @@ export function SystemUserFormModal({
                   e.stopPropagation();
                   setIsServiciosDropdownOpen(!isServiciosDropdownOpen);
                   setIsSedeDropdownOpen(false);
+                  setIsSedesPermitidasDropdownOpen(false);
                 }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20 text-left flex justify-between items-center"
                 disabled={isSaving || isLoadingServicios}
@@ -530,4 +685,3 @@ export function SystemUserFormModal({
     </div>
   );
 }
-
