@@ -6,7 +6,7 @@ import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 // import { Textarea } from "../../../components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
-import { Loader2 } from "lucide-react"; //Wallet +
+import { Calendar, Loader2 } from "lucide-react"; //Wallet +
 import { cashService, getEfectivoDia } from "./api/cashService";
 import type { CashCierre, CashEgreso, CashIngreso, CashResumen, CashReporteRaw } from "./types";
 import { formatDateDMY } from "../../../lib/dateFormat";
@@ -21,6 +21,52 @@ const toLocalDateString = (date: Date) => {
 };
 
 const getToday = () => toLocalDateString(new Date());
+
+type HeaderPeriod = "today" | "last_7_days" | "last_30_days" | "month" | "custom";
+
+interface HeaderDateRange {
+  start_date: string;
+  end_date: string;
+}
+
+const HEADER_PERIOD_OPTIONS: Array<{ id: HeaderPeriod; label: string }> = [
+  { id: "today", label: "Hoy" },
+  { id: "last_7_days", label: "7 días" },
+  { id: "last_30_days", label: "30 días" },
+  { id: "month", label: "Mes actual" },
+  { id: "custom", label: "Rango personalizado" },
+];
+
+const getRangeByPeriod = (period: HeaderPeriod, customRange?: HeaderDateRange): HeaderDateRange => {
+  const today = new Date();
+  const todayYmd = toLocalDateString(today);
+
+  if (period === "custom" && customRange?.start_date && customRange?.end_date) {
+    return {
+      start_date: customRange.start_date,
+      end_date: customRange.end_date,
+    };
+  }
+
+  if (period === "last_7_days") {
+    const start = new Date(today);
+    start.setDate(start.getDate() - 6);
+    return { start_date: toLocalDateString(start), end_date: todayYmd };
+  }
+
+  if (period === "last_30_days") {
+    const start = new Date(today);
+    start.setDate(start.getDate() - 29);
+    return { start_date: toLocalDateString(start), end_date: todayYmd };
+  }
+
+  if (period === "month") {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { start_date: toLocalDateString(start), end_date: todayYmd };
+  }
+
+  return { start_date: todayYmd, end_date: todayYmd };
+};
 
 const normalizeDateRange = (start?: string, end?: string) => {
   if (!start || !end) return { start, end };
@@ -149,8 +195,15 @@ export default function CierreCajaPage() {
   const [sedeNombre, setSedeNombre] = useState<string | null>(null);
   const monedaSede = String(moneda || "COP").toUpperCase();
 
-  const [fechaDesde] = useState(getToday());
-  const [fechaHasta] = useState(getToday());
+  const today = useMemo(() => getToday(), []);
+  const [periodoSeleccionado, setPeriodoSeleccionado] = useState<HeaderPeriod>("today");
+  const [fechaDesde, setFechaDesde] = useState(today);
+  const [fechaHasta, setFechaHasta] = useState(today);
+  const [showDateModal, setShowDateModal] = useState(false);
+  const [tempDateRange, setTempDateRange] = useState<HeaderDateRange>({
+    start_date: today,
+    end_date: today,
+  });
 
   const [resumen, setResumen] = useState<CashResumen>({
     ingresos: 0,
@@ -220,6 +273,51 @@ export default function CierreCajaPage() {
     setSedeNombre(resolvedSedeNombre || null);
     setMoneda((resolvedMoneda || "COP").toUpperCase());
   }, [user?.sede_id, user?.nombre_local, user?.moneda]);
+
+  const handlePeriodChange = (newPeriod: HeaderPeriod) => {
+    if (newPeriod === "custom") {
+      setTempDateRange({
+        start_date: fechaDesde || today,
+        end_date: fechaHasta || today,
+      });
+      setShowDateModal(true);
+      return;
+    }
+
+    const range = getRangeByPeriod(newPeriod);
+    const normalized = normalizeDateRange(range.start_date, range.end_date);
+    if (!normalized.start || !normalized.end) return;
+
+    setPeriodoSeleccionado(newPeriod);
+    setFechaDesde(normalized.start);
+    setFechaHasta(normalized.end);
+  };
+
+  const setQuickDateRange = (days: number) => {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - (days - 1));
+    setTempDateRange({
+      start_date: toLocalDateString(startDate),
+      end_date: toLocalDateString(endDate),
+    });
+  };
+
+  const handleApplyDateRange = () => {
+    const normalized = normalizeDateRange(tempDateRange.start_date, tempDateRange.end_date);
+    if (!normalized.start || !normalized.end) return;
+
+    setPeriodoSeleccionado("custom");
+    setFechaDesde(normalized.start);
+    setFechaHasta(normalized.end);
+    setShowDateModal(false);
+  };
+
+  const displayDateRange = useMemo(() => {
+    if (!fechaDesde || !fechaHasta) return "--";
+    if (fechaDesde === fechaHasta) return formatHeaderDate(fechaHasta);
+    return `${formatDate(fechaDesde)} - ${formatDate(fechaHasta)}`;
+  }, [fechaDesde, fechaHasta]);
 
   const egresosTotal = useMemo(() => {
     return egresos.reduce((sum, egreso) => sum + (egreso.monto || 0), 0);
@@ -933,6 +1031,55 @@ export default function CierreCajaPage() {
   }, [movimientosDia]);
 
   const saldosPorMedio = useMemo(() => {
+    const reportRoot = unwrapData(reportePeriodo) || {};
+    const reportSummary = reportRoot?.resumen ?? reportRoot?.summary ?? reportRoot;
+    const reportIngresosEfectivo = reportSummary?.ingresos_efectivo ?? reportRoot?.ingresos_efectivo ?? {};
+    const reportOtrosMetodos = reportSummary?.ingresos_otros_metodos ?? reportRoot?.ingresos_otros_metodos ?? {};
+    const hasReportMethods =
+      reportOtrosMetodos &&
+      typeof reportOtrosMetodos === "object" &&
+      Object.keys(reportOtrosMetodos).length > 0;
+
+    if (hasReportMethods) {
+      const fromReport = (keys: string[]) =>
+        keys.reduce((sum, key) => sum + toNumber((reportOtrosMetodos as Record<string, unknown>)[key]), 0);
+
+      const efectivo =
+        pickNumber(reportIngresosEfectivo, ["total", "efectivo_total", "total_efectivo"]) ?? 0;
+      const tarjetas = fromReport([
+        "tarjeta_credito",
+        "tarjeta_debito",
+        "tarjeta",
+        "pos",
+      ]);
+      const transferencias = fromReport(["transferencia", "link_de_pago"]);
+      const creditoEmpleados = fromReport([
+        "credito_empleados",
+        "abonos",
+        "descuento_por_nomina",
+        "decuento_por_nomina",
+      ]);
+      const addi = fromReport(["addi"]);
+      const total =
+        pickNumber(reportSummary, ["total_vendido", "ventas_totales", "total_ingresos"]) ??
+        (efectivo + tarjetas + transferencias + creditoEmpleados + addi);
+
+      return {
+        izquierda: [
+          { label: "Efectivo", value: efectivo, trend: true },
+          { label: "Tarjetas", value: tarjetas, trend: true },
+          { label: "Transferencias", value: transferencias, trend: true },
+          { label: "Total", value: total, trend: false, total: true },
+        ],
+        derecha: [
+          { label: "Tarjeta", value: tarjetas, trend: true },
+          { label: "Transferencias", value: transferencias, trend: true },
+          { label: "Crédito empleados", value: creditoEmpleados, trend: false },
+          { label: "Addi", value: addi, trend: false },
+        ],
+      };
+    }
+
     const totales: Record<string, number> = {};
     const accumulate = (method: string | undefined, amount: number) => {
       const key = normalizePaymentMethodKey(method);
@@ -972,7 +1119,7 @@ export default function CierreCajaPage() {
         { label: "Addi", value: addi, trend: false },
       ],
     };
-  }, [egresos, ingresos]);
+  }, [egresos, ingresos, reportePeriodo]);
 
   const reporteResumen = useMemo(() => {
     if (!reportePeriodo) return null;
@@ -1056,12 +1203,110 @@ export default function CierreCajaPage() {
     setError(null);
   };
 
+  const DateRangeModal = () => {
+    if (!showDateModal) return null;
+
+    const maxDate = getToday();
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="mx-4 w-full max-w-md rounded-lg bg-white p-6">
+          <div className="mb-6">
+            <h3 className="text-xl font-bold text-gray-900">Seleccionar rango de fechas</h3>
+            <p className="mt-1 text-gray-700">Elige las fechas para filtrar el cierre de caja</p>
+          </div>
+
+          <div className="mb-6">
+            <p className="mb-3 text-sm text-gray-700">Rangos rápidos:</p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-gray-300 text-gray-800 hover:bg-gray-100"
+                onClick={() => setQuickDateRange(7)}
+              >
+                7 días
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-gray-300 text-gray-800 hover:bg-gray-100"
+                onClick={() => setQuickDateRange(30)}
+              >
+                30 días
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-gray-300 text-gray-800 hover:bg-gray-100"
+                onClick={() => {
+                  const endDate = new Date();
+                  const firstDayOfMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+                  setTempDateRange({
+                    start_date: toLocalDateString(firstDayOfMonth),
+                    end_date: toLocalDateString(endDate),
+                  });
+                }}
+              >
+                Mes actual
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-800">Fecha de inicio</label>
+              <Input
+                type="date"
+                value={tempDateRange.start_date}
+                onChange={(event) => setTempDateRange((prev) => ({ ...prev, start_date: event.target.value }))}
+                max={tempDateRange.end_date || maxDate}
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-800">Fecha de fin</label>
+              <Input
+                type="date"
+                value={tempDateRange.end_date}
+                onChange={(event) => setTempDateRange((prev) => ({ ...prev, end_date: event.target.value }))}
+                min={tempDateRange.start_date}
+                max={maxDate}
+              />
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-lg border border-gray-300 bg-gray-50 p-4">
+            <p className="text-sm text-gray-800">
+              <span className="font-medium">Rango seleccionado:</span>{" "}
+              {formatDate(tempDateRange.start_date)} - {formatDate(tempDateRange.end_date)}
+            </p>
+          </div>
+
+          <div className="mt-6 flex gap-3">
+            <Button className="flex-1 bg-black text-white hover:bg-gray-800" onClick={handleApplyDateRange}>
+              Aplicar rango
+            </Button>
+            <Button
+              variant="outline"
+              className="flex-1 border-gray-300 text-gray-800 hover:bg-gray-100"
+              onClick={() => setShowDateModal(false)}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-screen bg-[#f1eff6]">
       <Sidebar />
       <main className="flex-1 overflow-auto">
         <div className="mx-auto max-w-[1360px] p-3 sm:p-6 lg:p-8">
           <div className="space-y-4">
+            <DateRangeModal />
             {error && (
               <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-gray-900">
                 {error}
@@ -1079,9 +1324,36 @@ export default function CierreCajaPage() {
                 <p className="text-xl text-[#656271]">{sedeNombre ? `Caja Sede ${sedeNombre}` : "Caja de la sede"}</p>
               </div>
 
-              <div className="space-y-1 border-b border-[#dfdce8] pb-3">
-                <p className="text-3xl font-semibold text-[#2e2d35]">{formatHeaderDate(fechaHasta)}</p>
-                <p className="text-sm text-[#6d6a77]">Caja abierta desde: {loadingCierres ? "..." : cajaAbiertaDesde}</p>
+              <div className="flex flex-col gap-3 border-b border-[#dfdce8] pb-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-gray-600" />
+                    <span className="text-sm text-gray-600">Período:</span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1">
+                    {HEADER_PERIOD_OPTIONS.map((option) => (
+                      <Button
+                        key={option.id}
+                        size="sm"
+                        variant={periodoSeleccionado === option.id ? "default" : "outline"}
+                        className={`border-gray-300 text-xs ${
+                          periodoSeleccionado === option.id
+                            ? "bg-black text-white hover:bg-gray-800"
+                            : "text-gray-700 hover:bg-gray-100"
+                        }`}
+                        onClick={() => handlePeriodChange(option.id)}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-0.5 lg:text-right">
+                  <p className="text-lg font-semibold text-[#2e2d35]">{displayDateRange}</p>
+                  <p className="text-xs text-[#6d6a77]">Caja abierta desde: {loadingCierres ? "..." : cajaAbiertaDesde}</p>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">

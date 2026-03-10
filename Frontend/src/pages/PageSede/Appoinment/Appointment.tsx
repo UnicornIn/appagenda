@@ -62,8 +62,12 @@ const COLORS = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-amber-500', 
 
 const CELL_HEIGHT = 48;
 const CELL_WIDTH = 104;
+const MAX_STYLIST_COLUMN_WIDTH = 240;
 const MIN_APPOINTMENT_HEIGHT = 44;
 const APPOINTMENT_BORDER_WIDTH = 4;
+const CITA_TOOLTIP_WIDTH = 300;
+const BLOQUEO_TOOLTIP_WIDTH = 320;
+const TOOLTIP_MARGIN = 10;
 
 const getTextValue = (value: unknown): string => {
   if (typeof value === 'string') return value.trim();
@@ -600,8 +604,45 @@ const CalendarScheduler: React.FC = () => {
     if (profesionales.length === 0) return CELL_WIDTH;
     const availableWidth = Math.max(calendarViewportWidth - TIME_COLUMN_WIDTH, 0);
     if (availableWidth <= 0) return CELL_WIDTH;
-    return Math.max(CELL_WIDTH, availableWidth / profesionales.length);
+    const expandedWidth = Math.max(CELL_WIDTH, availableWidth / profesionales.length);
+    return Math.min(expandedWidth, MAX_STYLIST_COLUMN_WIDTH);
   }, [calendarViewportWidth, profesionales.length]);
+
+  const getTooltipLeft = useCallback((cursorX: number, tooltipWidth: number) => {
+    if (typeof window === "undefined") return cursorX + TOOLTIP_MARGIN;
+    const preferredRight = cursorX + TOOLTIP_MARGIN;
+    const maxLeft = window.innerWidth - tooltipWidth - TOOLTIP_MARGIN;
+
+    if (preferredRight <= maxLeft) return preferredRight;
+    return Math.max(cursorX - tooltipWidth - TOOLTIP_MARGIN, TOOLTIP_MARGIN);
+  }, []);
+
+  const clearHoverTooltips = useCallback(() => {
+    if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
+    setCitaTooltip((prev) => (prev.visible ? { visible: false, x: 0, y: 0, cita: null } : prev));
+    setBloqueoTooltip((prev) => (
+      prev.visible
+        ? { visible: false, x: 0, y: 0, bloqueo: null, profesional: "" }
+        : prev
+    ));
+  }, []);
+
+  const handleCalendarMouseMove = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!supportsHoverTooltips()) return;
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    const hoveringAgendaModule = Boolean(
+      target.closest('[data-hover-source="appointment"], [data-hover-source="bloqueo"]')
+    );
+    if (!hoveringAgendaModule) {
+      clearHoverTooltips();
+    }
+  }, [clearHoverTooltips]);
+
+  const handleCalendarMouseLeave = useCallback(() => {
+    if (!supportsHoverTooltips()) return;
+    clearHoverTooltips();
+  }, [clearHoverTooltips]);
 
   const professionalsTrackWidth = useMemo(
     () => effectiveCellWidth * profesionales.length,
@@ -1488,10 +1529,7 @@ const CalendarScheduler: React.FC = () => {
 
     const handleEventMouseLeave = () => {
       if (!supportsHoverTooltips()) return;
-      if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
-      tooltipTimeoutRef.current = setTimeout(() => {
-        setCitaTooltip({ visible: false, x: 0, y: 0, cita: null });
-      }, 120);
+      clearHoverTooltips();
     };
 
     const handleEventClick = () => {
@@ -1519,6 +1557,7 @@ const CalendarScheduler: React.FC = () => {
 
     return (
       <div
+        data-hover-source="appointment"
         className={`absolute rounded-md shadow-sm cursor-pointer overflow-hidden 
                  transition-all duration-150 z-20 ${styles.bg} ${styles.hover} ${styles.shadow}
                  hover:shadow-md hover:z-30 border-l-[3px] ${styles.border}
@@ -1584,14 +1623,12 @@ const CalendarScheduler: React.FC = () => {
 
     const handleBloqueoMouseLeave = () => {
       if (!supportsHoverTooltips()) return;
-      if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
-      tooltipTimeoutRef.current = setTimeout(() => {
-        setBloqueoTooltip({ visible: false, x: 0, y: 0, bloqueo: null, profesional: "" });
-      }, 120);
+      clearHoverTooltips();
     };
 
     return (
       <div
+        data-hover-source="bloqueo"
         className="absolute z-10 rounded-md border border-red-300/90 bg-gradient-to-b from-red-100 to-red-50 shadow-sm overflow-hidden pointer-events-auto cursor-pointer"
         style={{ ...position, minHeight: 40 }}
         onClick={handleBloqueoClick}
@@ -1766,7 +1803,12 @@ const CalendarScheduler: React.FC = () => {
 
           {/* CALENDARIO PRINCIPAL */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div ref={calendarViewportRef} className="flex-1 overflow-auto bg-white/60 backdrop-blur-sm">
+            <div
+              ref={calendarViewportRef}
+              className="flex-1 overflow-auto bg-white/60 backdrop-blur-sm"
+              onMouseMove={handleCalendarMouseMove}
+              onMouseLeave={handleCalendarMouseLeave}
+            >
               <div className="min-w-max" style={{ minWidth: `${calendarMinWidth}px` }}>
                 {/* ENCABEZADO DE ESTILISTAS MÁS COMPACTO */}
                 <div className="flex bg-white/95 backdrop-blur-lg border-b border-gray-200/60 sticky top-0 z-20 shadow-sm">
@@ -1867,17 +1909,10 @@ const CalendarScheduler: React.FC = () => {
       {/* MODALES */}
       {citaTooltip.visible && citaTooltip.cita && (
         <div
-          className="fixed z-50 bg-white/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-lg p-2.5 max-w-[18rem] transform -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
+          className="pointer-events-none fixed z-50 bg-white/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-lg p-2.5 max-w-[18rem] transform -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
           style={{
-            left: `${Math.min(citaTooltip.x + 10, window.innerWidth - 300)}px`,
+            left: `${getTooltipLeft(citaTooltip.x, CITA_TOOLTIP_WIDTH)}px`,
             top: `${citaTooltip.y}px`
-          }}
-          onMouseEnter={() => {
-            if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
-          }}
-          onMouseLeave={() => {
-            if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
-            setCitaTooltip({ visible: false, x: 0, y: 0, cita: null });
           }}
         >
           <div className="flex items-center gap-1.5 mb-1.5">
@@ -1962,17 +1997,10 @@ const CalendarScheduler: React.FC = () => {
 
       {bloqueoTooltip.visible && bloqueoTooltip.bloqueo && (
         <div
-          className="fixed z-50 bg-white/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-xl p-3 max-w-xs transform -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
+          className="pointer-events-none fixed z-50 bg-white/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-xl p-3 max-w-xs transform -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
           style={{
-            left: `${Math.min(bloqueoTooltip.x + 10, window.innerWidth - 320)}px`,
+            left: `${getTooltipLeft(bloqueoTooltip.x, BLOQUEO_TOOLTIP_WIDTH)}px`,
             top: `${bloqueoTooltip.y}px`
-          }}
-          onMouseEnter={() => {
-            if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
-          }}
-          onMouseLeave={() => {
-            if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
-            setBloqueoTooltip({ visible: false, x: 0, y: 0, bloqueo: null, profesional: "" });
           }}
         >
           <div className="flex items-center gap-2 mb-2">
