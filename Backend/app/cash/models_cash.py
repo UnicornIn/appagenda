@@ -28,6 +28,7 @@ class MetodoPagoIngreso(str, Enum):
     ADDI = "addi"
     ABONOS = "abonos"
     OTROS = "otros"
+    DESCUENTO_POR_NOMINA = "descuento_por_nomina"
 
 class EstadoCierre(str, Enum):
     ABIERTO = "abierto"
@@ -55,10 +56,10 @@ class AperturaCajaRequest(BaseModel):
     @validator('fecha')
     def validar_fecha(cls, v):
         try:
-            datetime.strptime(v, "%d-%m-%Y")
+            datetime.strptime(v, "%Y-%m-%d")
             return v
         except ValueError:
-            raise ValueError("Formato de fecha inválido. Use DD-MM-YYYY")
+            raise ValueError("Formato de fecha inválido. Use YYYY-MM-DD")
 
 class RegistroEgresoRequest(BaseModel):
     sede_id: str = Field(..., description="ID de la sede")
