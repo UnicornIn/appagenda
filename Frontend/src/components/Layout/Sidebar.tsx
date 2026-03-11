@@ -18,7 +18,7 @@ import {
 import { useAuth } from "../Auth/AuthContext";
 import { APP_MODULES, AGENDA_PATHS, canAccess, type AppModule } from "../../lib/access-control";
 import { formatSedeNombre } from "../../lib/sede";
-import { getSedes, type Sede as BranchSede } from "../Branch/sedesApi";
+import { getSedeById, getSedes, type Sede as BranchSede } from "../Branch/sedesApi";
 
 interface NavItem {
   title: string;
@@ -176,6 +176,33 @@ export function Sidebar() {
         scopedSedes.forEach((sede) => {
           mergedById.set(sede.sede_id.toUpperCase(), sede);
         });
+
+        const missingAllowedSedeIds = allowedSedeIds.filter((sedeId) => {
+          return !mergedById.has(sedeId.toUpperCase());
+        });
+
+        if (missingAllowedSedeIds.length > 0) {
+          const missingSedeResponses = await Promise.allSettled(
+            missingAllowedSedeIds.map((sedeId) => getSedeById(user.access_token, sedeId))
+          );
+
+          missingSedeResponses.forEach((response, index) => {
+            const sedeId = missingAllowedSedeIds[index];
+            if (response.status !== "fulfilled" || !response.value) {
+              return;
+            }
+
+            const resolvedSedeId = normalizeSedeId(
+              response.value.sede_id ?? response.value.unique_id ?? response.value._id ?? sedeId
+            );
+            if (!resolvedSedeId) return;
+
+            mergedById.set(resolvedSedeId.toUpperCase(), {
+              sede_id: resolvedSedeId,
+              nombre: formatSedeNombre(response.value.nombre, resolvedSedeId),
+            });
+          });
+        }
 
         if (!isSuperAdmin) {
           allowedSedeIds.forEach((sedeId) => {

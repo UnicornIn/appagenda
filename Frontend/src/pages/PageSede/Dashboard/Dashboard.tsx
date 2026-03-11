@@ -211,10 +211,15 @@ export default function DashboardPage() {
   }, [selectedSede, selectedPeriod, dateRange, monedaUsuario]);
 
   useEffect(() => {
-    if (!selectedSede || selectedSede === "global") return;
-    if (normalizeSedeId(activeSedeId) === normalizeSedeId(selectedSede)) return;
-    setActiveSedeId(selectedSede);
-  }, [activeSedeId, selectedSede, setActiveSedeId]);
+    const normalizedActiveSedeId = normalizeSedeId(activeSedeId);
+    if (!normalizedActiveSedeId) return;
+
+    setSelectedSede((current) => {
+      if (!current || current === "global") return current;
+      if (normalizeSedeId(current) === normalizedActiveSedeId) return current;
+      return normalizedActiveSedeId;
+    });
+  }, [activeSedeId]);
 
   const loadSedes = async () => {
     try {

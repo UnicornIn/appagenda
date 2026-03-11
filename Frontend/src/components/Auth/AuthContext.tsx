@@ -4,6 +4,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react";
 import { API_BASE_URL } from "../../types/config";
@@ -123,12 +124,31 @@ const fetchLocalBySedeId = async (sedeId: string, token: string): Promise<LocalD
   }
 };
 
+const persistLocalInfoToSession = (localInfo: LocalData) => {
+  sessionStorage.setItem("beaux-sede_id", localInfo.sede_id);
+  sessionStorage.setItem("beaux-pais", localInfo.pais);
+  sessionStorage.setItem("beaux-nombre_local", localInfo.nombre);
+  sessionStorage.setItem("beaux-moneda", localInfo.moneda);
+  sessionStorage.setItem("beaux-zona_horaria", localInfo.zona_horaria);
+  sessionStorage.setItem("beaux-telefono", localInfo.telefono);
+  sessionStorage.setItem("beaux-direccion", localInfo.direccion);
+  sessionStorage.setItem("beaux-activa", String(localInfo.activa));
+
+  if (localInfo.reglas_comision) {
+    sessionStorage.setItem("beaux-reglas_comision", JSON.stringify(localInfo.reglas_comision));
+  } else {
+    sessionStorage.removeItem("beaux-reglas_comision");
+  }
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeSedeId, setActiveSedeIdState] = useState<string | null>(null);
+  const hydratedSedeIdRef = useRef<string | null>(null);
 
   const clearAuthStorage = useCallback(() => {
+    hydratedSedeIdRef.current = null;
     const keys = [
       "beaux-id",
       "beaux-name",
@@ -358,6 +378,47 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     initializeAuth();
   }, [clearAuthStorage, validateToken]);
 
+  useEffect(() => {
+    const normalizedActiveSedeId = normalizeSedeId(activeSedeId);
+    const token = user?.access_token || user?.token;
+
+    if (!normalizedActiveSedeId || !token) return;
+    if (hydratedSedeIdRef.current === normalizedActiveSedeId) return;
+
+    let cancelled = false;
+
+    const syncActiveSedeInfo = async () => {
+      const localInfo = await fetchLocalBySedeId(normalizedActiveSedeId, token);
+      if (!localInfo || cancelled) return;
+
+      hydratedSedeIdRef.current = normalizedActiveSedeId;
+      persistLocalInfoToSession(localInfo);
+
+      setUser((currentUser) => {
+        if (!currentUser) return currentUser;
+
+        return {
+          ...currentUser,
+          sede_id: localInfo.sede_id,
+          nombre_local: localInfo.nombre,
+          moneda: localInfo.moneda,
+          pais: localInfo.pais,
+          zona_horaria: localInfo.zona_horaria,
+          telefono: localInfo.telefono,
+          direccion: localInfo.direccion,
+          activa: localInfo.activa,
+          reglas_comision: localInfo.reglas_comision,
+        };
+      });
+    };
+
+    syncActiveSedeInfo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSedeId, user?.access_token, user?.token]);
+
   const login = useCallback(
     async (email: string, password: string, remember: boolean = true): Promise<boolean> => {
       setIsLoading(true);
@@ -405,6 +466,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const localInfo = await fetchLocalBySedeId(sedeForLocalInfo, loginData.access_token);
 
           if (localInfo) {
+            hydratedSedeIdRef.current = normalizeSedeId(localInfo.sede_id);
             userData.pais = localInfo.pais;
             userData.sede_id = localInfo.sede_id;
             userData.nombre_local = localInfo.nombre;
@@ -458,4 +520,3 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     </AuthContext.Provider>
   );
 };
-

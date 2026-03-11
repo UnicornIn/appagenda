@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui
 import { Calendar, Loader2 } from "lucide-react"; //Wallet +
 import { cashService, getEfectivoDia } from "./api/cashService";
 import type { CashCierre, CashEgreso, CashIngreso, CashResumen, CashReporteRaw } from "./types";
-import { formatDateDMY } from "../../../lib/dateFormat";
+import { formatDateDMY, parseDateToDate, toBackendDate } from "../../../lib/dateFormat";
 import { toast } from "../../../hooks/use-toast";
 import { useAuth } from "../../../components/Auth/AuthContext";
 
@@ -186,6 +186,68 @@ const toTimestamp = (value?: string) => {
   const parsed = parseBackendDateTime(value);
   if (!parsed) return 0;
   return parsed.getTime();
+};
+
+const toComparableDate = (value?: string) => {
+  const parsed = parseDateToDate(value);
+  return parsed ? toLocalDateString(parsed) : "";
+};
+
+const isWithinDateRange = (value: string | undefined, start: string, end: string) => {
+  const comparable = toComparableDate(value);
+  if (!comparable) return false;
+  return comparable >= start && comparable <= end;
+};
+
+const buildRangeVariants = (start: string, end: string) => {
+  const legacyStart = toBackendDate(start);
+  const legacyEnd = toBackendDate(end);
+  const variants: Array<{
+    params: { fecha_inicio: string; fecha_fin: string };
+    options?: { preserveDateParams?: boolean };
+  }> = [
+    {
+      params: {
+        fecha_inicio: start,
+        fecha_fin: end,
+      },
+      options: { preserveDateParams: true },
+    },
+  ];
+
+  if (legacyStart !== start || legacyEnd !== end) {
+    variants.push({
+      params: {
+        fecha_inicio: legacyStart,
+        fecha_fin: legacyEnd,
+      },
+    });
+  }
+
+  return variants;
+};
+
+const mergeCashRecords = <T extends { id: string; fecha?: string; creado_en?: string }>(records: T[]) => {
+  const deduplicated = new Map<string, T>();
+
+  for (const record of records) {
+    const key = String(record.id);
+    const current = deduplicated.get(key);
+    if (!current) {
+      deduplicated.set(key, record);
+      continue;
+    }
+
+    const currentTimestamp = toTimestamp(current.creado_en || current.fecha);
+    const nextTimestamp = toTimestamp(record.creado_en || record.fecha);
+    if (nextTimestamp >= currentTimestamp) {
+      deduplicated.set(key, record);
+    }
+  }
+
+  return Array.from(deduplicated.values()).sort((a, b) => {
+    return toTimestamp(b.creado_en || b.fecha) - toTimestamp(a.creado_en || a.fecha);
+  });
 };
 
 export default function CierreCajaPage() {
@@ -446,19 +508,39 @@ export default function CierreCajaPage() {
 
   const normalizeIngresos = (data: any): CashIngreso[] => {
     const root = unwrapData(data);
-    const lista =
-      root?.ingresos ?? root?.items ?? root?.data ?? (Array.isArray(root) ? root : []);
-
-    if (!Array.isArray(lista)) return [];
+    const lista = pickArray(
+      root?.ingresos,
+      root?.items,
+      root?.data,
+      root?.results,
+      root?.rows,
+      root?.movimientos,
+      root?.ingresos?.items,
+      root?.ingresos?.data,
+      root?.data?.ingresos,
+      root
+    );
 
     return lista.map((item, index) => {
       return {
         id: item._id || item.id || item.ingreso_id || String(index),
         sede_id: item.sede_id,
         monto: toNumber(item.monto ?? item.valor ?? item.total ?? item.importe ?? 0),
-        motivo: item.motivo ?? item.descripcion ?? item.observacion ?? "Ingreso manual",
-        metodo_pago: item.metodo_pago ?? item.metodo ?? "otros",
-        fecha: item.fecha ?? item.created_at ?? item.creado_en ?? item.fecha_creacion ?? getToday(),
+        motivo:
+          item.motivo ??
+          item.descripcion ??
+          item.concepto ??
+          item.nota ??
+          item.observacion ??
+          "Ingreso manual",
+        metodo_pago: item.metodo_pago ?? item.metodo ?? item.medio_pago ?? item.medio ?? "otros",
+        fecha:
+          item.fecha ??
+          item.created_at ??
+          item.creado_en ??
+          item.fecha_creacion ??
+          item.fecha_ingreso ??
+          getToday(),
         creado_en: item.creado_en ?? item.created_at ?? item.fecha_creacion,
       };
     });
@@ -616,14 +698,32 @@ export default function CierreCajaPage() {
     setError(null);
 
     try {
-      const result = await cashService.getEgresos({
-        sede_id: sedeId,
-        fecha_inicio: start,
-        fecha_fin: end,
+      const responses = await Promise.allSettled(
+        buildRangeVariants(start, end).map(({ params, options }) =>
+          cashService.getEgresos(
+            {
+              sede_id: sedeId,
+              ...params,
+            },
+            options
+          )
+        )
+      );
+
+      const successful = responses.flatMap((response) => {
+        return response.status === "fulfilled" ? normalizeEgresos(response.value) : [];
       });
-      const egresosNormalizados = normalizeEgresos(result);
-      setEgresos((prev) => (egresosNormalizados.length > 0 ? egresosNormalizados : prev));
+
+      if (successful.length === 0 && responses.every((response) => response.status === "rejected")) {
+        throw new Error("No se pudieron cargar los egresos");
+      }
+
+      const egresosNormalizados = mergeCashRecords(successful).filter((egreso) =>
+        isWithinDateRange(egreso.fecha || egreso.creado_en, start, end)
+      );
+      setEgresos(egresosNormalizados);
     } catch (err) {
+      setEgresos([]);
       setError("No se pudieron cargar los egresos");
     } finally {
       setLoadingEgresos(false);
@@ -638,15 +738,33 @@ export default function CierreCajaPage() {
     setError(null);
 
     try {
-      const result = await cashService.getIngresos({
-        sede_id: sedeId,
-        fecha_inicio: start,
-        fecha_fin: end,
+      const responses = await Promise.allSettled(
+        buildRangeVariants(start, end).map(({ params, options }) =>
+          cashService.getIngresos(
+            {
+              sede_id: sedeId,
+              ...params,
+            },
+            options
+          )
+        )
+      );
+
+      const successful = responses.flatMap((response) => {
+        return response.status === "fulfilled" ? normalizeIngresos(response.value) : [];
       });
-      setIngresos(normalizeIngresos(result));
+
+      if (successful.length === 0 && responses.every((response) => response.status === "rejected")) {
+        throw new Error("No se pudieron cargar los ingresos");
+      }
+
+      const ingresosNormalizados = mergeCashRecords(successful).filter((ingreso) =>
+        isWithinDateRange(ingreso.fecha || ingreso.creado_en, start, end)
+      );
+      setIngresos(ingresosNormalizados);
     } catch (err) {
       setIngresos([]);
-      setError("No se pudieron cargar los ingresos manuales");
+      setError("No se pudieron cargar los ingresos registrados");
     } finally {
       setLoadingIngresos(false);
     }
@@ -714,7 +832,7 @@ export default function CierreCajaPage() {
         monto: montoValue,
         metodo_pago: ingresoMetodoPago,
         motivo: ingresoMotivo.trim(),
-        fecha: ingresoFecha,
+        fecha: toBackendDate(ingresoFecha),
         moneda: monedaSede,
       });
 
@@ -766,7 +884,7 @@ export default function CierreCajaPage() {
         nota: motivo,
         tipo: egresoTipo,
         concepto: motivo,
-        fecha: egresoFecha,
+        fecha: toBackendDate(egresoFecha),
         moneda: monedaSede,
       });
 
@@ -834,7 +952,7 @@ export default function CierreCajaPage() {
     try {
       await cashService.cierreCaja({
         sede_id: sedeId,
-        fecha: cierreFecha,
+        fecha: toBackendDate(cierreFecha),
         moneda: monedaSede,
         observaciones: cierreNota.trim() || undefined,
         efectivo_contado: efectivoContadoValue,
@@ -1575,7 +1693,7 @@ export default function CierreCajaPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                         <div>
                           <label className="text-xs font-medium text-[#666370]">Método de pago</label>
                           <select
@@ -1608,7 +1726,7 @@ export default function CierreCajaPage() {
                             <option value="otro">Otro</option>
                           </select>
                         </div>
-                        <div className="sm:col-span-2">
+                        <div>
                           <label className="text-xs font-medium text-[#666370]">Fecha</label>
                           <Input type="date" value={egresoFecha} onChange={(e) => setEgresoFecha(e.target.value)} />
                         </div>
