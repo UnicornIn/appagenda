@@ -66,6 +66,7 @@ class SystemUserCreate(BaseModel):
     email: EmailStr
     role: str
     sede_id: Optional[str] = None
+    sedes_permitidas: Optional[list[str]] = Field(default_factory=list)
     comision: Optional[float] = None
     especialidades: list[str] = Field(default_factory=list)
     password: Optional[str] = Field(default=None, min_length=6, max_length=128)

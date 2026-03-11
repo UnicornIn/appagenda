@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel
@@ -13,7 +13,7 @@ from app.database.mongo import (
     collection_sales,
     collection_inventarios,
     collection_giftcards,
-    collection_estilista,  # ⭐ Para buscar estilista por estilista_id
+    collection_estilista,  # ⭐ Para buscar estilista por profesional_id
     collection_commissions,    # ⭐ Para registrar comisiones de productos
 )
 
@@ -158,7 +158,7 @@ class VentaDirecta(BaseModel):
     cliente_id: Optional[str] = None
     sede_id: str
     vendido_por: Optional[str] = None        # Nombre libre (default: usuario autenticado)
-    estilista_id: Optional[str] = None       # ⭐ ID del estilista para enlazar comisiones
+    profesional_id: Optional[str] = None       # ⭐ ID del estilista para enlazar comisiones
     productos: List[ProductoVenta]
     metodo_pago: str
     abono: Optional[float] = 0
@@ -210,23 +210,23 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
     # ─── Resolver estilista y vendido_por ───────────────────────────
     #
     #  Prioridad del campo "vendido_por":
-    #   1. Si se envía estilista_id → se usa el nombre del estilista encontrado en BD
+    #   1. Si se envía profesional_id → se usa el nombre del estilista encontrado en BD
     #   2. Si se envía vendido_por (texto libre) → se usa tal cual
     #   3. Fallback → nombre del usuario autenticado
     #
     estilista_doc   = None
-    estilista_id_guardado = None
+    profesional_id_guardado = None
 
-    if venta.estilista_id:
+    if venta.profesional_id:
         estilista_doc = await collection_estilista.find_one(
-            {"profesional_id": venta.estilista_id}
+            {"profesional_id": venta.profesional_id}
         )
         if not estilista_doc:
             raise HTTPException(
                 status_code=404,
-                detail=f"Estilista con ID '{venta.estilista_id}' no encontrado"
+                detail=f"Estilista con ID '{venta.profesional_id}' no encontrado"
             )
-        estilista_id_guardado = venta.estilista_id
+        profesional_id_guardado = venta.profesional_id
         nombre_vendedor = (
             estilista_doc.get("nombre", "") + " " + estilista_doc.get("apellido", "")
         ).strip()
@@ -240,7 +240,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
     #   Aplica si:
     #   - La sede lo permite (tipo_comision "productos" o "mixto")
     #   - Y quien vende es un estilista (ya sea porque el usuario autenticado
-    #     es estilista, o porque el admin asignó un estilista_id)
+    #     es estilista, o porque el admin asignó un profesional_id)
     #
     aplica_comision = permite_comision_prod and (
         rol_usuario == "estilista" or estilista_doc is not None
@@ -386,7 +386,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
         "desglose_pagos": {venta.metodo_pago: num(abono_real), "total": num(total_venta)},
         # ⭐ Vendedor: puede ser el usuario autenticado, un nombre libre, o el estilista asignado
         "vendido_por": nombre_vendedor,
-        "estilista_id": estilista_id_guardado,        # ⭐ null si no se asignó estilista
+        "profesional_id": profesional_id_guardado,        # ⭐ null si no se asignó estilista
         "facturado_por": email_usuario,
         "notas": venta.notas,
         "estado_pago": estado_pago,
@@ -487,7 +487,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
             "moneda": moneda,
             "giftcard_reservada": bool(codigo_giftcard_guardado),
             "vendido_por": nombre_vendedor,
-            "estilista_id": estilista_id_guardado,
+            "profesional_id": profesional_id_guardado,
             # ⭐ Información de comisión generada
             "comision": {
                 "aplica": aplica_comision,

@@ -11,29 +11,19 @@ import { formatSedeNombre } from "../../../lib/sede";
 import { sedeService } from "../Sedes/sedeService";
 
 const roleBadgeClasses: Record<string, string> = {
-  superadmin: "bg-gray-900 text-white",
   super_admin: "bg-gray-900 text-white",
-  admin: "bg-blue-50 text-blue-700",
   admin_sede: "bg-blue-50 text-blue-700",
-  adminsede: "bg-blue-50 text-blue-700",
   recepcionista: "bg-amber-50 text-amber-700",
-  recepcionoista: "bg-amber-50 text-amber-700",
   call_center: "bg-emerald-50 text-emerald-700",
-  callcenter: "bg-emerald-50 text-emerald-700",
-  soporte: "bg-emerald-50 text-emerald-700",
+  estilista: "bg-fuchsia-50 text-fuchsia-700",
 };
 
 const roleLabels: Record<string, string> = {
-  superadmin: "superadmin",
-  super_admin: "superadmin",
-  admin: "adminsede",
-  admin_sede: "adminsede",
-  adminsede: "adminsede",
+  super_admin: "super_admin",
+  admin_sede: "admin_sede",
   recepcionista: "recepcionista",
-  recepcionoista: "recepcionista",
-  call_center: "call center",
-  callcenter: "call center",
-  soporte: "call center",
+  call_center: "call_center",
+  estilista: "estilista",
 };
 
 const normalizeRoleKey = (role: string) => role.trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -48,12 +38,16 @@ export default function SystemUsersPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
 
   const isSuperAdmin = useMemo(
-    () => user?.role === "superadmin" || user?.role === "super_admin",
+    () => {
+      const role = normalizeRoleKey(user?.role || "");
+      return role === "super_admin" || role === "superadmin";
+    },
     [user?.role]
   );
 
@@ -104,6 +98,7 @@ export default function SystemUsersPage() {
     try {
       setIsLoading(true);
       setError(null);
+      setSuccessMessage(null);
       const data = await systemUsersService.getSystemUsers(user.access_token);
       setUsers(data);
       setSelectedUserId((currentSelectedUserId) => {
@@ -156,8 +151,15 @@ export default function SystemUsersPage() {
 
     setIsSaving(true);
     try {
-      await systemUsersService.createSystemUser(user.access_token, payload);
+      const result = await systemUsersService.createSystemUser(user.access_token, payload);
       await loadSystemUsers();
+      if (result.warning) {
+        setError(null);
+        setSuccessMessage(`Usuario creado correctamente. Nota: ${result.warning}`);
+      } else {
+        setError(null);
+        setSuccessMessage("Usuario creado correctamente.");
+      }
       closeModal();
     } finally {
       setIsSaving(false);
@@ -177,8 +179,15 @@ export default function SystemUsersPage() {
 
     setIsSaving(true);
     try {
-      await systemUsersService.updateSystemUser(user.access_token, editingUser._id, payload);
+      const result = await systemUsersService.updateSystemUser(user.access_token, editingUser._id, payload);
       await loadSystemUsers();
+      if (result.warning) {
+        setError(null);
+        setSuccessMessage(`Usuario actualizado correctamente. Nota: ${result.warning}`);
+      } else {
+        setError(null);
+        setSuccessMessage("Usuario actualizado correctamente.");
+      }
       closeModal();
     } finally {
       setIsSaving(false);
@@ -223,6 +232,7 @@ export default function SystemUsersPage() {
     if (!confirmed) return;
 
     setError(null);
+    setSuccessMessage(null);
     setIsDeleting(true);
     try {
       const result = await systemUsersService.deleteSystemUser(user.access_token, selectedUser._id);
@@ -230,6 +240,8 @@ export default function SystemUsersPage() {
 
       if (result.softDeleted) {
         setError("El backend no soporta borrado fisico; el usuario fue desactivado.");
+      } else {
+        setSuccessMessage("Usuario eliminado correctamente.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo eliminar el usuario del sistema.");
@@ -284,7 +296,7 @@ export default function SystemUsersPage() {
                   className="h-8 px-3 text-xs bg-gray-900 text-white rounded hover:bg-gray-800 flex items-center gap-1"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  Nuevo
+                  Nuevo usuario
                 </button>
               )}
             </div>
@@ -304,6 +316,12 @@ export default function SystemUsersPage() {
           {!isSuperAdmin && (
             <div className="mx-6 mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">
               Solo superadmin puede gestionar usuarios del sistema.
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="mx-6 mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded">
+              <div className="text-xs text-emerald-700">{successMessage}</div>
             </div>
           )}
 
@@ -422,6 +440,14 @@ export default function SystemUsersPage() {
                     <p className="text-gray-500 mb-1">Sede</p>
                     <p className="text-gray-900 font-medium">
                       {getSedeDisplayName(selectedUser)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500 mb-1">Sedes permitidas</p>
+                    <p className="text-gray-900 font-medium">
+                      {selectedUser.sedes_permitidas?.length
+                        ? selectedUser.sedes_permitidas.join(", ")
+                        : "No disponible en este endpoint"}
                     </p>
                   </div>
                   <div>
