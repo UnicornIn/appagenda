@@ -1,8 +1,7 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime
 from bson import ObjectId
 from typing import List, Optional, Dict
-import re
 
 from app.admin.models import Profesional
 from app.auth.routes import get_current_user
@@ -262,123 +261,6 @@ async def list_professionals(
         profesional_to_dict(p)
 
     return professionals
-
-# ===================================================
-# 👥 Listar nombres de profesionales + recepcionistas
-# ===================================================
-@router.get("/staff-nombres", response_model=dict)
-async def list_staff_names(
-    sede_id: Optional[str] = Query(None, description="Sede a consultar (solo super_admin)"),
-    q: Optional[str] = Query(None, description="Filtro por nombre/email/ID"),
-    limit: int = Query(100, ge=1, le=500),
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Retorna nombres de profesionales y recepcionistas en una sola respuesta.
-    """
-    if current_user["rol"] not in ["super_admin", "admin_sede", "estilista", "recepcionista", "call_center"]:
-        raise HTTPException(status_code=403, detail="No autorizado para listar personal")
-
-    sede_actual = str(current_user.get("sede_id") or "").strip()
-    sede_objetivo = str(sede_id or sede_actual).strip()
-
-    if current_user["rol"] != "super_admin":
-        sede_objetivo = sede_actual
-
-    if not sede_objetivo:
-        raise HTTPException(status_code=400, detail="No se pudo determinar la sede para la consulta")
-
-    filtro_texto = (q or "").strip()
-    filtro_regex = {"$regex": re.escape(filtro_texto), "$options": "i"} if filtro_texto else None
-
-    query_profesionales = {
-        "rol": "estilista",
-        "sede_id": sede_objetivo,
-        "activo": {"$ne": False},
-    }
-    if filtro_regex:
-        query_profesionales["$or"] = [
-            {"nombre": filtro_regex},
-            {"apellido": filtro_regex},
-            {"email": filtro_regex},
-            {"profesional_id": filtro_regex},
-        ]
-
-    profesionales_raw = await collection_estilista.find(
-        query_profesionales,
-        {
-            "_id": 1,
-            "profesional_id": 1,
-            "nombre": 1,
-            "apellido": 1,
-            "email": 1,
-        }
-    ).sort("nombre", 1).to_list(length=limit)
-
-    query_recepcionistas = {
-        "sede_id": sede_objetivo,
-        "activo": {"$ne": False},
-        "rol": {"$in": ["recepcionista", "admin_sede", "adminsede"]},
-    }
-    if filtro_regex:
-        query_recepcionistas["$or"] = [
-            {"nombre": filtro_regex},
-            {"correo_electronico": filtro_regex},
-        ]
-
-    recepcionistas_raw = await collection_auth.find(
-        query_recepcionistas,
-        {
-            "_id": 1,
-            "nombre": 1,
-            "correo_electronico": 1,
-            "rol": 1,
-        }
-    ).sort("nombre", 1).to_list(length=limit)
-
-    profesionales = []
-    recepcionistas = []
-    items = []
-
-    for p in profesionales_raw:
-        nombre = f"{p.get('nombre', '')} {p.get('apellido', '')}".strip() or "Profesional sin nombre"
-        profesional_id = str(p.get("profesional_id") or "").strip() or None
-        email = p.get("email")
-        registro = {
-            "id": f"profesional:{profesional_id or str(p.get('_id'))}",
-            "nombre": nombre,
-            "tipo": "profesional",
-            "profesional_id": profesional_id,
-            "email": email,
-        }
-        profesionales.append(registro)
-        items.append(registro)
-
-    for r in recepcionistas_raw:
-        nombre = str(r.get("nombre") or "").strip() or "Recepcionista sin nombre"
-        email = r.get("correo_electronico")
-        rol = str(r.get("rol") or "").strip() or "recepcionista"
-        registro = {
-            "id": f"recepcionista:{str(r.get('_id'))}",
-            "nombre": nombre,
-            "tipo": "recepcionista",
-            "profesional_id": None,
-            "email": email,
-            "rol": rol,
-        }
-        recepcionistas.append(registro)
-        items.append(registro)
-
-    items.sort(key=lambda x: (str(x.get("nombre", "")).lower(), str(x.get("tipo", ""))))
-
-    return {
-        "sede_id": sede_objetivo,
-        "total_profesionales": len(profesionales),
-        "total_recepcionistas": len(recepcionistas),
-        "profesionales": profesionales,
-        "recepcionistas": recepcionistas,
-        "items": items[:limit],
-    }
 
 # ===================================================
 # 🔍 Obtener profesional por ID (incluye sede_nombre)
