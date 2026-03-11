@@ -29,8 +29,10 @@ class UserResponse(BaseModel):
     nombre: str
     correo_electronico: str
     rol: str
+    profesional_id: Optional[str] = None
     sede_id: Optional[str] = None
     franquicia_id: Optional[str] = None
+    sedes_permitidas: Optional[List[str]] = []  # ← agregar esto
     activo: bool
     fecha_creacion: Optional[str] = None
     creado_por: Optional[str] = None
@@ -66,6 +68,7 @@ class UserUpdate(BaseModel):
     sede_id: Optional[str] = None
     franquicia_id: Optional[str] = None
     activo: Optional[bool] = None
+    sedes_permitidas: Optional[List[str]] = None  # ← NUEVO
     password: Optional[str] = None
 
 
@@ -75,6 +78,7 @@ class UserUpdateResponse(BaseModel):
     correo_electronico: str
     rol: str
     sede_id: Optional[str] = None
+    sedes_permitidas: Optional[List[str]] = None
     franquicia_id: Optional[str] = None
     activo: bool
     modificado_por: str

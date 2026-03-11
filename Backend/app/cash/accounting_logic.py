@@ -528,6 +528,7 @@ async def calcular_ingresos_efectivo_appointments(
             "$group": {
                 "_id": None,
                 "total_efectivo": {"$sum": "$historial_pagos.monto"},
+                "abonos": {"$sum": {"$cond": [{"$eq": ["$historial_pagos.tipo", "abono_inicial"]}, "$historial_pagos.monto", 0]}},
                 "cantidad_pagos": {"$sum": 1},
                 "citas_ids": {"$addToSet": "$_id"}
             }
@@ -560,18 +561,26 @@ async def calcular_ingresos_efectivo_sales(
         {
             "$match": {
                 "sede_id": sede_id,
-                "fecha_pago": {"$gte": fecha_inicio, "$lte": fecha_fin},
                 "historial_pagos": {"$exists": True, "$ne": []}
             }
         },
         {"$unwind": "$historial_pagos"},
-        {"$match": {"historial_pagos.metodo": "efectivo"}},
+        {
+            "$match": {
+                "historial_pagos.metodo": "efectivo",
+                # ✅ Re-filtrar por fecha después del unwind
+                "historial_pagos.fecha": {
+                    "$gte": fecha_inicio,
+                    "$lte": fecha_fin
+                }
+            }
+        },
         {
             "$group": {
                 "_id": None,
                 "total_efectivo": {"$sum": "$historial_pagos.monto"},
                 "cantidad_pagos": {"$sum": 1},
-                "ventas_ids"    : {"$addToSet": "$identificador"}
+                "ventas_ids": {"$addToSet": "$identificador"}
             }
         }
     ]
@@ -652,21 +661,30 @@ async def calcular_ingresos_por_metodo_pago(
 
     # 2. Sales con historial_pagos
     pipeline_sales = [
-        {
-            "$match": {
-                "sede_id"  : sede_id,
-                "fecha_pago": {"$gte": fecha_inicio, "$lte": fecha_fin},
-                "historial_pagos": {"$exists": True, "$ne": []}
-            }
-        },
-        {"$unwind": "$historial_pagos"},
-        {
-            "$group": {
-                "_id"  : "$historial_pagos.metodo",
-                "total": {"$sum": "$historial_pagos.monto"}
+    {
+        "$match": {
+            "sede_id": sede_id,
+            # ✅ Sin filtro de fecha aquí — se hace después del unwind
+            "historial_pagos": {"$exists": True, "$ne": []}
+        }
+    },
+    {"$unwind": "$historial_pagos"},
+    {
+        # ✅ Re-filtrar por fecha DESPUÉS del unwind
+        "$match": {
+            "historial_pagos.fecha": {
+                "$gte": fecha_inicio,
+                "$lte": fecha_fin
             }
         }
-    ]
+    },
+    {
+        "$group": {
+            "_id"  : "$historial_pagos.metodo",  # ✅ con $ 
+            "total": {"$sum": "$historial_pagos.monto"}
+        }
+    }
+]
 
     for item in await sales.aggregate(pipeline_sales, allowDiskUse=True).to_list(None):
         metodo_norm = _normalizar_metodo(item["_id"])
@@ -738,52 +756,124 @@ async def _obtener_ventas_dia_sistema(
 
     ventas_formateadas = []
 
-    for venta in await sales.find({
-        "sede_id"  : sede_id,
-        "fecha_pago": {"$gte": fecha_inicio, "$lte": fecha_fin}
-    }).sort("fecha_pago", 1).to_list(None):
+    # =========================================================
+    # 1. APPOINTMENTS NO FACTURADAS
+    # Igual que calcular_ingresos_por_metodo_pago rama appointments
+    # =========================================================
+    pipeline_appointments = [
+        {
+            "$match": {
+                "sede_id": sede_id,
+                "historial_pagos": {"$exists": True, "$ne": []},
+                "$or": [
+                    {"estado_factura": {"$exists": False}},
+                    {"estado_factura": {"$ne": "facturado"}}
+                ]
+            }
+        },
+        {"$unwind": "$historial_pagos"},
+        {
+            "$match": {
+                "historial_pagos.fecha": {
+                    "$gte": fecha_inicio,
+                    "$lte": fecha_fin
+                }
+            }
+        }
+    ]
 
-        fecha_pago      = venta.get("fecha_pago")
-        nombre_cliente  = venta.get("nombre_cliente", "")
-        cedula_cliente  = venta.get("cedula_cliente", "")
-        email_cliente   = venta.get("email_cliente", "")
-        telefono_cliente= venta.get("telefono_cliente", "")
-        id_movimiento   = venta.get("identificador", "")
-        nro_comprobante = venta.get("numero_comprobante", "")
-        usuario         = venta.get("facturado_por", "")
+    async for cita in appointments.aggregate(pipeline_appointments, allowDiskUse=True):
+        pago = cita["historial_pagos"]
+        ventas_formateadas.append({
+            "fecha"               : pago.get("fecha"),
+            "nombre_cliente"      : cita.get("cliente_nombre", ""),
+            "cedula_cliente"      : cita.get("cedula_cliente", ""),
+            "email_cliente"       : cita.get("cliente_email", ""),
+            "telefono_cliente"    : cita.get("cliente_telefono", ""),
+            "medio_pago"          : pago.get("metodo", "").replace("_", " ").title(),
+            "tipo_movimiento"     : pago.get("tipo", ""),
+            "id_movimiento"       : str(cita.get("_id", "")),
+            "nro_comprobante"     : cita.get("numero_comprobante", ""),
+            "flujo_periodo"       : pago.get("monto", 0),
+            "usuario_modificacion": pago.get("registrado_por", ""),
+            "notas"               : pago.get("notas", ""),
+        })
 
-        historial_pagos = venta.get("historial_pagos", [])
-        if historial_pagos:
-            for pago in historial_pagos:
-                ventas_formateadas.append({
-                    "fecha"               : fecha_pago,
-                    "nombre_cliente"      : nombre_cliente,
-                    "cedula_cliente"      : cedula_cliente,
-                    "email_cliente"       : email_cliente,
-                    "telefono_cliente"    : telefono_cliente,
-                    "medio_pago"          : pago.get("metodo", "").capitalize(),
-                    "tipo_movimiento"     : pago.get("tipo"),
-                    "id_movimiento"       : id_movimiento,
-                    "nro_comprobante"     : nro_comprobante,
-                    "flujo_periodo"       : pago.get("monto", 0),
-                    "usuario_modificacion": usuario
-                })
-        elif venta.get("desglose_pagos"):
-            for metodo, monto in venta.get("desglose_pagos", {}).items():
-                if metodo != "total" and monto > 0:
-                    ventas_formateadas.append({
-                        "fecha"               : fecha_pago,
-                        "nombre_cliente"      : nombre_cliente,
-                        "cedula_cliente"      : cedula_cliente,
-                        "email_cliente"       : email_cliente,
-                        "telefono_cliente"    : telefono_cliente,
-                        "medio_pago"          : metodo.capitalize(),
-                        "tipo_movimiento"     : "Venta Facturada",
-                        "id_movimiento"       : id_movimiento,
-                        "nro_comprobante"     : nro_comprobante,
-                        "flujo_periodo"       : monto,
-                        "usuario_modificacion": usuario
-                    })
+    # =========================================================
+    # 2. SALES CON HISTORIAL_PAGOS
+    # Filtra por fecha REAL del pago, no por fecha_pago (cierre)
+    # =========================================================
+    pipeline_sales = [
+        {
+            "$match": {
+                "sede_id": sede_id,
+                # ✅ Sin filtro de fecha aquí — se hace después del unwind
+                "historial_pagos": {"$exists": True, "$ne": []}
+            }
+        },
+        {"$unwind": "$historial_pagos"},
+        {
+            # ✅ Filtrar por fecha real del pago
+            "$match": {
+                "historial_pagos.fecha": {
+                    "$gte": fecha_inicio,
+                    "$lte": fecha_fin
+                }
+            }
+        }
+    ]
+
+    async for venta in sales.aggregate(pipeline_sales, allowDiskUse=True):
+        pago = venta["historial_pagos"]
+        ventas_formateadas.append({
+            "fecha"               : pago.get("fecha"),
+            "nombre_cliente"      : venta.get("nombre_cliente", ""),
+            "cedula_cliente"      : venta.get("cedula_cliente", ""),
+            "email_cliente"       : venta.get("email_cliente", ""),
+            "telefono_cliente"    : venta.get("telefono_cliente", ""),
+            "medio_pago"          : pago.get("metodo", "").replace("_", " ").title(),
+            "tipo_movimiento"     : pago.get("tipo", ""),
+            "id_movimiento"       : venta.get("identificador", ""),
+            "nro_comprobante"     : venta.get("numero_comprobante", ""),
+            "flujo_periodo"       : pago.get("monto", 0),
+            "usuario_modificacion": venta.get("facturado_por", ""),
+            "notas"               : pago.get("notas", ""),
+        })
+
+    # =========================================================
+    # 3. SALES MIGRADAS (sin historial_pagos, usando desglose_pagos)
+    # Estas sí se buscan por fecha_pago porque no tienen historial
+    # =========================================================
+    ventas_migradas = await sales.find({
+        "sede_id"        : sede_id,
+        "fecha_pago"     : {"$gte": fecha_inicio, "$lte": fecha_fin},
+        "historial_pagos": {"$exists": False},
+        "desglose_pagos" : {"$exists": True}
+    }).to_list(None)
+
+    for venta in ventas_migradas:
+        for metodo, monto in venta.get("desglose_pagos", {}).items():
+            if metodo == "total" or not monto:
+                continue
+            ventas_formateadas.append({
+                "fecha"               : venta.get("fecha_pago"),
+                "nombre_cliente"      : venta.get("nombre_cliente", ""),
+                "cedula_cliente"      : venta.get("cedula_cliente", ""),
+                "email_cliente"       : venta.get("email_cliente", ""),
+                "telefono_cliente"    : venta.get("telefono_cliente", ""),
+                "medio_pago"          : metodo.replace("_", " ").title(),
+                "tipo_movimiento"     : "Venta Migrada",
+                "id_movimiento"       : venta.get("identificador", ""),
+                "nro_comprobante"     : venta.get("numero_comprobante", ""),
+                "flujo_periodo"       : monto,
+                "usuario_modificacion": venta.get("facturado_por", ""),
+                "notas"               : "",
+            })
+
+    # Ordenar por fecha real del pago
+    ventas_formateadas.sort(
+        key=lambda x: x["fecha"] if x["fecha"] else datetime.min
+    )
 
     return ventas_formateadas
 
@@ -827,65 +917,129 @@ async def _obtener_movimientos_efectivo_dia_sistema(
 
     movimientos = []
 
+    # =========================================================
+    # 1. APPOINTMENTS NO FACTURADAS (efectivo)
+    # ✅ Fix Bug 1: incluye citas como ZULMA que no están en sales
+    # =========================================================
+    pipeline_appointments = [
+        {
+            "$match": {
+                "sede_id": sede_id,
+                "historial_pagos": {"$exists": True, "$ne": []},
+                "$or": [
+                    {"estado_factura": {"$exists": False}},
+                    {"estado_factura": {"$ne": "facturado"}}
+                ]
+            }
+        },
+        {"$unwind": "$historial_pagos"},
+        {
+            "$match": {
+                "historial_pagos.metodo": "efectivo",
+                # ✅ Fix Bug 2: re-filtrar fecha DESPUÉS del unwind
+                "historial_pagos.fecha": {
+                    "$gte": fecha_inicio,
+                    "$lte": fecha_fin
+                }
+            }
+        }
+    ]
+
+    async for cita in appointments.aggregate(pipeline_appointments, allowDiskUse=True):
+        pago = cita["historial_pagos"]
+        movimientos.append({
+            "fecha"      : pago.get("fecha"),
+            "tipo"       : "INGRESO",
+            "descripcion": f"{cita.get('cliente_nombre', '')} - cita",
+            "comprobante": cita.get("numero_comprobante", ""),
+            "ingreso"    : pago.get("monto", 0),
+            "egreso"     : 0,
+            "saldo"      : 0
+        })
+
+    # =========================================================
+    # 2. SALES CON HISTORIAL_PAGOS (incluye citas facturadas)
+    # ✅ Fix Bug 2 y 3: unwind + re-filtro, solo sales (no duplicar appointments)
+    # =========================================================
+    pipeline_sales = [
+        {
+            "$match": {
+                "sede_id": sede_id,
+                # ✅ Sin filtro de fecha aquí — se hace después del unwind
+                "historial_pagos": {"$exists": True, "$ne": []}
+            }
+        },
+        {"$unwind": "$historial_pagos"},
+        {
+            "$match": {
+                "historial_pagos.metodo": "efectivo",
+                # ✅ Fecha real del pago, no fecha de cierre
+                "historial_pagos.fecha": {
+                    "$gte": fecha_inicio,
+                    "$lte": fecha_fin
+                }
+            }
+        }
+    ]
+
+    async for venta in sales.aggregate(pipeline_sales, allowDiskUse=True):
+        pago = venta["historial_pagos"]
+        movimientos.append({
+            "fecha"      : pago.get("fecha"),
+            "tipo"       : "INGRESO",
+            "descripcion": f"{venta.get('nombre_cliente', '')} - {venta.get('tipo_origen', 'venta')}",
+            "comprobante": venta.get("numero_comprobante", ""),
+            "ingreso"    : pago.get("monto", 0),
+            "egreso"     : 0,
+            "saldo"      : 0
+        })
+
+    # =========================================================
+    # 3. SALES MIGRADAS (sin historial_pagos)
+    # Estas sí usan fecha_pago porque no tienen historial
+    # =========================================================
     for venta in await sales.find({
-        "sede_id"  : sede_id,
-        "fecha_pago": {"$gte": fecha_inicio, "$lte": fecha_fin}
-    }).sort("fecha_pago", 1).to_list(None):
+        "sede_id"        : sede_id,
+        "fecha_pago"     : {"$gte": fecha_inicio, "$lte": fecha_fin},
+        "historial_pagos": {"$exists": False},
+        "desglose_pagos.efectivo": {"$exists": True, "$gt": 0}
+    }).to_list(None):
+        movimientos.append({
+            "fecha"      : venta.get("fecha_pago"),
+            "tipo"       : "INGRESO",
+            "descripcion": f"{venta.get('nombre_cliente', '')} - venta migrada",
+            "comprobante": venta.get("numero_comprobante", ""),
+            "ingreso"    : venta.get("desglose_pagos", {}).get("efectivo", 0),
+            "egreso"     : 0,
+            "saldo"      : 0
+        })
 
-        nombre_cliente  = venta.get("nombre_cliente", "")
-        tipo_origen     = venta.get("tipo_origen", "Venta")
-        nro_comprobante = venta.get("numero_comprobante", "")
-        fecha_pago      = venta.get("fecha_pago")
-
-        historial_pagos = venta.get("historial_pagos", [])
-        if historial_pagos:
-            for pago in historial_pagos:
-                if pago.get("metodo", "").lower() == "efectivo":
-                    movimientos.append({
-                        "fecha"      : fecha_pago,
-                        "tipo"       : "INGRESO",
-                        "descripcion": f"{nombre_cliente} - {tipo_origen}",
-                        "comprobante": nro_comprobante,
-                        "ingreso"    : pago.get("monto", 0),
-                        "egreso"     : 0,
-                        "saldo"      : 0
-                    })
-        else:
-            monto_efectivo = venta.get("desglose_pagos", {}).get("efectivo", 0)
-            if monto_efectivo > 0:
-                movimientos.append({
-                    "fecha"      : fecha_pago,
-                    "tipo"       : "INGRESO",
-                    "descripcion": f"{nombre_cliente} - {tipo_origen}",
-                    "comprobante": nro_comprobante,
-                    "ingreso"    : monto_efectivo,
-                    "egreso"     : 0,
-                    "saldo"      : 0
-                })
-
+    # =========================================================
+    # 4. INGRESOS MANUALES EN EFECTIVO
+    # =========================================================
     ingresos_manuales = await _ingresos_manuales_docs(sede_id, fecha)
     for ingreso in ingresos_manuales:
         if _normalizar_metodo(ingreso.get("metodo_pago", "")) != "efectivo":
             continue
-
         monto = float(ingreso.get("monto", 0) or 0)
         if monto <= 0:
             continue
-
         movimientos.append({
-            "fecha": _fecha_para_manual(ingreso, fecha),
-            "tipo": "INGRESO",
+            "fecha"      : _fecha_para_manual(ingreso, fecha),
+            "tipo"       : "INGRESO",
             "descripcion": f"Ingreso manual - {ingreso.get('motivo', '')}".strip(" -"),
             "comprobante": ingreso.get("comprobante_numero", ""),
-            "ingreso": monto,
-            "egreso": 0,
-            "saldo": 0,
+            "ingreso"    : monto,
+            "egreso"     : 0,
+            "saldo"      : 0,
         })
 
+    # =========================================================
+    # 5. EGRESOS (sin cambios)
+    # =========================================================
     for e in await cash_expenses.find({
         "sede_id": sede_id,
         "fecha"  : fecha,
-        # Excluir documentos migrados: solo egresos propios del sistema
         "origen" : {"$ne": "migracion"}
     }).sort("creado_en", 1).to_list(None):
         movimientos.append({
@@ -898,18 +1052,18 @@ async def _obtener_movimientos_efectivo_dia_sistema(
             "saldo"      : 0
         })
 
+    # Ordenar y calcular saldo corrido
     movimientos.sort(key=lambda x: x["fecha"] if x["fecha"] else datetime.min)
-
     saldo = saldo_inicial
     for mov in movimientos:
-        saldo      += mov["ingreso"]
-        saldo      -= mov["egreso"]
+        saldo       += mov["ingreso"]
+        saldo       -= mov["egreso"]
         mov["saldo"] = saldo
 
     return {
         "saldo_inicial": saldo_inicial,
         "movimientos"  : movimientos,
-        "saldo_final"  : saldo
+        "saldo_final"  : saldo  # ✅ Debería dar 49,100
     }
 
 
@@ -935,6 +1089,7 @@ async def calcular_resumen_dia(
 
     apertura         = await _buscar_apertura(sede_id, fecha)
     efectivo_inicial = apertura.get("efectivo_inicial", 0) if apertura else 0
+    
 
     migrado = await _tiene_data_migrada(sede_id, fecha)
 

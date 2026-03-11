@@ -756,7 +756,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         fecha: formatDateDMY(rawData.fecha_creacion, formatDateDMY(new Date())),
         tipo: 'Abono',
         monto: abonado,
-        metodo: rawData.metodo_pago || 'Efectivo',
+        // metodo: rawData.metodo_pago || 'Efectivo',
+        metodo: rawData.metodo_pago || '',
         registradoPor: rawData.creada_por_rol === 'admin_sede' ? 'Administrador' : 'Sistema'
       });
     }
@@ -2163,7 +2164,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                                   </div>
                                   <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1 truncate">
                                     <CalendarDays className="w-2.5 h-2.5 flex-shrink-0" />
-                                    <span className="truncate">{pago.fecha} • {pago.metodo}</span>
+                                    <span className="truncate">{pago.fecha}{pago.metodo ? ` • ${pago.metodo}` : ''}</span>
                                   </div>
                                   <div className="text-xs text-gray-400 truncate">
                                     Registrado por: {pago.registradoPor}

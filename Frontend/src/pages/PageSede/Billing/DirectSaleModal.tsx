@@ -20,11 +20,13 @@ import {
   deleteAllDirectSaleProducts,
   deleteDirectSaleProduct,
   type DirectSaleLineItem,
+  type DirectSaleSellerOption,
   fetchInventoryProductDetail,
   fetchInventoryProducts,
   type InventoryProduct,
   type PaymentMethod,
   registerDirectSalePayment,
+  searchDirectSaleSellers,
   verifyDirectSaleInBillingReport,
 } from "./directSalesApi";
 import { handleFacturarRequest, type FacturarTipo } from "./facturarApi";
@@ -47,6 +49,7 @@ interface CartItem {
 
 const DEFAULT_PAYMENT_METHOD: PaymentMethod = "efectivo";
 const CLIENTS_SEARCH_PAGE_SIZE = 30;
+const SELLERS_SEARCH_PAGE_SIZE = 30;
 const ALL_PAYMENT_BREAKDOWN_METHODS = [
   "efectivo",
   "transferencia",
@@ -101,6 +104,32 @@ function mergeClientOptions(
   return Array.from(byId.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
 }
 
+function mergeSellerOptions(
+  current: DirectSaleSellerOption[],
+  incoming: DirectSaleSellerOption[]
+): DirectSaleSellerOption[] {
+  const byId = new Map<string, DirectSaleSellerOption>();
+
+  for (const seller of current) {
+    byId.set(seller.id, seller);
+  }
+
+  for (const seller of incoming) {
+    const existing = byId.get(seller.id);
+    byId.set(seller.id, {
+      id: seller.id,
+      nombre: seller.nombre || existing?.nombre || "",
+      tipo: seller.tipo || existing?.tipo || "usuario",
+      profesionalId: seller.profesionalId || existing?.profesionalId,
+      email: seller.email || existing?.email,
+      rol: seller.rol || existing?.rol,
+      sedeId: seller.sedeId || existing?.sedeId,
+    });
+  }
+
+  return Array.from(byId.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
+}
+
 export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSaleModalProps) {
   const { user } = useAuth();
 
@@ -114,6 +143,12 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   const [selectedBuyerId, setSelectedBuyerId] = useState("");
   const [isLoadingClients, setIsLoadingClients] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
+  const [sellerSearch, setSellerSearch] = useState("");
+  const [knownSellers, setKnownSellers] = useState<DirectSaleSellerOption[]>([]);
+  const [sellerOptions, setSellerOptions] = useState<DirectSaleSellerOption[]>([]);
+  const [selectedSellerId, setSelectedSellerId] = useState("");
+  const [isLoadingSellers, setIsLoadingSellers] = useState(false);
+  const [sellersError, setSellersError] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(DEFAULT_PAYMENT_METHOD);
   const [giftCardCode, setGiftCardCode] = useState("");
   const [paymentBreakdown, setPaymentBreakdown] = useState<Record<PaymentBreakdownMethod, number>>(
@@ -133,6 +168,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   const [actionError, setActionError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const latestBuyerSearchRequestRef = useRef(0);
+  const latestSellerSearchRequestRef = useRef(0);
 
   const token =
     user?.access_token ||
@@ -149,7 +185,12 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     () => knownClients.find((client) => client.id === selectedBuyerId) ?? null,
     [knownClients, selectedBuyerId]
   );
+  const selectedSeller = useMemo(
+    () => knownSellers.find((seller) => seller.id === selectedSellerId) ?? null,
+    [knownSellers, selectedSellerId]
+  );
   const hasBuyerQuery = buyerSearch.trim().length > 0;
+  const hasSellerQuery = sellerSearch.trim().length > 0;
   const cartTotal = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [cartItems]
@@ -194,12 +235,20 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
 
   const isCatalogLocked = Boolean(saleId);
   const isClientLocked = Boolean(saleId);
+  const isSellerLocked = Boolean(saleId);
   const isBusy =
     isLoadingProducts ||
     isCreatingSale ||
     isProcessingPayment ||
     isClearingSale ||
     isVerifyingReport;
+
+  const getSellerTypeLabel = (seller: DirectSaleSellerOption): string => {
+    if (seller.tipo === "profesional") return "Profesional";
+    if (seller.tipo === "recepcionista") return "Recepcionista";
+    if (seller.rol && seller.rol.trim().length > 0) return seller.rol;
+    return "Usuario";
+  };
 
   const sanitizePaymentMethodForCurrency = (method: PaymentMethod): PaymentMethod => {
     if (!isCopCurrency && method === "addi") {
@@ -219,6 +268,12 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     setSelectedBuyerId("");
     setIsLoadingClients(false);
     setClientsError(null);
+    setSellerSearch("");
+    setKnownSellers([]);
+    setSellerOptions([]);
+    setSelectedSellerId("");
+    setIsLoadingSellers(false);
+    setSellersError(null);
     setPaymentMethod(DEFAULT_PAYMENT_METHOD);
     setGiftCardCode("");
     setPaymentBreakdown(buildEmptyPaymentBreakdown());
@@ -316,6 +371,57 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
       clearTimeout(timeout);
     };
   }, [isOpen, token, buyerSearch]);
+
+  useEffect(() => {
+    if (!isOpen || !token) return;
+
+    let cancelled = false;
+    const requestId = ++latestSellerSearchRequestRef.current;
+    const query = sellerSearch.trim();
+
+    if (!query) {
+      setSellerOptions([]);
+      setSellersError(null);
+      setIsLoadingSellers(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadSellers = async () => {
+      try {
+        setIsLoadingSellers(true);
+        setSellersError(null);
+
+        const result = await searchDirectSaleSellers(token, query, {
+          sedeId,
+          limit: SELLERS_SEARCH_PAGE_SIZE,
+        });
+
+        if (cancelled || requestId !== latestSellerSearchRequestRef.current) return;
+
+        setSellerOptions(result);
+        setKnownSellers((prev) => mergeSellerOptions(prev, result));
+      } catch (error) {
+        if (cancelled || requestId !== latestSellerSearchRequestRef.current) return;
+        setSellerOptions([]);
+        setSellersError(error instanceof Error ? error.message : "No se pudieron cargar vendedores");
+      } finally {
+        if (!cancelled && requestId === latestSellerSearchRequestRef.current) {
+          setIsLoadingSellers(false);
+        }
+      }
+    };
+
+    const timeout = setTimeout(() => {
+      void loadSellers();
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [isOpen, token, sellerSearch, sedeId]);
 
   useEffect(() => {
     if (!isCopCurrency && paymentMethod === "addi") {
@@ -618,6 +724,17 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
             telefono: selectedBuyer.telefono,
           }
         : undefined,
+      seller: selectedSeller
+        ? {
+            id: selectedSeller.id,
+            nombre: selectedSeller.nombre,
+            tipo: selectedSeller.tipo,
+            profesionalId: selectedSeller.profesionalId,
+            email: selectedSeller.email,
+            rol: selectedSeller.rol,
+            sedeId: selectedSeller.sedeId,
+          }
+        : undefined,
     });
     setSaleId(created.saleId);
     setIsCreatingSale(false);
@@ -877,6 +994,123 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
             {isClientLocked && selectedBuyer ? (
               <p className="mt-2 text-xs text-gray-500">
                 Cliente fijado para la venta creada: {selectedBuyer.nombre}.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="border-b border-gray-200 px-5 py-4">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600">
+              Vendido por (usuario del sistema)
+            </label>
+
+            <div className="relative max-w-xl">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <Input
+                value={sellerSearch}
+                onChange={(event) => setSellerSearch(event.target.value)}
+                placeholder="Buscar vendedor por nombre..."
+                className="h-10 pl-9"
+                disabled={isBusy || isSellerLocked}
+              />
+            </div>
+
+            {selectedSeller ? (
+              <div className="mt-2 max-w-xl rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-medium text-gray-900">{selectedSeller.nombre}</p>
+                      <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                        {getSellerTypeLabel(selectedSeller)}
+                      </span>
+                    </div>
+                    <p className="truncate text-xs text-gray-500">
+                      {selectedSeller.email || selectedSeller.rol || "Sin datos adicionales"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSellerId("")}
+                    className="text-xs font-medium text-gray-600 hover:text-gray-900 disabled:cursor-not-allowed disabled:text-gray-400"
+                    disabled={isBusy || isSellerLocked}
+                  >
+                    Quitar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-gray-500">
+                Si no seleccionas vendedor, la venta queda con el usuario autenticado.
+              </p>
+            )}
+
+            {selectedSeller?.tipo === "profesional" ? (
+              <p className="mt-2 text-xs text-emerald-700">
+                Las comisiones de productos se calcularán para este profesional.
+              </p>
+            ) : null}
+
+            {hasSellerQuery ? (
+              <div className="mt-2 max-w-xl overflow-hidden rounded-lg border border-gray-200 bg-white">
+                <div className="max-h-56 overflow-y-auto">
+                  {!isLoadingSellers && sellerOptions.length === 0 ? (
+                    <p className="px-3 py-3 text-xs text-gray-500">
+                      No hay vendedores para la búsqueda actual.
+                    </p>
+                  ) : (
+                    sellerOptions.map((seller) => {
+                      const isSelected = seller.id === selectedSellerId;
+
+                      return (
+                        <button
+                          key={seller.id}
+                          type="button"
+                          onClick={() => setSelectedSellerId(seller.id)}
+                          className={`flex w-full items-start justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 ${
+                            isSelected ? "bg-gray-100" : "hover:bg-gray-50"
+                          }`}
+                          disabled={isBusy || isSellerLocked}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="truncate text-sm font-medium text-gray-900">{seller.nombre}</p>
+                              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
+                                {getSellerTypeLabel(seller)}
+                              </span>
+                            </div>
+                            <p className="truncate text-xs text-gray-500">
+                              {seller.email || seller.rol || "Sin datos de contacto"}
+                            </p>
+                          </div>
+                          {isSelected ? (
+                            <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                              Seleccionado
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-gray-500">
+                Escribe el nombre del usuario para buscar.
+              </p>
+            )}
+
+            {hasSellerQuery && isLoadingSellers ? (
+              <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Cargando vendedores...
+              </div>
+            ) : null}
+            {hasSellerQuery && sellersError ? (
+              <p className="mt-2 text-xs text-amber-700">{sellersError}</p>
+            ) : null}
+            {isSellerLocked && selectedSeller ? (
+              <p className="mt-2 text-xs text-gray-500">
+                Vendedor fijado para la venta creada: {selectedSeller.nombre}.
               </p>
             ) : null}
           </div>
