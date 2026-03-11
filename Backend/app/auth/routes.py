@@ -180,7 +180,6 @@ async def list_users(
             nombre=u.get("nombre", ""),
             correo_electronico=u.get("correo_electronico", ""),
             rol=u.get("rol", ""),
-            profesional_id=u.get("profesional_id"),
             sede_id=u.get("sede_id"),
             franquicia_id=u.get("franquicia_id"),
             activo=u.get("activo", True),
