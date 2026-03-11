@@ -59,6 +59,16 @@ export interface DirectSaleClientRef {
   telefono?: string;
 }
 
+export interface DirectSaleSellerRef {
+  id: string;
+  nombre: string;
+  tipo: "profesional" | "recepcionista" | "usuario";
+  profesionalId?: string;
+  email?: string;
+  rol?: string;
+  sedeId?: string;
+}
+
 export interface CreateDirectSaleInput {
   token: string;
   sedeId: string;
@@ -67,6 +77,7 @@ export interface CreateDirectSaleInput {
   giftCardCode?: string;
   items: DirectSaleLineItem[];
   client?: DirectSaleClientRef;
+  seller?: DirectSaleSellerRef;
   notes?: string;
 }
 
@@ -95,6 +106,36 @@ interface VerifyBillingSaleParams {
   sedeId: string;
   saleId: string;
 }
+
+interface SearchDirectSaleSellersOptions {
+  sedeId?: string;
+  limit?: number;
+}
+
+export interface DirectSaleSellerOption {
+  id: string;
+  nombre: string;
+  tipo: "profesional" | "recepcionista" | "usuario";
+  profesionalId?: string;
+  email?: string;
+  rol?: string;
+  sedeId?: string;
+}
+
+interface AuthUserRaw {
+  id?: string;
+  _id?: string;
+  nombre?: string;
+  correo_electronico?: string;
+  email?: string;
+  rol?: string;
+  sede_id?: string | null;
+  activo?: boolean;
+  profesional_id?: string;
+}
+
+const AUTH_USERS_CACHE_TTL_MS = 60_000;
+const directSaleAuthUsersCache = new Map<string, { expiresAt: number; items: DirectSaleSellerOption[] }>();
 
 function buildAuthHeaders(token: string): HeadersInit {
   return {
@@ -242,6 +283,9 @@ function buildCreateSalePayload(
 ): Record<string, unknown> {
   const giftCardCode = typeof input.giftCardCode === "string" ? input.giftCardCode.trim() : "";
   const clientId = typeof input.client?.id === "string" ? input.client.id.trim() : "";
+  const sellerName = typeof input.seller?.nombre === "string" ? input.seller.nombre.trim() : "";
+  const sellerProfessionalId =
+    typeof input.seller?.profesionalId === "string" ? input.seller.profesionalId.trim() : "";
   const payload: Record<string, unknown> = {
     sede_id: input.sedeId,
     productos: input.items.map((item) => ({
@@ -264,12 +308,108 @@ function buildCreateSalePayload(
     payload.cliente_id = clientId;
   }
 
+  if (sellerName.length > 0) {
+    payload.vendido_por = sellerName;
+  }
+
+  if (sellerProfessionalId.length > 0) {
+    payload.estilista_id = sellerProfessionalId;
+  }
+
   if (includeModernFields) {
     payload.tipo = "venta_directa";
     payload.total = roundToTwo(input.total);
   }
 
   return payload;
+}
+
+function normalizeRole(rawRole: unknown): string {
+  const normalized = String(rawRole ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (normalized === "superadmin") return "super_admin";
+  if (normalized === "adminsede") return "admin_sede";
+  if (normalized === "callcenter") return "call_center";
+  if (normalized === "recepcionoista") return "recepcionista";
+  return normalized;
+}
+
+function resolveSellerTypeByRole(role: string): DirectSaleSellerOption["tipo"] {
+  if (role === "estilista") return "profesional";
+  if (role === "recepcionista" || role === "admin_sede") return "recepcionista";
+  return "usuario";
+}
+
+function normalizeSellerOptionFromAuthUser(raw: AuthUserRaw): DirectSaleSellerOption | null {
+  const id = String(raw.id ?? raw._id ?? "").trim();
+  const nombre = String(raw.nombre ?? "").trim();
+
+  if (!id || !nombre) {
+    return null;
+  }
+
+  const rol = normalizeRole(raw.rol);
+  const profesionalId = String(raw.profesional_id ?? "").trim() || undefined;
+  const email = String(raw.correo_electronico ?? raw.email ?? "").trim() || undefined;
+  const sedeId = String(raw.sede_id ?? "").trim() || undefined;
+
+  return {
+    id,
+    nombre,
+    tipo: resolveSellerTypeByRole(rol),
+    profesionalId,
+    email,
+    rol: rol || undefined,
+    sedeId,
+  };
+}
+
+async function fetchDirectSaleSellersFromAuthUsers(token: string): Promise<DirectSaleSellerOption[]> {
+  const now = Date.now();
+  const cached = directSaleAuthUsersCache.get(token);
+  if (cached && cached.expiresAt > now) {
+    return cached.items;
+  }
+
+  const response = await fetch(`${API_BASE_URL}auth/users?activo=true`, {
+    method: "GET",
+    headers: buildAuthHeaders(token),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+
+  const data = await parseJsonSafely<AuthUserRaw[] | Record<string, unknown>>(response);
+  const rawUsers = Array.isArray(data) ? data : [];
+  const items = rawUsers
+    .map((user) => normalizeSellerOptionFromAuthUser(user))
+    .filter((item): item is DirectSaleSellerOption => Boolean(item))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+  directSaleAuthUsersCache.set(token, {
+    expiresAt: now + AUTH_USERS_CACHE_TTL_MS,
+    items,
+  });
+
+  return items;
+}
+
+function sellerMatchesQuery(seller: DirectSaleSellerOption, normalizedQuery: string): boolean {
+  const searchable = [
+    seller.nombre,
+    seller.email || "",
+    seller.rol || "",
+    seller.profesionalId || "",
+    seller.id,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return searchable.includes(normalizedQuery);
 }
 
 export async function fetchInventoryProducts(token: string, currency: string): Promise<InventoryProduct[]> {
@@ -327,6 +467,34 @@ export async function fetchInventoryProductDetail(params: GetInventoryDetailPara
     }
     return fetchInventoryProductDetailByPath(params.token, params.fallbackInventoryId, params.currency);
   }
+}
+
+export async function searchDirectSaleSellers(
+  token: string,
+  query: string,
+  options: SearchDirectSaleSellersOptions = {}
+): Promise<DirectSaleSellerOption[]> {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    return [];
+  }
+
+  const normalizedSedeId = typeof options.sedeId === "string" ? options.sedeId.trim() : "";
+  const normalizedQuery = trimmedQuery.toLowerCase();
+  const source = await fetchDirectSaleSellersFromAuthUsers(token);
+  const normalizedLimit =
+    typeof options.limit === "number" && Number.isFinite(options.limit)
+      ? Math.max(1, Math.min(100, Math.trunc(options.limit)))
+      : 20;
+
+  return source
+    .filter((seller) => {
+      if (normalizedSedeId && seller.sedeId && seller.sedeId !== normalizedSedeId) {
+        return false;
+      }
+      return sellerMatchesQuery(seller, normalizedQuery);
+    })
+    .slice(0, normalizedLimit);
 }
 
 export async function createDirectSale(input: CreateDirectSaleInput): Promise<CreatedDirectSale> {

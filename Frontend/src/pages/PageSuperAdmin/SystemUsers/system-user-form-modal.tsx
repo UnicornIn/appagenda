@@ -19,11 +19,28 @@ interface SystemUserFormModalProps {
 }
 
 const ROLE_OPTIONS: Array<{ label: string; value: SystemUserRole }> = [
-  { label: "superadmin", value: "superadmin" },
-  { label: "adminsede", value: "admin_sede" },
+  { label: "super_admin", value: "super_admin" },
+  { label: "admin_sede", value: "admin_sede" },
   { label: "recepcionista", value: "recepcionista" },
-  { label: "call center", value: "call_center" },
+  { label: "estilista", value: "estilista" },
+  { label: "call_center", value: "call_center" },
 ];
+
+const normalizeRole = (role: string) => role.trim().toLowerCase().replace(/[\s-]+/g, "_");
+
+const toSystemUserRole = (role: string): SystemUserRole => {
+  const normalizedRole = normalizeRole(role);
+  if (normalizedRole === "super_admin" || normalizedRole === "superadmin") return "super_admin";
+  if (normalizedRole === "adminsede" || normalizedRole === "admin") return "admin_sede";
+  if (normalizedRole === "callcenter" || normalizedRole === "soporte") return "call_center";
+  if (normalizedRole === "recepcionoista") return "recepcionista";
+  if (normalizedRole === "stylist" || normalizedRole === "profesional") return "estilista";
+  if (normalizedRole === "admin_sede") return "admin_sede";
+  if (normalizedRole === "recepcionista") return "recepcionista";
+  if (normalizedRole === "call_center") return "call_center";
+  if (normalizedRole === "estilista") return "estilista";
+  return "admin_sede";
+};
 
 export function SystemUserFormModal({
   isOpen,
@@ -41,8 +58,10 @@ export function SystemUserFormModal({
     email: "",
     role: "admin_sede" as SystemUserRole,
     sede_id: "",
+    sedes_permitidas: [] as string[],
     especialidades: [] as string[],
     password: "",
+    confirm_password: "",
     activo: true,
   });
 
@@ -50,36 +69,64 @@ export function SystemUserFormModal({
   const [servicios, setServicios] = useState<Service[]>([]);
   const [isLoadingSedes, setIsLoadingSedes] = useState(false);
   const [isLoadingServicios, setIsLoadingServicios] = useState(false);
-
   const [isSedeDropdownOpen, setIsSedeDropdownOpen] = useState(false);
+  const [isSedesPermitidasDropdownOpen, setIsSedesPermitidasDropdownOpen] = useState(false);
   const [isServiciosDropdownOpen, setIsServiciosDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = useMemo(
-    () =>
-      Boolean(
-        formData.nombre.trim() &&
-          formData.email.trim() &&
-          formData.role &&
-          formData.sede_id.trim() &&
-          (isEditMode || formData.password.trim())
-      ),
-    [formData, isEditMode]
-  );
+  const requiresPrimarySede = formData.role !== "super_admin";
+  const canConfigureSedesPermitidas = formData.role === "admin_sede";
+
+  const canSubmit = useMemo(() => {
+    const nombre = formData.nombre.trim();
+    const email = formData.email.trim();
+    const password = formData.password.trim();
+    const confirmPassword = formData.confirm_password.trim();
+    const hasRequiredPassword = isEditMode ? true : Boolean(password);
+    const hasSede = !requiresPrimarySede || Boolean(formData.sede_id.trim());
+    const passwordLengthValid = !password || password.length >= 8;
+    const passwordsMatch = isEditMode
+      ? !password || password === confirmPassword
+      : Boolean(password) && password === confirmPassword;
+
+    return Boolean(
+      nombre &&
+        email &&
+        formData.role &&
+        hasSede &&
+        hasRequiredPassword &&
+        passwordLengthValid &&
+        passwordsMatch
+    );
+  }, [formData, isEditMode, requiresPrimarySede]);
 
   useEffect(() => {
     if (!isOpen) return;
 
     if (isEditMode && initialUser) {
+      const primarySedeId = initialUser.sede_id?.trim() || "";
+      const initialSedesPermitidas = Array.from(
+        new Set(
+          [
+            ...(Array.isArray(initialUser.sedes_permitidas)
+              ? initialUser.sedes_permitidas.map((sedeId) => String(sedeId ?? "").trim())
+              : []),
+            primarySedeId,
+          ].filter(Boolean)
+        )
+      );
+
       setFormData({
         nombre: initialUser.nombre || "",
         email: initialUser.email || "",
         role: toSystemUserRole(initialUser.role),
-        sede_id: initialUser.sede_id?.trim() || "",
+        sede_id: primarySedeId,
+        sedes_permitidas: initialSedesPermitidas,
         especialidades: Array.isArray(initialUser.especialidades)
           ? initialUser.especialidades.map((esp) => esp.trim()).filter(Boolean)
           : [],
         password: "",
+        confirm_password: "",
         activo: Boolean(initialUser.activo),
       });
     } else {
@@ -88,8 +135,10 @@ export function SystemUserFormModal({
         email: "",
         role: "admin_sede",
         sede_id: "",
+        sedes_permitidas: [],
         especialidades: [],
         password: "",
+        confirm_password: "",
         activo: true,
       });
     }
@@ -124,6 +173,7 @@ export function SystemUserFormModal({
   useEffect(() => {
     const handleClickOutside = () => {
       setIsSedeDropdownOpen(false);
+      setIsSedesPermitidasDropdownOpen(false);
       setIsServiciosDropdownOpen(false);
     };
 
@@ -136,6 +186,33 @@ export function SystemUserFormModal({
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    if (canConfigureSedesPermitidas) {
+      return;
+    }
+
+    setFormData((prev) => {
+      if (prev.sedes_permitidas.length === 0) return prev;
+      return {
+        ...prev,
+        sedes_permitidas: [],
+      };
+    });
+    setIsSedesPermitidasDropdownOpen(false);
+  }, [canConfigureSedesPermitidas]);
+
+  useEffect(() => {
+    if (!canConfigureSedesPermitidas) return;
+    const sedePrincipal = formData.sede_id.trim();
+    if (!sedePrincipal) return;
+    if (formData.sedes_permitidas.includes(sedePrincipal)) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      sedes_permitidas: [...prev.sedes_permitidas, sedePrincipal],
+    }));
+  }, [canConfigureSedesPermitidas, formData.sede_id, formData.sedes_permitidas]);
+
   if (!isOpen) return null;
 
   const stopPropagation = (e: React.MouseEvent) => {
@@ -143,7 +220,17 @@ export function SystemUserFormModal({
   };
 
   const handleSelectSede = (sede: Sede) => {
-    setFormData((prev) => ({ ...prev, sede_id: sede.sede_id }));
+    setFormData((prev) => {
+      const nextSedesPermitidas = canConfigureSedesPermitidas
+        ? Array.from(new Set([...prev.sedes_permitidas, sede.sede_id]))
+        : prev.sedes_permitidas;
+
+      return {
+        ...prev,
+        sede_id: sede.sede_id,
+        sedes_permitidas: nextSedesPermitidas,
+      };
+    });
     setIsSedeDropdownOpen(false);
   };
 
@@ -163,6 +250,25 @@ export function SystemUserFormModal({
     }));
   };
 
+  const handleToggleSedePermitida = (sedeId: string) => {
+    const normalizedSedeId = sedeId.trim();
+    if (!normalizedSedeId) return;
+
+    setFormData((prev) => {
+      const isSelected = prev.sedes_permitidas.includes(normalizedSedeId);
+      if (isSelected && normalizedSedeId === prev.sede_id) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        sedes_permitidas: isSelected
+          ? prev.sedes_permitidas.filter((id) => id !== normalizedSedeId)
+          : [...prev.sedes_permitidas, normalizedSedeId],
+      };
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -171,6 +277,7 @@ export function SystemUserFormModal({
     const nombre = formData.nombre.trim();
     const email = formData.email.trim();
     const password = formData.password.trim();
+    const confirmPassword = formData.confirm_password.trim();
     const sedeId = formData.sede_id.trim();
 
     if (!nombre) {
@@ -183,8 +290,8 @@ export function SystemUserFormModal({
       return;
     }
 
-    if (!sedeId) {
-      setError("Por favor selecciona una sede.");
+    if (requiresPrimarySede && !sedeId) {
+      setError("Por favor selecciona una sede principal.");
       return;
     }
 
@@ -193,20 +300,37 @@ export function SystemUserFormModal({
       return;
     }
 
-    if (password && password.length < 6) {
-      setError("La contraseña debe tener minimo 6 caracteres.");
+    if (password && password.length < 8) {
+      setError("La contraseña debe tener mínimo 8 caracteres.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Las contraseñas no coinciden.");
       return;
     }
 
     const especialidadesValidas = (formData.especialidades || [])
       .map((esp) => esp.trim())
       .filter((esp) => Boolean(esp));
+    const sedesPermitidasValidas = Array.from(
+      new Set(
+        (formData.sedes_permitidas || [])
+          .map((sedePermitida) => sedePermitida.trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (canConfigureSedesPermitidas && sedeId && !sedesPermitidasValidas.includes(sedeId)) {
+      sedesPermitidasValidas.push(sedeId);
+    }
 
     const payload: CreateSystemUserPayload = {
       nombre,
       email,
       role: formData.role,
-      sede_id: sedeId,
+      sede_id: requiresPrimarySede ? sedeId : undefined,
+      sedes_permitidas: canConfigureSedesPermitidas ? sedesPermitidasValidas : undefined,
       especialidades: especialidadesValidas,
       password: password || undefined,
       activo: formData.activo,
@@ -228,7 +352,7 @@ export function SystemUserFormModal({
         >
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold">
-              {isEditMode ? "Editar usuario del sistema" : "Anadir usuario del sistema"}
+              {isEditMode ? "Editar usuario del sistema" : "Añadir usuario del sistema"}
             </h2>
             <button
               onClick={onClose}
@@ -283,51 +407,129 @@ export function SystemUserFormModal({
               </select>
             </div>
 
-            <div className="relative">
-              <label className="block text-sm font-medium mb-2">Sede *</label>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsSedeDropdownOpen(!isSedeDropdownOpen);
-                  setIsServiciosDropdownOpen(false);
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20 text-left flex justify-between items-center"
-                disabled={isSaving || isLoadingSedes}
-              >
-                <span className={formData.sede_id ? "text-gray-900" : "text-gray-500"}>
-                  {isLoadingSedes ? "Cargando sedes..." : getSedeNombre()}
-                </span>
-                {isLoadingSedes ? (
-                  <Loader className="h-4 w-4 animate-spin text-gray-400" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-gray-400" />
-                )}
-              </button>
-
-              {isSedeDropdownOpen && !isLoadingSedes && (
-                <div
-                  className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto"
-                  onClick={stopPropagation}
+            {requiresPrimarySede && (
+              <div className="relative">
+                <label className="block text-sm font-medium mb-2">Sede principal *</label>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsSedeDropdownOpen(!isSedeDropdownOpen);
+                    setIsSedesPermitidasDropdownOpen(false);
+                    setIsServiciosDropdownOpen(false);
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20 text-left flex justify-between items-center"
+                  disabled={isSaving || isLoadingSedes}
                 >
-                  {sedes.map((sede) => (
-                    <button
-                      key={sede.sede_id}
-                      type="button"
-                      onClick={() => handleSelectSede(sede)}
-                      className={`w-full text-left px-3 py-2 hover:bg-gray-100 ${
-                        formData.sede_id === sede.sede_id ? "bg-blue-50 text-blue-600" : ""
-                      }`}
-                    >
-                      <div className="font-medium">{formatSedeNombre(sede.nombre)}</div>
-                      <div className="text-sm text-gray-500 truncate">{sede.direccion}</div>
-                    </button>
-                  ))}
-                  {sedes.length === 0 && (
-                    <div className="px-3 py-2 text-sm text-gray-500 text-center">No hay sedes disponibles</div>
+                  <span className={formData.sede_id ? "text-gray-900" : "text-gray-500"}>
+                    {isLoadingSedes ? "Cargando sedes..." : getSedeNombre()}
+                  </span>
+                  {isLoadingSedes ? (
+                    <Loader className="h-4 w-4 animate-spin text-gray-400" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-gray-400" />
                   )}
-                </div>
-              )}
+                </button>
+
+                {isSedeDropdownOpen && !isLoadingSedes && (
+                  <div
+                    className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                    onClick={stopPropagation}
+                  >
+                    {sedes.map((sede) => (
+                      <button
+                        key={sede.sede_id}
+                        type="button"
+                        onClick={() => handleSelectSede(sede)}
+                        className={`w-full text-left px-3 py-2 hover:bg-gray-100 ${
+                          formData.sede_id === sede.sede_id ? "bg-blue-50 text-blue-600" : ""
+                        }`}
+                      >
+                        <div className="font-medium">{formatSedeNombre(sede.nombre)}</div>
+                        <div className="text-sm text-gray-500 truncate">{sede.direccion}</div>
+                      </button>
+                    ))}
+                    {sedes.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">No hay sedes disponibles</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {canConfigureSedesPermitidas && (
+              <div className="relative">
+                <label className="block text-sm font-medium mb-2">Sedes permitidas</label>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsSedesPermitidasDropdownOpen(!isSedesPermitidasDropdownOpen);
+                    setIsSedeDropdownOpen(false);
+                    setIsServiciosDropdownOpen(false);
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20 text-left flex justify-between items-center"
+                  disabled={isSaving || isLoadingSedes}
+                >
+                  <span className={formData.sedes_permitidas.length > 0 ? "text-gray-900" : "text-gray-500"}>
+                    {isLoadingSedes
+                      ? "Cargando sedes..."
+                      : formData.sedes_permitidas.length === 0
+                      ? "Seleccionar sedes permitidas"
+                      : `${formData.sedes_permitidas.length} sede(s) seleccionada(s)`}
+                  </span>
+                  {isLoadingSedes ? (
+                    <Loader className="h-4 w-4 animate-spin text-gray-400" />
+                  ) : isSedesPermitidasDropdownOpen ? (
+                    <ChevronUp className="h-4 w-4 text-gray-400" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-gray-400" />
+                  )}
+                </button>
+
+                {isSedesPermitidasDropdownOpen && !isLoadingSedes && (
+                  <div
+                    className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                    onClick={stopPropagation}
+                  >
+                    {sedes.map((sede) => (
+                      <label
+                        key={`permitida-${sede.sede_id}`}
+                        className="flex items-start gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={formData.sedes_permitidas.includes(sede.sede_id)}
+                          onChange={() => handleToggleSedePermitida(sede.sede_id)}
+                          className="mt-1 h-4 w-4 rounded border-gray-300 text-[oklch(0.65_0.25_280)] focus:ring-[oklch(0.65_0.25_280)]"
+                          disabled={isSaving}
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900">{formatSedeNombre(sede.nombre)}</p>
+                          <p className="text-xs text-gray-500">{sede.sede_id}</p>
+                        </div>
+                      </label>
+                    ))}
+                    {sedes.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">No hay sedes disponibles</div>
+                    )}
+                  </div>
+                )}
+                <p className="mt-1 text-xs text-gray-500">
+                  Para `admin_sede`, la sede principal se incluye automáticamente en permitidas.
+                </p>
+              </div>
+            )}
+
+            {!requiresPrimarySede && (
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                Para `super_admin` la sede principal no es obligatoria en el contrato actual.
+              </div>
+            )}
+
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              El contrato actual usa `sede_id` principal. Si `PATCH /auth/users/:user_id` no soporta
+              `sedes_permitidas`, el formulario mostrará error para evitar guardar cambios incompletos.
             </div>
 
             <div className="relative">
@@ -338,6 +540,7 @@ export function SystemUserFormModal({
                   e.stopPropagation();
                   setIsServiciosDropdownOpen(!isServiciosDropdownOpen);
                   setIsSedeDropdownOpen(false);
+                  setIsSedesPermitidasDropdownOpen(false);
                 }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20 text-left flex justify-between items-center"
                 disabled={isSaving || isLoadingServicios}
@@ -381,9 +584,7 @@ export function SystemUserFormModal({
                         />
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-900">{servicio.nombre}</p>
-                          <p className="text-xs text-gray-500">
-                            ID: {servicioId} • {servicio.duracion || 0} min • $
-                          </p>
+                          <p className="text-xs text-gray-500">ID: {servicioId}</p>
                         </div>
                       </label>
                     );
@@ -397,7 +598,7 @@ export function SystemUserFormModal({
 
             <div>
               <label className="block text-sm font-medium mb-2">
-                {isEditMode ? "Contrasena (opcional)" : "Contrasena *"}
+                {isEditMode ? "Contraseña (opcional)" : "Contraseña *"}
               </label>
               <input
                 type="password"
@@ -407,15 +608,31 @@ export function SystemUserFormModal({
                 required={!isEditMode}
                 placeholder={
                   isEditMode
-                    ? "Dejar vacio para conservar la contrasena actual"
-                    : "Ingresa una contrasena segura"
+                    ? "Dejar vacío para conservar la contraseña actual"
+                    : "Ingresa una contraseña segura"
                 }
                 disabled={isSaving}
-                minLength={6}
+                minLength={8}
               />
               <p className="text-xs text-gray-500 mt-1">
-                {isEditMode ? "Solo si deseas cambiarla (minimo 6 caracteres)." : "Minimo 6 caracteres"}
+                {isEditMode ? "Solo si deseas cambiarla (mínimo 8 caracteres)." : "Mínimo 8 caracteres"}
               </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                {isEditMode ? "Confirmar nueva contraseña" : "Confirmar contraseña *"}
+              </label>
+              <input
+                type="password"
+                value={formData.confirm_password}
+                onChange={(e) => setFormData((prev) => ({ ...prev, confirm_password: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20"
+                required={!isEditMode || Boolean(formData.password.trim())}
+                placeholder="Repite la contraseña"
+                disabled={isSaving}
+                minLength={8}
+              />
             </div>
 
             <div className="flex items-center gap-2">
@@ -433,9 +650,7 @@ export function SystemUserFormModal({
             </div>
 
             {error && (
-              <div className="rounded-md bg-red-50 p-3 border border-red-200 text-xs text-red-700">
-                {error}
-              </div>
+              <div className="rounded-md bg-red-50 p-3 border border-red-200 text-xs text-red-700">{error}</div>
             )}
 
             <div className="flex gap-3 pt-4">
@@ -457,8 +672,10 @@ export function SystemUserFormModal({
                     <Loader className="h-4 w-4 animate-spin" />
                     Guardando...
                   </>
+                ) : isEditMode ? (
+                  "Guardar cambios"
                 ) : (
-                  isEditMode ? "Guardar cambios" : "Crear usuario del sistema"
+                  "Crear usuario"
                 )}
               </button>
             </div>
@@ -468,21 +685,3 @@ export function SystemUserFormModal({
     </div>
   );
 }
-
-const normalizeRole = (role: string) => role.trim().toLowerCase().replace(/[\s-]+/g, "_");
-
-const toSystemUserRole = (role: string): SystemUserRole => {
-  const normalizedRole = normalizeRole(role);
-
-  if (normalizedRole === "super_admin") return "superadmin";
-  if (normalizedRole === "adminsede") return "admin_sede";
-  if (normalizedRole === "callcenter" || normalizedRole === "soporte") return "call_center";
-  if (normalizedRole === "recepcionoista") return "recepcionista";
-
-  if (normalizedRole === "superadmin") return "superadmin";
-  if (normalizedRole === "admin_sede") return "admin_sede";
-  if (normalizedRole === "recepcionista") return "recepcionista";
-  if (normalizedRole === "call_center") return "call_center";
-
-  return "admin_sede";
-};

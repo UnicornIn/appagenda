@@ -58,9 +58,17 @@ const HOURS = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => {
 const COLORS = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-amber-500', 'bg-indigo-500', 'bg-teal-500', 'bg-pink-500', 'bg-cyan-500'];
 const CELL_HEIGHT = 36;
 const CELL_WIDTH = 96;
+const MAX_STYLIST_COLUMN_WIDTH = 240;
+const CITA_TOOLTIP_WIDTH = 300;
+const TOOLTIP_MARGIN = 10;
+const normalizeRole = (role: string | null | undefined) =>
+  String(role ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 
 const CalendarScheduler: React.FC = () => {
-  const { user } = useAuth();
+  const { user, activeSedeId, setActiveSedeId } = useAuth();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedSede, setSelectedSede] = useState<Sede | null>(null);
   const [sedes, setSedes] = useState<Sede[]>([]);
@@ -101,7 +109,33 @@ const CalendarScheduler: React.FC = () => {
     return selectedSede?.sede_id || '';
   }, [selectedSede]);
 
-  // OPTIMIZADO: Cargar sedes y seleccionar RF SURAMERICANA por defecto
+  const allowedSedes = useMemo(() => {
+    const set = new Set<string>();
+    const primary = String(user?.sede_id_principal ?? "").trim();
+    if (primary) set.add(primary);
+
+    const active = String(user?.sede_id ?? "").trim();
+    if (active) set.add(active);
+
+    if (Array.isArray(user?.sedes_permitidas)) {
+      user.sedes_permitidas.forEach((sedeId) => {
+        const normalized = String(sedeId ?? "").trim();
+        if (normalized) set.add(normalized);
+      });
+    }
+
+    return set;
+  }, [user?.sede_id, user?.sede_id_principal, user?.sedes_permitidas]);
+
+  const isSuperAdmin = useMemo(
+    () => {
+      const role = normalizeRole(user?.role);
+      return role === "super_admin" || role === "superadmin";
+    },
+    [user?.role]
+  );
+
+  // Cargar sedes y respetar el contexto de sede activo.
   useEffect(() => {
     const cargarSedesInicial = async () => {
       if (!user?.access_token) return;
@@ -118,24 +152,25 @@ const CalendarScheduler: React.FC = () => {
           dataCacheRef.current.set(cacheKey, sedesData);
         }
         
-        setSedes(sedesData);
-        
-        // Buscar RF SURAMERICANA específicamente (case insensitive)
-        const suramericana = sedesData.find(sede => 
-          sede.nombre.toLowerCase().includes('suramericana') || 
-          sede.nombre.toLowerCase().includes('sur americana') ||
-          sede.nombre.toLowerCase().includes('rf suramericana') ||
-          sede.nombre.toLowerCase().includes('rf sur americana')
-        );
-        
-        // Si encontramos RF SURAMERICANA, la seleccionamos
-        if (suramericana) {
-          console.log('✅ Sede RF SURAMERICANA encontrada:', suramericana.nombre);
-          setSelectedSede(suramericana);
-        } else if (sedesData.length > 0) {
-          // Si no encontramos RF SURAMERICANA, tomar la primera
-          console.log('⚠️ RF SURAMERICANA no encontrada, usando:', sedesData[0].nombre);
-          setSelectedSede(sedesData[0]);
+        const filteredSedes = isSuperAdmin
+          ? sedesData
+          : sedesData.filter((sede) => {
+              const sedeId = String(sede.sede_id ?? "").trim();
+              return sedeId ? allowedSedes.has(sedeId) : false;
+            });
+
+        setSedes(filteredSedes);
+
+        const preferredSedeId = String(
+          activeSedeId || user?.sede_id || user?.sede_id_principal || ""
+        ).trim();
+        const preferredSede = filteredSedes.find((sede) => sede.sede_id === preferredSedeId);
+        const nextSelectedSede = preferredSede || filteredSedes[0] || null;
+
+        setSelectedSede(nextSelectedSede);
+
+        if (nextSelectedSede?.sede_id && nextSelectedSede.sede_id !== activeSedeId) {
+          setActiveSedeId(nextSelectedSede.sede_id);
         }
       } catch (error) {
         console.error('Error cargando sedes:', error);
@@ -145,7 +180,16 @@ const CalendarScheduler: React.FC = () => {
     };
     
     cargarSedesInicial();
-  }, [user]);
+  }, [
+    user?.access_token,
+    user?.sede_id,
+    user?.sede_id_principal,
+    user?.role,
+    activeSedeId,
+    allowedSedes,
+    isSuperAdmin,
+    setActiveSedeId,
+  ]);
 
   const handleCitaClick = useCallback((apt: Appointment) => {
     console.log('Cita clickeada:', apt);
@@ -469,8 +513,18 @@ const CalendarScheduler: React.FC = () => {
     if (profesionales.length === 0) return CELL_WIDTH;
     const availableWidth = Math.max(calendarViewportWidth - TIME_COLUMN_WIDTH, 0);
     if (availableWidth <= 0) return CELL_WIDTH;
-    return Math.max(CELL_WIDTH, availableWidth / profesionales.length);
+    const expandedWidth = Math.max(CELL_WIDTH, availableWidth / profesionales.length);
+    return Math.min(expandedWidth, MAX_STYLIST_COLUMN_WIDTH);
   }, [calendarViewportWidth, profesionales.length]);
+
+  const getTooltipLeft = useCallback((cursorX: number, tooltipWidth: number) => {
+    if (typeof window === "undefined") return cursorX + TOOLTIP_MARGIN;
+    const preferredRight = cursorX + TOOLTIP_MARGIN;
+    const maxLeft = window.innerWidth - tooltipWidth - TOOLTIP_MARGIN;
+
+    if (preferredRight <= maxLeft) return preferredRight;
+    return Math.max(cursorX - tooltipWidth - TOOLTIP_MARGIN, TOOLTIP_MARGIN);
+  }, []);
 
   const professionalsTrackWidth = useMemo(
     () => effectiveCellWidth * profesionales.length,
@@ -1381,6 +1435,9 @@ const CalendarScheduler: React.FC = () => {
                 onChange={(e) => {
                   const sede = sedes.find(s => s._id === e.target.value);
                   setSelectedSede(sede || null);
+                  if (sede?.sede_id) {
+                    setActiveSedeId(sede.sede_id);
+                  }
                 }}
               >
                   <option value="">Selecciona una sede</option>
@@ -1603,15 +1660,10 @@ const CalendarScheduler: React.FC = () => {
       {/* TOOLTIP DE CITA - EXACTAMENTE IGUAL */}
       {citaTooltip.visible && citaTooltip.cita && (
         <div
-          className="fixed z-50 bg-white/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-lg p-2.5 max-w-[18rem] transform -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
+          className="pointer-events-none fixed z-50 bg-white/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-lg p-2.5 max-w-[18rem] transform -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
           style={{
-            left: `${Math.min(citaTooltip.x + 10, window.innerWidth - 300)}px`,
+            left: `${getTooltipLeft(citaTooltip.x, CITA_TOOLTIP_WIDTH)}px`,
             top: `${citaTooltip.y}px`
-          }}
-          onMouseEnter={() => tooltipTimeoutRef.current && clearTimeout(tooltipTimeoutRef.current)}
-          onMouseLeave={() => {
-            if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
-            setCitaTooltip({ visible: false, x: 0, y: 0, cita: null });
           }}
         >
           <div className="flex items-center gap-1.5 mb-1.5">

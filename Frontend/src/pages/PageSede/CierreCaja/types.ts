@@ -12,6 +12,9 @@ export type CashEgreso = {
   motivo: string;
   fecha: string;
   creado_en?: string;
+  metodo_pago?: string;
+  tipo?: string;
+  concepto?: string;
 };
 
 export type CashIngreso = {
