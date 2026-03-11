@@ -133,6 +133,7 @@ async def crear_servicio(
 @router.get("/", response_model=list)
 async def listar_servicios(
     activo: bool = None,
+    sede_id: str = None,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -142,9 +143,9 @@ async def listar_servicios(
     admin_sede sin franquicia_id → globales + su sede
     super_admin                  → todos
     """
-    if current_user["rol"] == ["admin_sede", "call_center", "recepcionista"]:
+    if current_user["rol"] in ["admin_sede", "call_center", "recepcionista"]:
         sede_id = current_user.get("sede_id")
-
+        sede_activa = sede_id or current_user.get("sede_id")
         # ⭐ Intentar obtener franquicia_id (primero del token, luego de la sede)
         franquicia_id = current_user.get("franquicia_id") or await _get_franquicia_id_de_sede(sede_id)
 

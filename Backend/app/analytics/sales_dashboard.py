@@ -140,6 +140,7 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
     - metodos_pago: Por método desde desglose_pagos
     """
     metricas_por_moneda = {}
+    #organizar abonos seria tomar historial_pagos.tipo = abono_inicial 
     
     # ========= PROCESAR VENTAS =========
     for venta in ventas:
@@ -152,6 +153,7 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
                 "cantidad_ventas": 0,
                 "ventas_servicios": 0,
                 "ventas_productos": 0,
+                "abonos": 0,
                 "metodos_pago": {
                     "efectivo": 0,
                     "transferencia": 0,
@@ -163,7 +165,7 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
                     "link_de_pago": 0,
                     "tarjeta_credito": 0,
                     "tarjeta_debito": 0,
-                    "descuento_por_nomina"
+                    "descuento_por_nomina": 0,
                     "abonos": 0
                 }
             }
@@ -174,6 +176,12 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
         
         metricas_por_moneda[moneda]["ventas_totales"] += total_venta
         metricas_por_moneda[moneda]["cantidad_ventas"] += 1
+
+        # ✅ Solo tipo = "abono_inicial", sin importar el método usado
+        historial_pagos = venta.get("historial_pagos", [])
+        for pago in historial_pagos:
+            if pago.get("tipo") == "abono_inicial":
+                metricas_por_moneda[moneda]["abonos"] += pago.get("monto", 0)
         
         # Separar servicios vs productos (desde items)
         items = venta.get("items", [])
@@ -206,6 +214,7 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
         datos["ventas_totales"] = round(datos["ventas_totales"], 2)
         datos["ventas_servicios"] = round(datos["ventas_servicios"], 2)
         datos["ventas_productos"] = round(datos["ventas_productos"], 2)
+        datos["abonos"] = round(datos["abonos"], 2)
         
         # Redondear métodos de pago
         for metodo in datos["metodos_pago"]:

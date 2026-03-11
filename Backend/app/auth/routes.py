@@ -95,6 +95,7 @@ async def create_user(
     password: str = Form(...),
     rol: str = Form(...),
     sede_id: str = Form(None),
+    sedes_permitidas: List[str] = Form(None),  # ← NUEVO: array con sedes separadas por comas
     franquicia_id: str = Form(None),
     current_user: dict = Depends(get_current_user)
 ):
@@ -135,6 +136,7 @@ async def create_user(
         "hashed_password": hashed_password,
         "rol": rol,  # ⭐ ESTE ES EL ROL REAL que se usará en el login
         "sede_id": sede_id,
+        "sedes_permitidas": sedes_permitidas.split(",") if sedes_permitidas else [],  # ← Convertir a lista
         "franquicia_id": franquicia_id,
         "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "activo": True,
@@ -162,7 +164,7 @@ async def list_users(
     activo: Optional[bool] = None,      # Filtro opcional por estado
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] != "super_admin":
+    if current_user["rol"] not in ["super_admin", "admin_sede", "recepcionista"]:
         raise HTTPException(status_code=403, detail="Solo el super_admin puede listar usuarios")
 
     # Construir filtro dinámico
@@ -180,8 +182,10 @@ async def list_users(
             nombre=u.get("nombre", ""),
             correo_electronico=u.get("correo_electronico", ""),
             rol=u.get("rol", ""),
+            profesional_id=u.get("profesional_id"),
             sede_id=u.get("sede_id"),
             franquicia_id=u.get("franquicia_id"),
+            sedes_permitidas=u.get("sedes_permitidas", []),
             activo=u.get("activo", True),
             fecha_creacion=u.get("fecha_creacion"),
             creado_por=u.get("creado_por"),
@@ -448,6 +452,13 @@ async def update_user(
     # sede_id — guarda exactamente lo que llegó (str, "" o None)
     if "sede_id" in raw_changes:
         changes["sede_id"] = raw_changes["sede_id"] if raw_changes["sede_id"] else None
+
+    if "sedes_permitidas" in raw_changes:
+        val = raw_changes["sedes_permitidas"]
+        changes["sedes_permitidas"] = (
+            [s.strip() for s in val if s and str(s).strip()]
+            if val is not None else []
+        )
 
     # franquicia_id — igual
     if "franquicia_id" in raw_changes:

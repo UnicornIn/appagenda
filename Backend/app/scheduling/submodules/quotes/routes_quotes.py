@@ -98,7 +98,7 @@ async def obtener_citas(
         # ⭐ SEDE: usar la del usuario autenticado (ya viene dinámica del header X-Sede-Id)
         # Si el frontend pasa sede_id en query, validar que coincida con la sede activa
         sede_activa = current_user.get("sede_id")
-        es_super = current_user.get("rol") == "super_admin"
+        es_super = current_user.get("rol") in ["super_admin", "call_center"]
 
         if sede_id and not es_super:
             # Validar que no pida una sede diferente a la que tiene activa
