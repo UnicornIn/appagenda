@@ -199,11 +199,11 @@ def _crear_hoja_resumen_caja(ws, resumen: Dict, sede_info: Dict):
     ws[f'D{fila}'].alignment = derecha
     fila += 1
     
-    ws[f'A{fila}'] = "- Descuento por Nómina"
+    """ws[f'A{fila}'] = "- Descuento por Nómina"
     ws[f'D{fila}'] = resumen["ingresos_otros_metodos"]["descuento_por_nomina"]
     ws[f'D{fila}'].number_format = '#,##0.00'
     ws[f'D{fila}'].alignment = derecha
-    fila += 1
+    fila += 1"""
 
     ws[f'D{fila}'].border = Border(top=Side(style='thin'))
     fila += 1
