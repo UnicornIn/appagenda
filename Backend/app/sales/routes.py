@@ -6,6 +6,7 @@ from bson import ObjectId
 import random
 
 from app.auth.routes import get_current_user
+from app.utils.timezone import today_str, today
 from app.database.mongo import (
     collection_products,
     collection_clients,
@@ -115,7 +116,7 @@ async def registrar_comision_venta_directa(
                     "total_comisiones": num(nuevo_total_comision),
                     "total_servicios": num(nuevo_total_servicios),
                     "periodo_fin": hoy,
-                    "ultima_actualizacion": datetime.now(),
+                    "ultima_actualizacion": today(sede).replace(tzinfo=None)
                 },
                 "$push": {
                     "servicios_detalle": {"$each": detalle_items},
@@ -140,7 +141,7 @@ async def registrar_comision_venta_directa(
             "periodo_inicio": hoy,
             "periodo_fin": hoy,
             "estado": "pendiente",
-            "creado_en": datetime.now(),
+            "creado_en": today(sede).replace(tzinfo=None),
         }
         result = await collection_commissions.insert_one(nueva_comision)
         print(f"💰 Nueva comisión creada para {profesional_nombre}: {fmt(total_comision, moneda)}")
@@ -357,7 +358,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
     historial_pagos = []
     if abono_real > 0:
         historial_pagos.append({
-            "fecha": datetime.now(),
+            "fecha": today(sede).replace(tzinfo=None),
             "monto": num(abono_real),
             "metodo": venta.metodo_pago,
             "tipo": "pago_inicial",
@@ -371,7 +372,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
     venta_doc = {
         "identificador": identificador,
         "tipo_venta": "venta_directa",
-        "fecha_pago": datetime.now(),
+        "fecha_pago": today(sede).replace(tzinfo=None),
         "local": sede.get("nombre"),
         "sede_id": venta.sede_id,
         "moneda": moneda,
@@ -418,7 +419,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
                     },
                     "$push": {"historial": {
                         "tipo": "reserva", "venta_id": venta_id, "concepto": "venta_directa",
-                        "monto": num(abono_real), "fecha": datetime.now(), "registrado_por": email_usuario,
+                        "monto": num(abono_real), "fecha": today(sede).replace(tzinfo=None), "registrado_por": email_usuario,
                         "saldo_disponible_antes": num(saldo_gc),
                         "saldo_disponible_despues": num(nuevo_disponible_gc),
                     }}
@@ -508,12 +509,15 @@ async def registrar_pago_venta(
     data: PagoVentaRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     venta = await collection_sales.find_one({"_id": ObjectId(venta_id)})
     if not venta:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
+    sede = await collection_locales.find_one({"sede_id": venta.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     moneda = venta.get("moneda", "COP")
     saldo_pendiente_actual = round(float(venta.get("saldo_pendiente", 0)), 2)
@@ -592,7 +596,7 @@ async def registrar_pago_venta(
 
     historial_actual = venta.get("historial_pagos", [])
     historial_actual.append({
-        "fecha": datetime.now(),
+        "fecha": today(sede).replace(tzinfo=None),
         "monto": num(monto_real),
         "metodo": data.metodo_pago,
         "tipo": "pago_adicional",
@@ -614,7 +618,7 @@ async def registrar_pago_venta(
             "estado_pago": nuevo_estado,
             "historial_pagos": historial_actual,
             "desglose_pagos": desglose_actual,
-            "ultima_actualizacion": datetime.now()
+            "ultima_actualizacion": today(sede).replace(tzinfo=None)
         }}
     )
 
@@ -647,12 +651,15 @@ async def eliminar_producto_de_venta(
     producto_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No tienes permisos para eliminar productos")
 
     venta = await collection_sales.find_one({"_id": ObjectId(venta_id)})
     if not venta:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
+    sede = await collection_locales.find_one({"sede_id": venta.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     if venta.get("tipo_venta") != "venta_directa":
         raise HTTPException(status_code=400, detail="Solo se pueden eliminar productos de ventas directas")
@@ -692,7 +699,7 @@ async def eliminar_producto_de_venta(
             "desglose_pagos": desglose_actual,
             "saldo_pendiente": num(nuevo_saldo),
             "estado_pago": nuevo_estado_pago,
-            "ultima_actualizacion": datetime.now()
+            "ultima_actualizacion": today(sede).replace(tzinfo=None)
         }}
     )
 
@@ -717,12 +724,15 @@ async def eliminar_todos_productos_de_venta(
     venta_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No tienes permisos para cancelar ventas")
 
     venta = await collection_sales.find_one({"_id": ObjectId(venta_id)})
     if not venta:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
+    sede = await collection_locales.find_one({"sede_id": venta.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     if venta.get("tipo_venta") != "venta_directa":
         raise HTTPException(status_code=400, detail="Solo se pueden cancelar ventas directas")
@@ -845,8 +855,8 @@ async def eliminar_todos_productos_de_venta(
             "estado_pago": "cancelado",
             "estado_factura": "cancelado",
             "cancelado_por": current_user.get("email"),
-            "fecha_cancelacion": datetime.now(),
-            "ultima_actualizacion": datetime.now()
+            "fecha_cancelacion": today(sede).replace(tzinfo=None),
+            "ultima_actualizacion": today(sede).replace(tzinfo=None)
         }}
     )
 

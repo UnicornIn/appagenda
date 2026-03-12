@@ -147,12 +147,16 @@ def _extraer_fecha_migrado(doc: dict, fecha_fallback: str = None) -> "datetime |
 
 def _fecha_query(fecha: str) -> dict:
     """
-    Filtro MongoDB que matchea el campo 'fecha' tanto si está
-    guardado como "2025-12-12" (date-only) como si está guardado
-    como "2025-12-12 11:13:00" (datetime string).
+    Tolera ambos formatos: YYYY-MM-DD y DD-MM-YYYY.
+    fecha siempre entra como YYYY-MM-DD.
     """
-    return {"$regex": f"^{fecha}"}
+    try:
+        dt = datetime.strptime(fecha, "%Y-%m-%d")
+        fecha_invertida = dt.strftime("%d-%m-%Y")  # "11-03-2026"
+    except ValueError:
+        fecha_invertida = fecha
 
+    return {"$in": [fecha, fecha_invertida]}
 
 async def _buscar_apertura(sede_id: str, fecha: str):
     """
@@ -243,7 +247,7 @@ def _formatear_ingresos_manuales_para_flujo(
             "cedula_cliente": "",
             "email_cliente": "",
             "telefono_cliente": "",
-            "medio_pago": _normalizar_metodo(ingreso.get("metodo_pago", "")).replace("_", " ").title(),
+            "medio_pago": ingreso.get("metodo_pago", "efectivo").replace("_", " ").title(),
             "tipo_movimiento": "Ingreso Manual",
             "id_movimiento": ingreso.get("ingreso_id", ""),
             "nro_comprobante": ingreso.get("comprobante_numero", ""),
@@ -313,42 +317,19 @@ async def _ingresos_por_metodo_migrado(sede_id: str, fecha: str) -> Dict:
 
 
 async def _egresos_efectivo_migrado(sede_id: str, fecha: str) -> Dict:
-    """
-    Calcula egresos desde cash_expenses (migrado).
-    Solo considera categoria=EGRESO.
-    Los egresos migrados tienen tipo='Egresos' (genérico),
-    se agrupan todos en 'gastos_operativos'.
-    """
-    agrupados = {
-        "compras_internas" : {"total": 0, "cantidad": 0},
-        "gastos_operativos": {"total": 0, "cantidad": 0},
-        "retiros_caja"     : {"total": 0, "cantidad": 0},
-        "otros"            : {"total": 0, "cantidad": 0},
+    agrupados = { ... }  # igual que antes
+    
+    # ← AGREGAR esto al final, antes del return
+    por_metodo = {
+        "efectivo": 0, "tarjeta_credito": 0, "tarjeta_debito": 0,
+        "pos": 0, "transferencia": 0, "link_de_pago": 0,
+        "giftcard": 0, "addi": 0, "abonos": 0, "otros": 0,
     }
-
-    docs = await cash_expenses.find({
-        "sede_id"   : sede_id,
-        "fecha"     : _fecha_query(fecha),
-        "categoria" : "EGRESO",
-        "origen"    : "migracion"
-    }).to_list(None)
-
-    for d in docs:
-        tipo  = d.get("tipo", "Egresos")
-        monto = d.get("monto", 0) or 0
-
-        if tipo in agrupados:
-            agrupados[tipo]["total"]    += monto
-            agrupados[tipo]["cantidad"] += 1
-        else:
-            # Los egresos migrados llegan con tipo='Egresos' (texto del CSV)
-            # → los metemos en gastos_operativos
-            agrupados["gastos_operativos"]["total"]    += monto
-            agrupados["gastos_operativos"]["cantidad"] += 1
-
-    agrupados["total"] = sum(
-        cat["total"] for cat in agrupados.values() if isinstance(cat, dict)
-    )
+    # Los migrados no tienen metodo_pago → todos van a efectivo por defecto
+    por_metodo["efectivo"] = agrupados["total"]
+    
+    agrupados["por_metodo"]     = por_metodo
+    agrupados["total_efectivo"] = por_metodo["efectivo"]
     return agrupados
 
 
@@ -707,8 +688,12 @@ async def calcular_ingresos_por_metodo_pago(
                 metodos[metodo_norm] = 0
             metodos[metodo_norm] += monto
 
+    abonos_valor = metodos.pop("abonos", 0)  # sacar del dict principal
+    metodos["abonos_informativos"] = abonos_valor
+
     metodos["total_general"] = sum(
-        monto for key, monto in metodos.items() if key != "total_general"
+        monto for key, monto in metodos.items()
+        if key not in ("total_general", "abonos_informativos")
     )
     return metodos
 
@@ -724,15 +709,21 @@ async def calcular_egresos_efectivo(
         "otros"            : {"total": 0, "cantidad": 0},
     }
 
+    # ← NUEVO: desglose por método de pago
+    por_metodo = {
+        "efectivo": 0, "tarjeta_credito": 0, "tarjeta_debito": 0,
+        "pos": 0, "transferencia": 0, "link_de_pago": 0,
+        "giftcard": 0, "addi": 0, "abonos": 0, "otros": 0,
+    }
+
     for egreso in await cash_expenses.find({
-        "sede_id": sede_id,
-        "fecha"  : fecha,
-        # Excluir documentos migrados: la rama normal solo lee egresos
-        # propios del sistema (sin campo 'origen').
-        "origen" : {"$ne": "migracion"}
+    "sede_id": sede_id,
+    "fecha"  : _fecha_query(fecha),
+    "origen" : {"$ne": "migracion"}
     }).to_list(None):
         tipo  = egreso.get("tipo", "otro")
         monto = egreso.get("monto", 0)
+        metodo = _normalizar_metodo(egreso.get("metodo_pago", "efectivo"))  # ← NUEVO
         if tipo in agrupados:
             agrupados[tipo]["total"]    += monto
             agrupados[tipo]["cantidad"] += 1
@@ -740,9 +731,12 @@ async def calcular_egresos_efectivo(
             agrupados["otros"]["total"]    += monto
             agrupados["otros"]["cantidad"] += 1
 
-    agrupados["total"] = sum(
-        cat["total"] for cat in agrupados.values() if isinstance(cat, dict)
-    )
+        if metodo not in por_metodo:
+            por_metodo[metodo] = 0
+        por_metodo[metodo] += monto
+
+    agrupados["por_metodo"] = por_metodo           # ← NUEVO
+    agrupados["total_efectivo"] = por_metodo.get("efectivo", 0)  # ← NUEVO
     return agrupados
 
 
@@ -886,14 +880,13 @@ async def _obtener_egresos_dia_sistema(
 
     for e in await cash_expenses.find({
         "sede_id": sede_id,
-        "fecha"  : fecha,
-        # Excluir documentos migrados: solo egresos propios del sistema
+        "fecha"  : _fecha_query(fecha),
         "origen" : {"$ne": "migracion"}
     }).sort("creado_en", 1).to_list(None):
         egresos_formateados.append({
             "fecha"          : e.get("creado_en", ""),
             "concepto"       : e.get("concepto", ""),
-            "medio_pago"     : "Efectivo",
+            "medio_pago"     : e.get("metodo_pago", "efectivo").replace("_", " ").title(),  # ← FIX
             "tipo_movimiento": "Egresos",
             "id_egreso"      : e.get("egreso_id", ""),
             "nro_comprobante": e.get("comprobante_numero", ""),
@@ -1039,9 +1032,12 @@ async def _obtener_movimientos_efectivo_dia_sistema(
     # =========================================================
     for e in await cash_expenses.find({
         "sede_id": sede_id,
-        "fecha"  : fecha,
+        "fecha"  : _fecha_query(fecha),
         "origen" : {"$ne": "migracion"}
     }).sort("creado_en", 1).to_list(None):
+        metodo = _normalizar_metodo(e.get("metodo_pago", "efectivo"))
+        if metodo != "efectivo":
+            continue   # ← transferencias, tarjetas, etc. NO tocan la caja física
         movimientos.append({
             "fecha"      : e.get("creado_en"),
             "tipo"       : "EGRESO",
@@ -1142,7 +1138,8 @@ async def calcular_resumen_dia(
     ingresos_info["manuales_efectivo"] = total_manual_efectivo
     ingresos_info["total"] = total_ingresos_efectivo
 
-    efectivo_esperado = efectivo_inicial + total_ingresos_efectivo - egresos["total"]
+    total_egresos_efectivo = egresos.get("total_efectivo", egresos.get("total", 0))  # fallback para datos migrados
+    efectivo_esperado = efectivo_inicial + total_ingresos_efectivo - total_egresos_efectivo
 
     return {
         "sede_id"         : sede_id,
@@ -1167,6 +1164,7 @@ async def calcular_resumen_dia(
             )
         },
         "egresos"          : egresos,
+        "egresos_por_metodo": egresos.get("por_metodo", {}),
         "efectivo_esperado": efectivo_esperado,
         "total_vendido"    : ingresos_discriminados.get("total_general", 0),
         "efectivo_contado" : None,

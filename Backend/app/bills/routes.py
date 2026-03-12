@@ -9,6 +9,7 @@ from datetime import timedelta
 from app.database.mongo import collection_giftcards
 from app.giftcards.routes_giftcards import _estado_giftcard
 from app.cash.utils_cash import fecha_a_datetime
+from app.utils.timezone import today_str, today
 
 from app.database.mongo import (
     collection_citas,
@@ -272,7 +273,7 @@ async def facturar_cita_o_venta(
     # ====================================
     numero_comprobante = generar_numero_comprobante()
     identificador = generar_identificador()
-    fecha_actual = datetime.now()
+    fecha_actual = today(sede).replace(tzinfo=None)
 
     # ====================================
     # 7️⃣ HISTORIAL Y DESGLOSE DE PAGOS
@@ -715,11 +716,15 @@ async def obtener_ventas_sede(
     sort_order: str = Query("desc", regex=r"^(asc|desc)$"),
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin",]:
+    if current_user["rol"] not in ["admin_sede", "super_admin","recepcionista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     try:
         filtros = {"sede_id": sede_id}
+
+        sede = await collection_locales.find_one({"sede_id": sede_id})
+        if not sede:
+            raise HTTPException(status_code=404, detail="Sede no encontrada")
 
         if fecha_desde or fecha_hasta:
             filtros["fecha_pago"] = {}
@@ -729,7 +734,7 @@ async def obtener_ventas_sede(
                 fecha_fin = fecha_a_datetime(fecha_hasta).replace(hour=23, minute=59, second=59)
                 filtros["fecha_pago"]["$lte"] = fecha_fin
         elif not profesional_id and not search:
-            fecha_fin = datetime.now()
+            fecha_fin = today(sede).replace(tzinfo=None)
             filtros["fecha_pago"] = {"$gte": fecha_fin - timedelta(days=7), "$lte": fecha_fin}
 
         condiciones_or = []
@@ -808,7 +813,7 @@ async def obtener_ventas_sede(
 # ============================================================
 @router.get("/sales/{sede_id}/{venta_id}")
 async def obtener_detalle_venta(sede_id: str, venta_id: str, current_user: dict = Depends(get_current_user)):
-    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     try:
