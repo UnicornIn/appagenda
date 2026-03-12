@@ -27,6 +27,7 @@ from app.database.mongo import (
 )
 from app.cash.utils_cash import fecha_a_datetime
 from app.auth.routes import get_current_user
+from app.utils.timezone import today_str, today
 
 
 router = APIRouter()
@@ -365,7 +366,7 @@ async def crear_cita(
     historial_pagos = []
     if abono > 0:
         historial_pagos.append({
-            "fecha": datetime.now(),
+            "fecha": today(sede).replace(tzinfo=None),
             "monto": float(abono),
             "metodo": cita.metodo_pago_inicial,
             "tipo": "abono_inicial",
@@ -470,8 +471,8 @@ async def crear_cita(
         # Metadata
         "creada_por": current_user.get("email"),
         "creada_por_rol": current_user.get("rol"),
-        "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "ultima_actualizacion": datetime.now()
+        "fecha_creacion": today(sede).replace(tzinfo=None),
+        "ultima_actualizacion": today(sede).replace(tzinfo=None),
     }
 
     # Guardar en BD
@@ -1419,7 +1420,7 @@ async def editar_cita(
                 "comision_valor": comision_valor,
                 "agregado_por_email": current_user.get("email"),
                 "agregado_por_rol": current_user.get("rol"),
-                "fecha_agregado": datetime.now(),
+                "fecha_agregado": today_str(sede),
                 "profesional_id": profesional_para_producto
             })
 
@@ -1537,7 +1538,7 @@ async def editar_cita(
     # ====================================
     # ⭐ Actualizar timestamp
     # ====================================
-    cambios["ultima_actualizacion"] = datetime.now()
+    cambios["ultima_actualizacion"] = today_str(sede)
 
     # ====================================
     # Ejecutar actualización
@@ -1564,6 +1565,9 @@ async def cancelar_cita(cita_id: str, current_user: dict = Depends(get_current_u
     cita = await resolve_cita_by_id(cita_id)
     if not cita:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
+    sede = await collection_locales.find_one({"sede_id": cita.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     if current_user.get("rol") == "usuario":
         if cita.get("cliente_id") != current_user.get("user_id") and cita.get("cliente_id") != current_user.get("cliente_id"):
@@ -1571,7 +1575,7 @@ async def cancelar_cita(cita_id: str, current_user: dict = Depends(get_current_u
 
     await collection_citas.update_one({"_id": ObjectId(cita["_id"])}, {"$set": {
         "estado": "cancelada",
-        "fecha_cancelacion": datetime.now(),
+        "fecha_cancelacion": today_str(sede),
         "cancelada_por": current_user.get("email")
     }})
 
@@ -1629,11 +1633,14 @@ async def confirmar_cita(cita_id: str, current_user: dict = Depends(get_current_
     cita = await resolve_cita_by_id(cita_id)
     if not cita:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
+    sede = await collection_locales.find_one({"sede_id": cita.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     await collection_citas.update_one({"_id": ObjectId(cita["_id"])}, {"$set": {
         "estado": "confirmada",
         "confirmada_por": current_user.get("email"),
-        "fecha_confirmacion": datetime.now()
+        "fecha_confirmacion": today_str(sede)
     }})
 
     return {"success": True, "mensaje": "Cita confirmada", "cita_id": cita_id}
@@ -1666,6 +1673,9 @@ async def registrar_pago(
     cita = await collection_citas.find_one({"_id": ObjectId(cita_id)})
     if not cita:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
+    sede = await collection_locales.find_one({"sede_id": cita.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     if cita.get("estado_factura") == "facturado":
         raise HTTPException(status_code=400, detail="La cita ya fue facturada")
@@ -1754,7 +1764,7 @@ async def registrar_pago(
     estado_pago = "pagado" if nuevo_saldo_pendiente <= 0 else "abonado"
 
     nuevo_pago = {
-        "fecha": datetime.now(),
+        "fecha": today(sede).replace(tzinfo=None),
         "monto": num(monto_real),
         "metodo": data.metodo_pago,
         "tipo": "pago_adicional",
@@ -1769,7 +1779,7 @@ async def registrar_pago(
         "saldo_pendiente": num(nuevo_saldo_pendiente),
         "estado_pago": estado_pago,
         "metodo_pago_actual": data.metodo_pago,
-        "ultima_actualizacion": datetime.now()
+        "ultima_actualizacion": today(sede).replace(tzinfo=None)
     }
     if codigo_giftcard_usado and not cita.get("codigo_giftcard"):
         update_set["codigo_giftcard"] = codigo_giftcard_usado
@@ -1841,11 +1851,14 @@ async def completar_cita(cita_id: str, current_user: dict = Depends(get_current_
     cita = await resolve_cita_by_id(cita_id)
     if not cita:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
+    sede = await collection_locales.find_one({"sede_id": cita.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     await collection_citas.update_one({"_id": ObjectId(cita["_id"])}, {"$set": {
         "estado": "completada",
         "completada_por": current_user.get("email"),
-        "fecha_completada": datetime.now()
+        "fecha_completada": today(sede).replace(tzinfo=None)
     }})
 
     return {"success": True, "mensaje": "Cita completada", "cita_id": cita_id}
@@ -1859,10 +1872,14 @@ async def no_asistio(cita_id: str, current_user: dict = Depends(get_current_user
     if not cita:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
 
+    sede = await collection_locales.find_one({"sede_id": cita.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
+
     await collection_citas.update_one({"_id": ObjectId(cita["_id"])}, {"$set": {
         "estado": "no_asistio",
         "marcada_no_asistio_por": current_user.get("email"),
-        "fecha_no_asistio": datetime.now()
+        "fecha_no_asistio": today(sede).replace(tzinfo=None)
     }})
 
     return {"success": True, "mensaje": "Marcada como no asistió", "cita_id": cita_id}
@@ -2238,7 +2255,7 @@ async def agregar_productos_a_cita(
             "comision_valor": comision_producto,
             "agregado_por_email": email_usuario,
             "agregado_por_rol": rol_usuario,
-            "fecha_agregado": datetime.now(),
+            "fecha_agregado": today_str(sede),
         }
         
         # Si es estilista, guardar su profesional_id para comisiones
@@ -2277,7 +2294,7 @@ async def agregar_productos_a_cita(
                 "valor_total": nuevo_total,
                 "saldo_pendiente": nuevo_saldo,
                 "estado_pago": nuevo_estado_pago,
-                "ultima_actualizacion": datetime.utcnow()
+                "ultima_actualizacion": today(sede).replace(tzinfo=None)
             }
         }
     )
@@ -2327,6 +2344,9 @@ async def eliminar_producto_de_cita(
     cita = await collection_citas.find_one({"_id": ObjectId(cita_id)})
     if not cita:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
+    sede = await collection_locales.find_one({"sede_id": cita.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     # Verificar que la cita tenga productos
     productos_actuales = cita.get("productos", [])
@@ -2379,7 +2399,7 @@ async def eliminar_producto_de_cita(
                 "valor_total": nuevo_total,
                 "saldo_pendiente": nuevo_saldo,
                 "estado_pago": nuevo_estado_pago,
-                "ultima_actualizacion": datetime.now()
+                "ultima_actualizacion": today(sede).replace(tzinfo=None)
             }
         }
     )
@@ -2421,6 +2441,9 @@ async def eliminar_todos_productos_de_cita(
     cita = await collection_citas.find_one({"_id": ObjectId(cita_id)})
     if not cita:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
+    sede = await collection_locales.find_one({"sede_id": cita.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
 
     # Verificar que la cita tenga productos
     productos_actuales = cita.get("productos", [])
@@ -2457,7 +2480,7 @@ async def eliminar_todos_productos_de_cita(
                 "valor_total": nuevo_total,
                 "saldo_pendiente": nuevo_saldo,
                 "estado_pago": nuevo_estado_pago,
-                "ultima_actualizacion": datetime.now()
+                "ultima_actualizacion": today(sede).replace(tzinfo=None)
             }
         }
     )
@@ -2497,12 +2520,16 @@ async def finalizar_servicio_con_pdf(
     if not ficha:
         raise HTTPException(status_code=404, detail="No se encontró ficha técnica asociada a esta cita")
 
+    sede = await collection_locales.find_one({"sede_id": cita.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
+
     # Actualizar estado
     await collection_citas.update_one(
         {"_id": ObjectId(cita_id)},
         {"$set": {
             "estado":             "finalizado",
-            "fecha_finalizacion": datetime.now(),
+            "fecha_finalizacion": today(sede).replace(tzinfo=None),
             "finalizado_por":     current_user.get("email")
         }}
     )
@@ -2520,7 +2547,7 @@ async def finalizar_servicio_con_pdf(
         {"_id": ObjectId(cita_id)},
         {"$set": {
             "pdf_generado":         pdf_result["pdf_generado"],
-            "pdf_fecha_generacion": datetime.now(),
+            "pdf_fecha_generacion": today(sede).replace(tzinfo=None),
             "pdf_enviado":          pdf_result["pdf_enviado"]
         }}
     )

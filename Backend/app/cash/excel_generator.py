@@ -53,6 +53,10 @@ def generar_reporte_excel_caja_completo(
     # Hoja 4: Movimientos Efectivo
     ws_movimientos = wb.create_sheet("Movimientos Efectivo")
     _crear_hoja_movimientos_efectivo(ws_movimientos, sede_info, fecha_inicio, fecha_fin, movimientos_efectivo)
+
+    # Hoja 5: Flujo por Método de Pago
+    ws_metodos = wb.create_sheet("Flujo por Método")
+    _crear_hoja_flujo_por_metodo(ws_metodos, resumen, sede_info, fecha_inicio, fecha_fin)
     
     # Guardar en memoria
     excel_file = BytesIO()
@@ -221,28 +225,56 @@ def _crear_hoja_resumen_caja(ws, resumen: Dict, sede_info: Dict):
     ws[f'A{fila}'].font = header_font
     ws[f'A{fila}'].fill = relleno_gris
     fila += 1
-    
-    ws[f'A{fila}'] = "- Compras Internas"
-    ws[f'D{fila}'] = resumen["egresos"]["compras_internas"]["total"]
-    ws[f'D{fila}'].number_format = '#,##0.00'
-    ws[f'D{fila}'].alignment = derecha
+
+    # --- Por categoría ---
+    ws[f'A{fila}'] = "Por tipo:"
+    ws[f'A{fila}'].font = header_font
     fila += 1
-    
-    ws[f'A{fila}'] = "- Gastos Operativos"
-    ws[f'D{fila}'] = resumen["egresos"]["gastos_operativos"]["total"]
-    ws[f'D{fila}'].number_format = '#,##0.00'
-    ws[f'D{fila}'].alignment = derecha
+
+    for clave, label in [
+        ("compras_internas",  "  · Compras Internas"),
+        ("gastos_operativos", "  · Gastos Operativos"),
+        ("retiros_caja",      "  · Retiros de Caja"),
+        ("otros",             "  · Otros"),
+    ]:
+        valor = resumen["egresos"].get(clave, {}).get("total", 0) or 0
+        ws[f'A{fila}'] = label
+        ws[f'D{fila}'] = valor
+        ws[f'D{fila}'].number_format = '#,##0.00'
+        ws[f'D{fila}'].alignment = derecha
+        fila += 1
+
+    fila += 1  # espacio
+
+    # --- Por método ---
+    ws[f'A{fila}'] = "Por método de pago:"
+    ws[f'A{fila}'].font = header_font
     fila += 1
-    
-    ws[f'A{fila}'] = "- Retiros"
-    ws[f'D{fila}'] = resumen["egresos"]["retiros_caja"]["total"]
-    ws[f'D{fila}'].number_format = '#,##0.00'
-    ws[f'D{fila}'].alignment = derecha
-    fila += 1
-    
+
+    egresos_metodo = resumen.get("egresos", {}).get("por_metodo", {})
+    LABELS_EGRESO = {
+        "efectivo":        "  · Efectivo",
+        "transferencia":   "  · Transferencia",
+        "tarjeta_credito": "  · Tarjeta Crédito",
+        "tarjeta_debito":  "  · Tarjeta Débito",
+        "pos":             "  · POS",
+        "link_de_pago":    "  · Link de Pago",
+        "giftcard":        "  · Giftcard",
+        "addi":            "  · Addi",
+        "otros":           "  · Otros",
+    }
+    for clave, label in LABELS_EGRESO.items():
+        valor = float(egresos_metodo.get(clave, 0) or 0)
+        if valor > 0:
+            ws[f'A{fila}'] = label
+            ws[f'D{fila}'] = valor
+            ws[f'D{fila}'].number_format = '#,##0.00'
+            ws[f'D{fila}'].alignment = derecha
+            fila += 1
+
     ws[f'D{fila}'].border = Border(top=Side(style='thin'))
     fila += 1
-    
+
     ws[f'A{fila}'] = "Total Egresos (-)"
     ws[f'A{fila}'].font = total_font
     ws[f'D{fila}'] = resumen["egresos"]["total"]
@@ -564,6 +596,111 @@ def _crear_hoja_movimientos_efectivo(
     # Anchos
     anchos = [18, 15, 40, 15, 15, 15, 15]
     for col, ancho in enumerate(anchos, start=1):
+        ws.column_dimensions[get_column_letter(col)].width = ancho
+
+def _crear_hoja_flujo_por_metodo(ws, resumen: Dict, sede_info: Dict, fecha_inicio: str, fecha_fin: str):
+    """Hoja 5: Reconciliación de ingresos y egresos por método de pago."""
+    
+    titulo_font  = Font(name='Arial', size=14, bold=True)
+    header_font  = Font(name='Arial', size=10, bold=True)
+    total_font   = Font(name='Arial', size=11, bold=True)
+    centro       = Alignment(horizontal='center', vertical='center')
+    derecha      = Alignment(horizontal='right',  vertical='center')
+    relleno_gris = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
+    relleno_verde= PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    relleno_rojo = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+
+    fila = 1
+    ws.merge_cells(f'A{fila}:D{fila}')
+    ws[f'A{fila}'] = "FLUJO POR MÉTODO DE PAGO"
+    ws[f'A{fila}'].font = titulo_font
+    ws[f'A{fila}'].alignment = centro
+    fila += 1
+
+    ws.merge_cells(f'A{fila}:D{fila}')
+    ws[f'A{fila}'] = sede_info.get("razon_social", "")
+    ws[f'A{fila}'].font = header_font
+    ws[f'A{fila}'].alignment = centro
+    fila += 2
+
+    ws[f'A{fila}'] = "Inicio:"; ws[f'B{fila}'] = f"{fecha_inicio} 00:00"
+    ws[f'A{fila}'].font = header_font; fila += 1
+    ws[f'A{fila}'] = "Fin:";    ws[f'B{fila}'] = f"{fecha_fin} 23:59"
+    ws[f'A{fila}'].font = header_font; fila += 2
+
+    # Headers
+    for col, texto in enumerate(["Método de Pago", "Ingresos (+)", "Egresos (-)", "Neto"], 1):
+        c = ws.cell(row=fila, column=col)
+        c.value = texto
+        c.font  = header_font
+        c.alignment = centro
+        c.fill  = relleno_gris
+    fila += 1
+
+    # Datos por método
+    ingresos_otros = resumen.get("ingresos_otros_metodos", {})
+    ingresos_efectivo = float(resumen.get("ingresos_efectivo", {}).get("total", 0) or 0)
+    egresos_metodo = resumen.get("egresos_por_metodo",
+                     resumen.get("egresos", {}).get("por_metodo", {}))
+
+    METODOS = [
+        ("efectivo",        "Efectivo",        ingresos_efectivo),
+        ("tarjeta_credito", "Tarjeta Crédito", ingresos_otros.get("tarjeta_credito", 0)),
+        ("tarjeta_debito",  "Tarjeta Débito",  ingresos_otros.get("tarjeta_debito", 0)),
+        ("pos",             "POS",             ingresos_otros.get("pos", 0)),
+        ("transferencia",   "Transferencia",   ingresos_otros.get("transferencia", 0)),
+        ("link_de_pago",    "Link de Pago",    ingresos_otros.get("link_de_pago", 0)),
+        ("giftcard",        "Giftcard",        ingresos_otros.get("giftcard", 0)),
+        ("addi",            "Addi",            ingresos_otros.get("addi", 0)),
+        ("abonos",          "Abonos",          ingresos_otros.get("abonos", 0)),
+        ("otros",           "Otros",           ingresos_otros.get("otros", 0)),
+    ]
+
+    total_ing = total_egr = 0.0
+
+    for clave, label, ingreso in METODOS:
+        egreso = float(egresos_metodo.get(clave, 0) or 0)
+        ingreso = float(ingreso or 0)
+        if ingreso == 0 and egreso == 0:
+            continue  # omite filas vacías
+        neto = ingreso - egreso
+        total_ing += ingreso
+        total_egr += egreso
+
+        ws.cell(row=fila, column=1).value = label
+        ws.cell(row=fila, column=2).value = ingreso
+        ws.cell(row=fila, column=2).number_format = '#,##0.00'
+        ws.cell(row=fila, column=2).alignment = derecha
+        ws.cell(row=fila, column=3).value = egreso
+        ws.cell(row=fila, column=3).number_format = '#,##0.00'
+        ws.cell(row=fila, column=3).alignment = derecha
+        ws.cell(row=fila, column=4).value = neto
+        ws.cell(row=fila, column=4).number_format = '#,##0.00'
+        ws.cell(row=fila, column=4).alignment = derecha
+        ws.cell(row=fila, column=4).fill = relleno_verde if neto >= 0 else relleno_rojo
+        fila += 1
+
+    # Totales
+    fila += 1
+    ws.cell(row=fila, column=1).value = "TOTAL"
+    ws.cell(row=fila, column=1).font  = total_font
+    ws.cell(row=fila, column=2).value = total_ing
+    ws.cell(row=fila, column=2).number_format = '#,##0.00'
+    ws.cell(row=fila, column=2).font  = total_font
+    ws.cell(row=fila, column=2).alignment = derecha
+    ws.cell(row=fila, column=3).value = total_egr
+    ws.cell(row=fila, column=3).number_format = '#,##0.00'
+    ws.cell(row=fila, column=3).font  = total_font
+    ws.cell(row=fila, column=3).alignment = derecha
+    neto_total = total_ing - total_egr
+    ws.cell(row=fila, column=4).value = neto_total
+    ws.cell(row=fila, column=4).number_format = '#,##0.00'
+    ws.cell(row=fila, column=4).font  = total_font
+    ws.cell(row=fila, column=4).alignment = derecha
+    ws.cell(row=fila, column=4).fill = relleno_verde if neto_total >= 0 else relleno_rojo
+
+    # Anchos
+    for col, ancho in enumerate([25, 18, 18, 18], 1):
         ws.column_dimensions[get_column_letter(col)].width = ancho
 
 # ============================================================

@@ -73,7 +73,7 @@ async def crear_cliente(
 ):
     try:
         rol = current_user.get("rol")
-        if rol not in ["admin_sede", "admin_franquicia", "super_admin"]:
+        if rol not in ["admin_sede", "admin_franquicia", "super_admin", "call_center", "recepcionista"]:
             raise HTTPException(403, "No autorizado")
 
         sede_autenticada = current_user.get("sede_id")

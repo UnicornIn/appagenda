@@ -158,7 +158,7 @@ async def registrar_egreso(
 ):
     """Registra un egreso de efectivo."""
     
-    fecha = egreso.fecha or datetime.now().strftime("%Y-%m-%d")
+    fecha = normalizar_fecha(egreso.fecha) if egreso.fecha else datetime.now().strftime("%Y-%m-%d")
     
     sede = await locales.find_one({"sede_id": egreso.sede_id})
     sede_nombre = sede.get("nombre") if sede else None
@@ -171,6 +171,7 @@ async def registrar_egreso(
         "descripcion": egreso.descripcion,
         "monto": egreso.monto,
         "moneda": egreso.moneda.value,
+        "metodo_pago": egreso.metodo_pago.value,
         "fecha": fecha,
         "registrado_por": current_user["email"],
         "registrado_por_nombre": current_user.get("nombre"),
@@ -199,6 +200,7 @@ async def registrar_egreso(
         descripcion=egreso_doc["descripcion"],
         monto=egreso_doc["monto"],
         moneda=egreso_doc["moneda"],
+        metodo_pago=egreso_doc["metodo_pago"],
         fecha=egreso_doc["fecha"],
         registrado_por=egreso_doc["registrado_por"],
         registrado_por_nombre=egreso_doc.get("registrado_por_nombre"),
@@ -360,6 +362,7 @@ async def listar_egresos(
                 descripcion=e.get("descripcion") or e.get("motivo"),
                 monto=float(e.get("monto", 0) or 0),
                 moneda=str(e.get("moneda", "COP")),
+                metodo_pago=str(e.get("metodo_pago", "efectivo")),
                 fecha=_as_date_string(e.get("fecha"), inicio),
                 registrado_por=str(e.get("registrado_por") or e.get("usuario_modificacion") or "sistema"),
                 registrado_por_nombre=e.get("registrado_por_nombre"),
@@ -796,6 +799,11 @@ async def _build_period_report_data(
             "otros": {"total": 0.0, "cantidad": 0},
             "total": 0.0,
         },
+        "egresos_por_metodo": {   # ← NUEVO
+            "efectivo": 0.0, "tarjeta_credito": 0.0, "tarjeta_debito": 0.0,
+            "pos": 0.0, "transferencia": 0.0, "link_de_pago": 0.0,
+            "giftcard": 0.0, "addi": 0.0, "abonos": 0.0, "otros": 0.0,
+        },
         "efectivo_esperado": 0.0,
         "total_vendido": 0.0,
         "efectivo_contado": None,
@@ -819,6 +827,13 @@ async def _build_period_report_data(
         for key in ingresos_otros_keys:
             resumen_total["ingresos_otros_metodos"][key] += float(
                 ingresos_otros.get(key, 0) or 0
+            )
+        
+        egresos_metodo_dia = resumen_dia.get("egresos_por_metodo", 
+                            resumen_dia.get("egresos", {}).get("por_metodo", {}))
+        for metodo in resumen_total["egresos_por_metodo"]:
+            resumen_total["egresos_por_metodo"][metodo] += float(
+                egresos_metodo_dia.get(metodo, 0) or 0
             )
 
         egresos_dia = resumen_dia.get("egresos", {})
