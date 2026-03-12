@@ -92,7 +92,9 @@ export function FacturaDetailModal({ factura, open, onOpenChange }: FacturaDetai
   }
 
   const getStatusIcon = (estado: string) => {
-    return estado === "pagado" ? (
+    const normalized = String(estado || "").trim().toLowerCase()
+
+    return normalized === "pagado" ? (
       <CheckCircle className="h-4 w-4 text-emerald-600" />
     ) : (
       <Clock className="h-4 w-4 text-amber-600" />
@@ -100,9 +102,17 @@ export function FacturaDetailModal({ factura, open, onOpenChange }: FacturaDetai
   }
 
   const getStatusColor = (estado: string) => {
-    return estado === "pagado"
-      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-      : "bg-amber-50 text-amber-700 border-amber-200"
+    const normalized = String(estado || "").trim().toLowerCase()
+
+    if (normalized === "pagado") {
+      return "bg-emerald-50 text-emerald-700 border-emerald-200"
+    }
+
+    if (normalized === "abonado") {
+      return "bg-yellow-50 text-yellow-700 border-yellow-200"
+    }
+
+    return "bg-amber-50 text-amber-700 border-amber-200"
   }
 
   // Función para obtener el icono según el tipo de item

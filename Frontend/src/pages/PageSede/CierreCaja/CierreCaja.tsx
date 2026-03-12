@@ -969,13 +969,6 @@ export default function CierreCajaPage() {
       });
 
       await loadAll();
-      const reporteCierre = await cashService.getReportePeriodo({
-        sede_id: sedeId,
-        fecha_inicio: cierreFecha,
-        fecha_fin: cierreFecha,
-      });
-      setReportePeriodo(reporteCierre);
-      setResumen(normalizeResumen(reporteCierre));
     } catch (err: any) {
       setError(err?.message || "No se pudo cerrar la caja");
     } finally {
@@ -1257,9 +1250,11 @@ export default function CierreCajaPage() {
     };
   }, [reportePeriodo, fechaDesde, fechaHasta]);
 
+  const showManualCashForms = false;
+
   const handleDescargarReporte = async () => {
     if (!sedeId) return;
-    const { start, end } = normalizeDateRange(cierreFecha, cierreFecha);
+    const { start, end } = normalizeDateRange(fechaDesde, fechaHasta);
     if (!start || !end) return;
 
     setDescargandoReporte(true);
@@ -1274,7 +1269,7 @@ export default function CierreCajaPage() {
       const blobUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = blobUrl;
-      anchor.download = filename || `reporte_caja_${start}.xlsx`;
+      anchor.download = filename || `reporte_caja_${start}${start !== end ? `_a_${end}` : ""}.xlsx`;
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
@@ -1664,6 +1659,7 @@ export default function CierreCajaPage() {
                 </Card>
               ) : null}
 
+              {showManualCashForms ? (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <Card className="border-[#d7d4df] bg-white/80 shadow-none">
                   <CardHeader className="border-b border-[#e3e0ea] pb-2">
@@ -1797,6 +1793,7 @@ export default function CierreCajaPage() {
                   </CardContent>
                 </Card>
               </div>
+              ) : null}
 
               <Card className="border-[#d7d4df] bg-white/80 shadow-none">
                 <CardHeader className="border-b border-[#e3e0ea] pb-2">
@@ -1807,31 +1804,31 @@ export default function CierreCajaPage() {
                     <table className="min-w-full text-sm">
                       <thead className="bg-[#eeebf4] text-left text-sm font-medium text-[#5f5c69]">
                         <tr>
-                          <th className="px-3 py-2">Hora</th>
+                          {/* <th className="px-3 py-2">Hora</th> */}
                           <th className="px-3 py-2">Tipo</th>
                           <th className="px-3 py-2">Concepto</th>
-                          <th className="px-3 py-2">Medio</th>
+                          {/* <th className="px-3 py-2">Medio</th> */}
                           <th className="px-3 py-2 text-right">Monto</th>
-                          <th className="px-3 py-2 text-right">Efectivo esperado</th>
+                          {/* <th className="px-3 py-2 text-right">Efectivo esperado</th> */}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#ece9f2] text-[#3d3a46]">
                         {loadingIngresos || loadingEgresos ? (
                           <tr>
-                            <td colSpan={6} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={3} className="px-3 py-6 text-center text-sm text-[#6b6878]">
                               Cargando movimientos...
                             </td>
                           </tr>
                         ) : movimientosConSaldo.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={3} className="px-3 py-6 text-center text-sm text-[#6b6878]">
                               No hay movimientos registrados para el día.
                             </td>
                           </tr>
                         ) : (
                           movimientosConSaldo.map((movimiento) => (
                             <tr key={movimiento.id}>
-                              <td className="px-3 py-2 font-medium text-[#2e2d35]">{movimiento.hora}</td>
+                              {/* <td className="px-3 py-2 font-medium text-[#2e2d35]">{movimiento.hora}</td> */}
                               <td className="px-3 py-2">
                                 <span
                                   className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${
@@ -1844,13 +1841,13 @@ export default function CierreCajaPage() {
                                 </span>
                               </td>
                               <td className="px-3 py-2">{movimiento.detalle}</td>
-                              <td className="px-3 py-2">{movimiento.medio}</td>
+                              {/* <td className="px-3 py-2">{movimiento.medio}</td> */}
                               <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
                                 {formatSignedMoney(movimiento.monto)}
                               </td>
-                              <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
+                              {/* <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
                                 {formatMoney(movimiento.saldo_esperado)}
-                              </td>
+                              </td> */}
                             </tr>
                           ))
                         )}

@@ -195,6 +195,20 @@ export function VentasFacturadasList() {
     return `${safeCurrency} ${Math.round(safeAmount).toLocaleString(getCurrencyLocale(safeCurrency))}`
   }
 
+  const getStatusBadgeClass = (estado: string) => {
+    const normalized = String(estado || "").trim().toLowerCase()
+
+    if (normalized === "pagado") {
+      return "bg-green-100 text-green-800"
+    }
+
+    if (normalized === "abonado") {
+      return "bg-amber-100 text-amber-800"
+    }
+
+    return "bg-yellow-100 text-yellow-800"
+  }
+
   const summaryCurrency = (facturas[0]?.moneda || "COP").toUpperCase()
 
   const formatSummaryCurrency = (amount: number) => {
@@ -463,11 +477,7 @@ export function VentasFacturadasList() {
                         </td>
                         <td className="px-6 py-4">
                           <span
-                            className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${
-                              factura.estado === "pagado" 
-                                ? "bg-green-100 text-green-800" 
-                                : "bg-yellow-100 text-yellow-800"
-                            }`}
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${getStatusBadgeClass(factura.estado)}`}
                           >
                             {factura.estado}
                           </span>
