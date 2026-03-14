@@ -5,6 +5,7 @@ import { X, ArrowLeft, CheckCircle, CreditCard, DollarSign, Calendar, Clock, Use
 import { crearCita } from '../../../../components/Quotes/citasApi'
 import { useAuth } from '../../../../components/Auth/AuthContext'
 import { getStoredCurrency, normalizeCurrencyCode } from "../../../../lib/currency"
+import { getPaymentMethodLabel, normalizePaymentMethodForBackend, PAYROLL_PAYMENT_METHOD } from "../../../../lib/payment-methods"
 
 // 🔥 INTERFAZ PARA LOS DATOS DE LA CITA
 interface CitaParaPago {
@@ -87,12 +88,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         ...(isCopCurrency ? [{ id: "addi", name: "Addi", icon: <Wallet className="w-4 h-4" /> }] : []),
         { id: "efectivo", name: "Efectivo", icon: <DollarSign className="w-4 h-4" /> },
         { id: "transferencia", name: "Transferencia", icon: <Wallet className="w-4 h-4" /> },
-        { id: "descuento_nomina", name: "Descuento por nómina", icon: <Wallet className="w-4 h-4" /> },
+        { id: PAYROLL_PAYMENT_METHOD, name: "Descuento por nómina", icon: <Wallet className="w-4 h-4" /> },
     ];
 
     const sanitizePaymentMethod = (method: string): string => {
-        if (!isCopCurrency && method === "addi") return "efectivo";
-        return method;
+        const normalizedMethod = normalizePaymentMethodForBackend(method);
+        if (!isCopCurrency && normalizedMethod === "addi") return "efectivo";
+        return normalizedMethod;
     };
 
     // 🔥 EFECTO PARA OBTENER MONEDA
@@ -682,16 +684,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                                     <div className="flex justify-between">
                                         <span>Método:</span>
                                         <span className="font-medium text-gray-900">
-                                            {selectedPaymentMethod === "link_pago" ? "Pago con link" :
-                                             selectedPaymentMethod === "tarjeta_credito" ? "Tarjeta de Crédito" :
-                                             selectedPaymentMethod === "tarjeta_debito" ? "Tarjeta de Débito" :
-                                             selectedPaymentMethod === "addi" ? "Addi" :
-                                             selectedPaymentMethod === "tarjeta" ? "Tarjeta" :
-                                             selectedPaymentMethod === "efectivo" ? "Efectivo" :
-                                             selectedPaymentMethod === "giftcard" ? "Gift Card" :
-                                             selectedPaymentMethod === "descuento_nomina" ? "Descuento por nómina" :
-                                             selectedPaymentMethod === "transferencia" ? "Transferencia" :
-                                             "Sin pago"}
+                                            {getPaymentMethodLabel(selectedPaymentMethod)}
                                         </span>
                                     </div>
                                     {selectedPaymentMethod === "giftcard" && giftCardCode.trim() && (

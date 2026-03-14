@@ -1,5 +1,6 @@
 // components/Quotes/citasApi.ts - Agrega esta función
 import { API_BASE_URL } from '../../../types/config'; // Ajusta la ruta según tu estructura
+import { normalizePaymentMethodForBackend } from '../../../lib/payment-methods';
 
 export class ApiRequestError extends Error {
   status: number;
@@ -88,6 +89,7 @@ export const registrarPagoCita = async (
   },
   token: string
 ) => {
+  const normalizedPaymentMethod = normalizePaymentMethodForBackend(pagoData.metodo_pago);
   const response = await fetch(
     `${API_BASE_URL}scheduling/quotes/citas/${citaId}/pago`,
     {
@@ -96,7 +98,10 @@ export const registrarPagoCita = async (
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify(pagoData)
+      body: JSON.stringify({
+        ...pagoData,
+        metodo_pago: normalizedPaymentMethod,
+      })
     }
   );
 

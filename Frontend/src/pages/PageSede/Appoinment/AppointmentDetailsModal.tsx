@@ -18,6 +18,7 @@ import { getEstilistas, type Estilista } from '../../../components/Professionale
 import { API_BASE_URL } from '../../../types/config';
 import TimeInputWithPicker from '../../../components/ui/time-input-with-picker';
 import { extractAgendaAdditionalNotes, formatAgendaTime, normalizeAgendaTimeValue } from '../../../lib/agenda';
+import { normalizePaymentMethodForBackend, PAYROLL_PAYMENT_METHOD } from '../../../lib/payment-methods';
 
 interface AppointmentDetailsModalProps {
   open: boolean;
@@ -30,7 +31,16 @@ interface PagoModalData {
   show: boolean;
   tipo: 'pago' | 'abono';
   monto: number;
-  metodoPago: 'efectivo' | 'transferencia' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'addi' | 'giftcard';
+  metodoPago:
+    | 'efectivo'
+    | 'transferencia'
+    | 'tarjeta'
+    | 'tarjeta_credito'
+    | 'tarjeta_debito'
+    | 'addi'
+    | 'giftcard'
+    | typeof PAYROLL_PAYMENT_METHOD
+    | 'descuento_nomina';
   codigoGiftcard: string;
 }
 
@@ -358,10 +368,11 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   const isCopCurrency = userCurrency === "COP";
 
   const sanitizeMetodoPago = (metodo: PagoModalData['metodoPago']): PagoModalData['metodoPago'] => {
-    if (!isCopCurrency && metodo === 'addi') {
+    const normalizedMethod = normalizePaymentMethodForBackend(metodo) as PagoModalData['metodoPago'];
+    if (!isCopCurrency && normalizedMethod === 'addi') {
       return 'efectivo';
     }
-    return metodo;
+    return normalizedMethod;
   };
 
   useEffect(() => {
@@ -1354,7 +1365,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                 <label className="block text-[10px] font-medium text-gray-700 mb-0.5">
                   Método de pago *
                 </label>
-                <div className={`grid grid-cols-2 sm:grid-cols-3 ${isCopCurrency ? 'lg:grid-cols-6' : 'lg:grid-cols-5'} gap-1`}>
+                <div className={`grid grid-cols-2 sm:grid-cols-3 ${isCopCurrency ? 'lg:grid-cols-7' : 'lg:grid-cols-6'} gap-1`}>
                   <button
                     type="button"
                     onClick={() => setPagoModal(prev => ({ ...prev, metodoPago: 'efectivo' }))}
@@ -1423,6 +1434,19 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                       <span className="font-medium">Addi</span>
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => setPagoModal(prev => ({ ...prev, metodoPago: PAYROLL_PAYMENT_METHOD }))}
+                    className={`p-1 rounded border flex flex-col items-center justify-center gap-0.5 text-[10px] ${
+                      sanitizeMetodoPago(pagoModal.metodoPago) === PAYROLL_PAYMENT_METHOD
+                        ? 'border-black bg-gray-50'
+                        : 'border-gray-300 hover:border-gray-400'
+                    }`}
+                    disabled={registrandoPago}
+                  >
+                    <Wallet className="w-3 h-3 text-gray-700" />
+                    <span className="font-medium">Nómina</span>
+                  </button>
                 </div>
               </div>
 

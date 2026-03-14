@@ -2,6 +2,7 @@ import { API_BASE_URL } from "../../../types/config";
 import { Cliente } from "../../../types/cliente";
 import { calcularDiasSinVenir } from "../../../lib/clientMetrics";
 import { formatCurrencyNoDecimals } from "../../../lib/currency";
+import { getActiveSedeIdFromStorage } from "../../../lib/sede-context";
 
 export interface CreateClienteData {
   nombre: string;
@@ -280,6 +281,25 @@ const fixS3Url = (url: string): string => {
   return url;
 };
 
+const resolveSedeHeaderId = (value?: string): string | undefined => {
+  const normalized = String(value ?? getActiveSedeIdFromStorage() ?? "").trim();
+  return normalized || undefined;
+};
+
+const buildClientHeaders = (
+  token: string,
+  options?: { hasJsonBody?: boolean; sedeId?: string }
+): Record<string, string> => {
+  const sedeHeaderId = resolveSedeHeaderId(options?.sedeId);
+
+  return {
+    accept: "application/json",
+    Authorization: `Bearer ${token}`,
+    ...(options?.hasJsonBody ? { "Content-Type": "application/json" } : {}),
+    ...(sedeHeaderId ? { "X-Sede-Id": sedeHeaderId } : {}),
+  };
+};
+
 export const clientesService = {
   async getClientesPaginados(
     token: string,
@@ -299,10 +319,7 @@ export const clientesService = {
 
       const response = await fetchWithTimeout(urlSede.toString(), {
         method: "GET",
-        headers: {
-          accept: "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: buildClientHeaders(token, { sedeId }),
       });
 
       if (!response.ok) {
@@ -367,10 +384,7 @@ export const clientesService = {
 
     const response = await fetchWithTimeout(url.toString(), {
       method: "GET",
-      headers: {
-        accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
+      headers: buildClientHeaders(token, { sedeId }),
     });
 
     if (!response.ok) {
@@ -436,10 +450,7 @@ export const clientesService = {
   async getAllClientes(token: string): Promise<Cliente[]> {
     const response = await fetch(`${API_BASE_URL}clientes/todos`, {
       method: 'GET',
-      headers: {
-        'accept': 'application/json',
-        'Authorization': `Bearer ${token}`
-      }
+      headers: buildClientHeaders(token)
     });
 
     if (!response.ok) {
@@ -682,11 +693,10 @@ ${datos.observaciones_generales || 'Ninguna'}`;
 
     const response = await fetch(`${API_BASE_URL}clientes/`, {
       method: 'POST',
-      headers: {
-        'accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
+      headers: buildClientHeaders(token, {
+        hasJsonBody: true,
+        sedeId: requestData.sede_id,
+      }),
       body: JSON.stringify(requestData)
     });
 
