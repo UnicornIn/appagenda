@@ -2,6 +2,7 @@ import { API_BASE_URL } from "../../../types/config";
 import { Cliente } from "../../../types/cliente";
 import { calcularDiasSinVenir } from "../../../lib/clientMetrics";
 import { formatCurrencyNoDecimals } from "../../../lib/currency";
+import { getActiveSedeIdFromStorage } from "../../../lib/sede-context";
 
 export interface CreateClienteData {
   nombre: string;
@@ -178,6 +179,25 @@ const fixS3Url = (url: string): string => {
   return url;
 };
 
+const resolveSedeHeaderId = (value?: string): string | undefined => {
+  const normalized = String(value ?? getActiveSedeIdFromStorage() ?? "").trim();
+  return normalized || undefined;
+};
+
+const buildClientHeaders = (
+  token: string,
+  options?: { hasJsonBody?: boolean; sedeId?: string }
+): Record<string, string> => {
+  const sedeHeaderId = resolveSedeHeaderId(options?.sedeId);
+
+  return {
+    accept: "application/json",
+    Authorization: `Bearer ${token}`,
+    ...(options?.hasJsonBody ? { "Content-Type": "application/json" } : {}),
+    ...(sedeHeaderId ? { "X-Sede-Id": sedeHeaderId } : {}),
+  };
+};
+
 const firstNonEmptyString = (...values: unknown[]): string => {
   for (const value of values) {
     if (typeof value === "string" || typeof value === "number") {
@@ -248,12 +268,14 @@ const fetchWithTimeout = async (
 export const clientesService = {
   async getClientesPaginados(
     token: string,
-    params?: { pagina?: number; limite?: number; filtro?: string }
+    params?: { pagina?: number; limite?: number; filtro?: string },
+    sedeHeaderId?: string
   ): Promise<ClientesPaginadosResult> {
     const pagina = params?.pagina ?? 1;
     const limiteSolicitado = params?.limite ?? 10;
     const limite = Math.min(Math.max(limiteSolicitado, 1), 100);
     const filtro = params?.filtro?.trim();
+    const normalizedSedeHeaderId = sedeHeaderId?.trim();
 
     const url = new URL(`${API_BASE_URL}clientes/todos`);
     url.searchParams.set("pagina", String(pagina));
@@ -267,6 +289,7 @@ export const clientesService = {
       headers: {
         accept: "application/json",
         Authorization: `Bearer ${token}`,
+        ...(normalizedSedeHeaderId ? { "X-Sede-Id": normalizedSedeHeaderId } : {}),
       },
     });
 
@@ -324,10 +347,7 @@ export const clientesService = {
       // Primera petición para obtener metadata
       const primeraRespuesta = await fetch(`${API_BASE_URL}clientes/todos?limite=${limite}&pagina=1`, {
         method: 'GET',
-        headers: {
-          'accept': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
+        headers: buildClientHeaders(token)
       });
 
       if (!primeraRespuesta.ok) {
@@ -363,10 +383,7 @@ export const clientesService = {
           promesas.push(
             fetch(`${API_BASE_URL}clientes/todos?limite=${limite}&pagina=${p}`, {
               method: 'GET',
-              headers: {
-                'accept': 'application/json',
-                'Authorization': `Bearer ${token}`
-              }
+              headers: buildClientHeaders(token)
             })
             .then(async (res) => {
               if (!res.ok) {
@@ -805,11 +822,10 @@ export const clientesService = {
 
     const response = await fetch(`${API_BASE_URL}clientes/`, {
       method: 'POST',
-      headers: {
-        'accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
+      headers: buildClientHeaders(token, {
+        hasJsonBody: true,
+        sedeId: requestData.sede_id,
+      }),
       body: JSON.stringify(requestData)
     });
 

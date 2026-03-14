@@ -282,6 +282,7 @@ export default function CierreCajaPage() {
   const [loadingEgresos, setLoadingEgresos] = useState(false);
   const [loadingCierres, setLoadingCierres] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
+  const [activeAction, setActiveAction] = useState<"ingreso" | "egreso" | "apertura" | "cierre" | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -303,13 +304,12 @@ export default function CierreCajaPage() {
   const [efectivoEnCaja, setEfectivoEnCaja] = useState<number | null>(null);
   const [loadingEfectivoEnCaja, setLoadingEfectivoEnCaja] = useState(false);
 
+  const [aperturaMonto, setAperturaMonto] = useState("");
+  const [aperturaNota, setAperturaNota] = useState("");
+
   const [cierreNota, setCierreNota] = useState("");
   const [cierreFecha, setCierreFecha] = useState(getToday());
   const [cierreEfectivoContado, setCierreEfectivoContado] = useState("");
-
-  // const [aperturaMonto, setAperturaMonto] = useState("");
-  // const [aperturaNota, setAperturaNota] = useState("");
-  // // const [aperturaFecha, setAperturaFecha] = useState(getToday());
 
   useEffect(() => {
     const resolvedSedeId = String(
@@ -823,6 +823,7 @@ export default function CierreCajaPage() {
     }
 
     setLoadingAction(true);
+    setActiveAction("ingreso");
     setError(null);
     setSuccess(null);
 
@@ -850,6 +851,7 @@ export default function CierreCajaPage() {
       setError(err?.message || "No se pudo registrar el ingreso");
     } finally {
       setLoadingAction(false);
+      setActiveAction(null);
     }
   };
 
@@ -869,6 +871,7 @@ export default function CierreCajaPage() {
     }
 
     setLoadingAction(true);
+    setActiveAction("egreso");
     setError(null);
     setSuccess(null);
 
@@ -918,6 +921,7 @@ export default function CierreCajaPage() {
       setError(err?.message || "No se pudo registrar el egreso");
     } finally {
       setLoadingAction(false);
+      setActiveAction(null);
     }
   };
 
@@ -946,6 +950,7 @@ export default function CierreCajaPage() {
     const diferencia = Number((efectivoContadoValue - efectivoEnCaja).toFixed(2));
 
     setLoadingAction(true);
+    setActiveAction("cierre");
     setError(null);
     setSuccess(null);
 
@@ -973,44 +978,54 @@ export default function CierreCajaPage() {
       setError(err?.message || "No se pudo cerrar la caja");
     } finally {
       setLoadingAction(false);
+      setActiveAction(null);
     }
   };
 
-  // const handleApertura = async () => {
-  //   if (!sedeId) return;
+  const handleApertura = async () => {
+    if (!sedeId) {
+      setError("No se encontró la sede actual para abrir caja");
+      return;
+    }
 
-  //   const montoValue = toNumber(aperturaMonto);
-  //   if (!montoValue || montoValue <= 0) {
-  //     setError("El monto inicial debe ser mayor a 0");
-  //     return;
-  //   }
+    const montoValue = toNumber(aperturaMonto);
+    if (!montoValue || montoValue <= 0) {
+      setError("El monto inicial debe ser mayor a 0");
+      return;
+    }
 
-  //   setLoadingAction(true);
-  //   setError(null);
-  //   setSuccess(null);
+    setLoadingAction(true);
+    setActiveAction("apertura");
+    setError(null);
+    setSuccess(null);
 
-  //   try {
-  //     await cashService.aperturaCaja({
-  //       sede_id: sedeId,
-  //       // fecha: aperturaFecha,
-  //       monto_inicial: montoValue,
-  //       efectivo_inicial: montoValue,
-  //       efectivo: montoValue,
-  //       notas: aperturaNota.trim() || undefined,
-  //       observaciones: aperturaNota.trim() || undefined,
-  //       moneda: monedaSede,
-  //     });
+    try {
+      await cashService.aperturaCaja({
+        sede_id: sedeId,
+        monto_inicial: montoValue,
+        efectivo_inicial: montoValue,
+        efectivo: montoValue,
+        notas: aperturaNota.trim() || undefined,
+        observaciones: aperturaNota.trim() || undefined,
+        moneda: monedaSede,
+      });
 
-  //     setAperturaMonto("");
-  //     setAperturaNota("");
-  //     setSuccess("Caja abierta correctamente");
-  //     await loadCierres();
-  //   } catch (err: any) {
-  //     setError(err?.message || "No se pudo abrir la caja");
-  //   } finally {
-  //     setLoadingAction(false);
-  //   }
-  // };
+      setAperturaMonto("");
+      setAperturaNota("");
+      setSuccess("Caja abierta correctamente");
+      toast({
+        title: "Caja abierta",
+        description: "La apertura de caja se registró correctamente.",
+      });
+
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.message || "No se pudo abrir la caja");
+    } finally {
+      setLoadingAction(false);
+      setActiveAction(null);
+    }
+  };
 
   // const handleCierre = async () => {
   //   if (!sedeId) return;
@@ -1250,7 +1265,7 @@ export default function CierreCajaPage() {
     };
   }, [reportePeriodo, fechaDesde, fechaHasta]);
 
-  const showManualCashForms = false;
+  const showManualCashForms = true;
 
   const handleDescargarReporte = async () => {
     if (!sedeId) return;
@@ -1545,6 +1560,46 @@ export default function CierreCajaPage() {
 
               <Card className="border-[#d7d4df] bg-white/80 shadow-none">
                 <CardHeader className="border-b border-[#e3e0ea] pb-2">
+                  <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Abrir caja</CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 gap-3 pt-4 md:grid-cols-4">
+                  <div>
+                    <label className="text-xs font-medium text-[#666370]">Monto inicial</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={aperturaMonto}
+                      onChange={(e) => setAperturaMonto(e.target.value)}
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-medium text-[#666370]">Observaciones (opcional)</label>
+                    <Input value={aperturaNota} onChange={(e) => setAperturaNota(e.target.value)} />
+                  </div>
+                  <div className="flex flex-col justify-end gap-2">
+                    <div className="rounded-md border border-[#ddd9e6] bg-[#f2f0f7] p-2 text-xs text-[#4b4857]">
+                      El monto inicial se registra como efectivo de apertura.
+                    </div>
+                    <Button
+                      onClick={handleApertura}
+                      disabled={loadingAction || !aperturaMonto.trim()}
+                      className="w-full bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
+                    >
+                      {loadingAction && activeAction === "apertura" ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Abriendo caja...
+                        </>
+                      ) : (
+                        "Abrir caja"
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-[#d7d4df] bg-white/80 shadow-none">
+                <CardHeader className="border-b border-[#e3e0ea] pb-2">
                   <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Cierre de caja</CardTitle>
                 </CardHeader>
                 <CardContent className="grid grid-cols-1 gap-3 pt-4 md:grid-cols-4">
@@ -1589,7 +1644,7 @@ export default function CierreCajaPage() {
                       }
                       className="w-full bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
                     >
-                      {loadingAction ? (
+                      {loadingAction && activeAction === "cierre" ? (
                         <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                           Cerrando caja...
@@ -1804,31 +1859,31 @@ export default function CierreCajaPage() {
                     <table className="min-w-full text-sm">
                       <thead className="bg-[#eeebf4] text-left text-sm font-medium text-[#5f5c69]">
                         <tr>
-                          {/* <th className="px-3 py-2">Hora</th> */}
+                          <th className="px-3 py-2">Hora</th>
                           <th className="px-3 py-2">Tipo</th>
                           <th className="px-3 py-2">Concepto</th>
-                          {/* <th className="px-3 py-2">Medio</th> */}
+                          <th className="px-3 py-2">Medio</th>
                           <th className="px-3 py-2 text-right">Monto</th>
-                          {/* <th className="px-3 py-2 text-right">Efectivo esperado</th> */}
+                          <th className="px-3 py-2 text-right">Efectivo esperado</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#ece9f2] text-[#3d3a46]">
                         {loadingIngresos || loadingEgresos ? (
                           <tr>
-                            <td colSpan={3} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={6} className="px-3 py-6 text-center text-sm text-[#6b6878]">
                               Cargando movimientos...
                             </td>
                           </tr>
                         ) : movimientosConSaldo.length === 0 ? (
                           <tr>
-                            <td colSpan={3} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={6} className="px-3 py-6 text-center text-sm text-[#6b6878]">
                               No hay movimientos registrados para el día.
                             </td>
                           </tr>
                         ) : (
                           movimientosConSaldo.map((movimiento) => (
                             <tr key={movimiento.id}>
-                              {/* <td className="px-3 py-2 font-medium text-[#2e2d35]">{movimiento.hora}</td> */}
+                              <td className="px-3 py-2 font-medium text-[#2e2d35]">{movimiento.hora}</td>
                               <td className="px-3 py-2">
                                 <span
                                   className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${
@@ -1841,13 +1896,13 @@ export default function CierreCajaPage() {
                                 </span>
                               </td>
                               <td className="px-3 py-2">{movimiento.detalle}</td>
-                              {/* <td className="px-3 py-2">{movimiento.medio}</td> */}
+                              <td className="px-3 py-2">{movimiento.medio}</td>
                               <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
                                 {formatSignedMoney(movimiento.monto)}
                               </td>
-                              {/* <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
+                              <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
                                 {formatMoney(movimiento.saldo_esperado)}
-                              </td> */}
+                              </td>
                             </tr>
                           ))
                         )}

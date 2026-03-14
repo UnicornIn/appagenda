@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "../../../types/config";
+import { PAYROLL_PAYMENT_METHOD, normalizePaymentMethodForBackend } from "../../../lib/payment-methods";
 
 export type PaymentMethod =
   | "efectivo"
@@ -8,6 +9,7 @@ export type PaymentMethod =
   | "tarjeta_debito"
   | "giftcard"
   | "addi"
+  | typeof PAYROLL_PAYMENT_METHOD
   | string;
 
 interface ApiErrorBody {
@@ -163,6 +165,10 @@ function roundToTwo(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+function normalizeDirectSalePaymentMethod(method: PaymentMethod): PaymentMethod {
+  return normalizePaymentMethodForBackend(method) as PaymentMethod;
+}
+
 function pickFirstNumber(values: unknown[]): number | null {
   for (const current of values) {
     const numeric = toNumeric(current);
@@ -292,7 +298,7 @@ function buildCreateSalePayload(
       producto_id: item.productId,
       cantidad: Math.trunc(item.quantity),
     })),
-    metodo_pago: input.paymentMethod,
+    metodo_pago: normalizeDirectSalePaymentMethod(input.paymentMethod),
     abono: 0,
   };
 
@@ -547,7 +553,7 @@ export async function registerDirectSalePayment(
   const giftCardCode = typeof input.giftCardCode === "string" ? input.giftCardCode.trim() : "";
   const bodyPayload = {
     monto: amount,
-    metodo_pago: input.paymentMethod,
+    metodo_pago: normalizeDirectSalePaymentMethod(input.paymentMethod),
     ...(giftCardCode.length > 0 ? { codigo_giftcard: giftCardCode } : {}),
   };
 
@@ -570,7 +576,7 @@ export async function registerDirectSalePayment(
 
   const query = new URLSearchParams({
     monto: String(amount),
-    metodo_pago: input.paymentMethod,
+    metodo_pago: normalizeDirectSalePaymentMethod(input.paymentMethod),
   });
   if (giftCardCode.length > 0) {
     query.append("codigo_giftcard", giftCardCode);

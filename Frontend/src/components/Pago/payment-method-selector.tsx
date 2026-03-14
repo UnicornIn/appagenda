@@ -3,6 +3,7 @@
 import { Card } from "../../components/ui/card"
 import { DollarSign, CreditCard, Wallet, Link as LinkIcon, Banknote, Globe, CheckCircle, Gift } from "lucide-react"
 import { useEffect, useState } from "react"
+import { normalizePaymentMethodForBackend, PAYROLL_PAYMENT_METHOD } from "../../lib/payment-methods"
 
 interface PaymentMethodSelectorProps {
   selectedMethod: string  // Valor del backend
@@ -84,8 +85,8 @@ const paymentMethodMap: PaymentMethod[] = [
     available: true
   },
   {
-    id: "descuento_nomina",
-    backendValue: "descuento_nomina",
+    id: PAYROLL_PAYMENT_METHOD,
+    backendValue: PAYROLL_PAYMENT_METHOD,
     displayName: "Descuento por nómina",
     icon: <Wallet className="w-5 h-5" />,
     description: "Descuento aplicado por nómina",
@@ -100,6 +101,14 @@ const legacyMethods: Record<string, PaymentMethod> = {
     backendValue: "tarjeta",
     displayName: "Tarjeta",
     icon: <CreditCard className="w-5 h-5" />,
+    description: "Método anterior (compatibilidad)",
+    available: true
+  },
+  descuento_nomina: {
+    id: "descuento_nomina",
+    backendValue: PAYROLL_PAYMENT_METHOD,
+    displayName: "Descuento por nómina",
+    icon: <Wallet className="w-5 h-5" />,
     description: "Método anterior (compatibilidad)",
     available: true
   }
@@ -131,6 +140,7 @@ export function PaymentMethodSelector({
   const [currency, setCurrency] = useState<string>("USD")
   const [loading, setLoading] = useState(true)
   const isCopCurrency = currency === "COP"
+  const normalizedSelectedMethod = normalizePaymentMethodForBackend(selectedMethod)
   
   // 🔥 OBTENER MONEDA DEL USUARIO
   useEffect(() => {
@@ -190,16 +200,16 @@ export function PaymentMethodSelector({
   // 🔒 Addi solo aplica para sedes COP
   useEffect(() => {
     if (loading) return
-    if (!isCopCurrency && selectedMethod === "addi") {
+    if (!isCopCurrency && normalizedSelectedMethod === "addi") {
       const fallbackMethod = paymentType.toLowerCase().includes("reserva") ? "sin_pago" : "efectivo"
       onMethodChange(fallbackMethod)
     }
-  }, [loading, isCopCurrency, paymentType, selectedMethod, onMethodChange])
+  }, [loading, isCopCurrency, normalizedSelectedMethod, paymentType, onMethodChange])
   
   // 🔥 OBTENER MÉTODO ACTUAL
   const getCurrentMethod = (): PaymentMethod => {
     const allMethods = getAllMethods()
-    return allMethods.find(m => m.backendValue === selectedMethod) ||
+    return allMethods.find(m => m.backendValue === normalizedSelectedMethod) ||
            legacyMethods[selectedMethod] ||
            paymentMethodMap[0] // Fallback
   }
@@ -379,7 +389,7 @@ export function PaymentMethodSelector({
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {allMethods.map((method) => {
-            const isSelected = selectedMethod === method.backendValue
+            const isSelected = normalizedSelectedMethod === method.backendValue
             const isDisabled = disabled || !method.available
             
             return (

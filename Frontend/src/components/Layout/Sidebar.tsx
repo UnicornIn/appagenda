@@ -41,7 +41,14 @@ const normalizeRole = (value: string | null | undefined): string =>
 
 const normalizeSedeId = (value: string | null | undefined): string => String(value ?? "").trim();
 
-const MULTI_SEDE_ROLES = new Set(["admin_sede", "call_center", "estilista"]);
+const MULTI_SEDE_ROLES = new Set([
+  "super_admin",
+  "superadmin",
+  "admin_sede",
+  "recepcionista",
+  "call_center",
+  "estilista",
+]);
 
 const navItems: NavItem[] = [
   { title: "Dashboard", href: "/superadmin/dashboard", icon: LayoutDashboard, module: APP_MODULES.SUPER_DASHBOARD },

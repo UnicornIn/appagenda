@@ -16,6 +16,7 @@ interface SalesMetricsProps {
   onPeriodChange: (period: string) => void;
   onDateRangeChange: (range: DateRange) => void;
   sedeId?: string;
+  hideSummaryCards?: boolean;
 }
 
 export interface DateRange {
@@ -39,7 +40,8 @@ export function SalesMetrics({
   dateRange,
   onPeriodChange,
   onDateRangeChange,
-  sedeId
+  sedeId,
+  hideSummaryCards = false,
 }: SalesMetricsProps) {
   const { user, isAuthenticated } = useAuth()
   const [loading, setLoading] = useState(true)
@@ -80,7 +82,7 @@ export function SalesMetrics({
   }, [dateRange, defaultDateRange, onDateRangeChange])
 
   const loadMetrics = async () => {
-    if (!isAuthenticated || !user?.access_token) {
+    if (hideSummaryCards || !isAuthenticated || !user?.access_token) {
       console.log('⚠️ Usuario no autenticado')
       return
     }
@@ -200,10 +202,10 @@ export function SalesMetrics({
   }
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !hideSummaryCards) {
       loadMetrics()
     }
-  }, [isAuthenticated, period, effectiveDateRange.start_date, effectiveDateRange.end_date, sedeId, user?.access_token])
+  }, [hideSummaryCards, isAuthenticated, period, effectiveDateRange.start_date, effectiveDateRange.end_date, sedeId, user?.access_token])
 
   const handlePeriodChange = (newPeriod: string) => {
     if (newPeriod === "custom") {
@@ -415,7 +417,7 @@ export function SalesMetrics({
       </div>
 
       {/* Mensaje de error */}
-      {error && (
+      {error && !hideSummaryCards && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-3">
           <p className="text-sm text-red-700">{error}</p>
           <Button
@@ -430,6 +432,7 @@ export function SalesMetrics({
       )}
 
       {/* Métricas */}
+      {!hideSummaryCards && (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {/* Ventas Totales */}
         <Card className="border-gray-300 hover:border-gray-400 transition-colors">
@@ -513,9 +516,10 @@ export function SalesMetrics({
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* Información del período */}
-      {!loading && (
+      {!loading && !hideSummaryCards && (
         <div className="text-center">
           <p className="text-xs text-gray-500">
             Mostrando datos para: {getPeriodDisplay()}

@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "../../types/config";
+import { getActiveSedeIdFromStorage } from "../../lib/sede-context";
 import type {
   GiftCard,
   GiftCardCreatePayload,
@@ -56,10 +57,13 @@ let clientsInflightPromise: Promise<GiftCardClientSelectorOption[]> | null = nul
 const clientsSearchCache = new Map<string, { data: GiftCardClientSearchResult; at: number }>();
 
 function buildHeaders(token: string, hasJsonBody = false): HeadersInit {
+  const activeSedeId = String(getActiveSedeIdFromStorage() ?? "").trim();
+
   return {
     Authorization: `Bearer ${token}`,
     Accept: "application/json",
     ...(hasJsonBody ? { "Content-Type": "application/json" } : {}),
+    ...(activeSedeId ? { "X-Sede-Id": activeSedeId } : {}),
   };
 }
 
