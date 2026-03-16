@@ -41,6 +41,12 @@ type FacturaFilters = {
   fecha_hasta: string
 }
 
+type AppliedFacturaFilters = {
+  fecha_desde: string | null
+  fecha_hasta: string | null
+  search: string | null
+}
+
 const EMPTY_FACTURA_FILTERS: FacturaFilters = {
   searchTerm: "",
   fecha_desde: "",
@@ -61,7 +67,7 @@ export function VentasFacturadasList() {
   const [sedes, setSedes] = useState<Sede[]>([])
   const [sedeIdMap, setSedeIdMap] = useState<Record<string, string>>({}) // Mapa de _id a sede_id
   const [pagination, setPagination] = useState<any>(null)
-  const [filtersApplied, setFiltersApplied] = useState<any>(null)
+  const [filtersApplied, setFiltersApplied] = useState<AppliedFacturaFilters | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [limit] = useState(50)
   const [appliedFilters, setAppliedFilters] = useState<FacturaFilters>(EMPTY_FACTURA_FILTERS)
@@ -252,6 +258,23 @@ export function VentasFacturadasList() {
   }
 
   const formatDate = (dateString: string) => formatDateDMY(dateString, dateString)
+  const appliedDateSummary = (() => {
+    if (!filtersApplied) return null
+
+    if (filtersApplied.fecha_desde && filtersApplied.fecha_hasta) {
+      return `Rango aplicado: ${formatDate(filtersApplied.fecha_desde)} - ${formatDate(filtersApplied.fecha_hasta)}`
+    }
+
+    if (filtersApplied.fecha_desde) {
+      return `Desde: ${formatDate(filtersApplied.fecha_desde)}`
+    }
+
+    if (filtersApplied.fecha_hasta) {
+      return `Hasta: ${formatDate(filtersApplied.fecha_hasta)}`
+    }
+
+    return null
+  })()
 
   const getCurrencyLocale = (currency: string) => {
     if (currency === "USD") return "en-US"
@@ -517,26 +540,20 @@ export function VentasFacturadasList() {
                 </div>
               </div>
 
-              {filtersApplied && (filtersApplied.fecha_desde || filtersApplied.fecha_hasta || filtersApplied.search) && (
-                <div className="mt-4 rounded-lg border border-gray-300 bg-gray-50 p-3">
-                  <p className="mb-1 text-sm font-medium text-gray-900">Filtros aplicados:</p>
-                  <div className="flex flex-wrap gap-2">
-                    {filtersApplied.fecha_desde && (
-                      <span className="inline-flex items-center rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-800">
-                        Desde: {formatDate(filtersApplied.fecha_desde)}
-                      </span>
-                    )}
-                    {filtersApplied.fecha_hasta && (
-                      <span className="inline-flex items-center rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-800">
-                        Hasta: {formatDate(filtersApplied.fecha_hasta)}
-                      </span>
-                    )}
-                    {filtersApplied.search && (
-                      <span className="inline-flex items-center rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-800">
-                        Búsqueda: "{filtersApplied.search}"
-                      </span>
-                    )}
-                  </div>
+              {(appliedDateSummary || filtersApplied?.search) && (
+                <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                  {appliedDateSummary && (
+                    <div className="inline-flex items-center gap-2 text-sm text-gray-700">
+                      <Calendar className="h-4 w-4 text-gray-500" />
+                      <span>{appliedDateSummary}</span>
+                    </div>
+                  )}
+                  {filtersApplied?.search && (
+                    <div className="inline-flex items-center gap-2 text-sm text-gray-700">
+                      <Search className="h-4 w-4 text-gray-500" />
+                      <span>Búsqueda: {filtersApplied.search}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -633,13 +650,6 @@ export function VentasFacturadasList() {
                 {pagination
                   ? `Mostrando ${pagination.from} a ${pagination.to} de ${pagination.total} facturas`
                   : `Mostrando ${facturas.length} facturas`}
-
-                {(appliedFilters.fecha_desde || appliedFilters.fecha_hasta) && (
-                  <div className="text-sm text-gray-500">
-                    {appliedFilters.fecha_desde && `Desde: ${formatDate(appliedFilters.fecha_desde)} `}
-                    {appliedFilters.fecha_hasta && `Hasta: ${formatDate(appliedFilters.fecha_hasta)}`}
-                  </div>
-                )}
               </div>
             )}
 

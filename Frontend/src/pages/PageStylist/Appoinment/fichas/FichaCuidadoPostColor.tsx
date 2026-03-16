@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { Cita } from '../../../../types/fichas';
 import { Camera, Loader2, X, Save, CheckCircle, Check } from "lucide-react";
 import { API_BASE_URL } from '../../../../types/config';
+import { getEstilistaDataFromCita, getFichaAuthToken } from './fichaHelpers';
 
 interface FichaCuidadoPostColorProps {
   cita: Cita;
@@ -177,59 +178,24 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
       return;
     }
 
-    if (formData.foto_actual.length === 0 || formData.foto_despues.length === 0) {
-      alert('Debe cargar al menos una foto de ANTES y una foto de DESPUÉS para crear la ficha');
-      return;
-    }
+    // if (formData.foto_actual.length === 0 || formData.foto_despues.length === 0) {
+    //   alert('Debe cargar al menos una foto de ANTES y una foto de DESPUÉS para crear la ficha');
+    //   return;
+    // }
 
     setLoading(true);
 
     try {
-      const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
+      const token = getFichaAuthToken();
 
       if (!token) {
         throw new Error('No hay token de autenticación');
       }
 
-      // Función para obtener datos del estilista desde sessionStorage
-      const getEstilistaData = () => {
-        try {
-          const estilistaNombre = sessionStorage.getItem('beaux-name') || "Estilista";
-          const estilistaEmail = sessionStorage.getItem('beaux-email') || "";
-          // Usar el estilista_id de la cita que es el ID real en la base de datos
-          const estilistaId = cita.estilista_id;
-          const estilistaRole = sessionStorage.getItem('beaux-role') || "estilista";
-          
-          // Formatear el nombre si viene como email
-          let nombreFormateado = estilistaNombre;
-          if (estilistaNombre.includes('@')) {
-            const namePart = estilistaNombre.split('@')[0];
-            nombreFormateado = namePart
-              .replace(/[._]/g, ' ')
-              .split(' ')
-              .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-              .join(' ');
-          }
-          
-          return {
-            nombre: nombreFormateado,
-            email: estilistaEmail,
-            id: estilistaId,
-            role: estilistaRole
-          };
-        } catch (error) {
-          console.error('Error obteniendo datos del estilista:', error);
-          return {
-            nombre: "Estilista",
-            email: "",
-            id: cita.estilista_id,
-            role: "estilista"
-          };
-        }
-      };
-
-      // Obtener datos del estilista actual
-      const estilistaData = getEstilistaData();
+      const estilistaData = getEstilistaDataFromCita(cita);
+      if (!estilistaData.id) {
+        throw new Error('No se pudo identificar al profesional de la cita. Recarga la agenda e intenta nuevamente.');
+      }
       console.log('📋 Datos del estilista:', estilistaData);
 
       // 1. Crear FormData
@@ -237,7 +203,7 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
 
       // 2. Agregar archivos
       formData.foto_actual.forEach((file) => {
-        formDataToSend.append('fotos_actual', file);
+        formDataToSend.append('fotos_antes', file);
       });
 
       formData.foto_despues.forEach((file) => {
@@ -301,7 +267,7 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
         descripcion_servicio: `Recomendaciones de cuidado post color para ${cita.servicios?.map((s: any) => s.nombre).join(', ') || 'Sin servicio'} - Realizado por ${estilistaData.nombre}`,
 
         // Fotos (URLs vacías porque el backend las subirá a S3)
-        fotos_actual: [],
+        fotos_antes: [],
         fotos_despues: [],
 
         // Permisos y comentarios
@@ -459,7 +425,7 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
 
   // Verificar si se ha seleccionado al menos una recomendación
   const alMenosUnaRecomendacion = formData.recomendaciones_seleccionadas.some(r => r === true);
-  const tieneFotosAntesDespues = formData.foto_actual.length > 0 && formData.foto_despues.length > 0;
+  // const tieneFotosAntesDespues = formData.foto_actual.length > 0 && formData.foto_despues.length > 0;
 
   return (
     <form onSubmit={handleSubmit} className="rounded-lg border bg-white p-6 space-y-6">
@@ -596,8 +562,8 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
 
         <button
           type="submit"
-          disabled={loading || !formData.firma_profesional || !alMenosUnaRecomendacion || !tieneFotosAntesDespues}
-          className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center ${loading || !formData.firma_profesional || !alMenosUnaRecomendacion || !tieneFotosAntesDespues
+          disabled={loading || !formData.firma_profesional || !alMenosUnaRecomendacion /* || !tieneFotosAntesDespues */}
+          className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center ${loading || !formData.firma_profesional || !alMenosUnaRecomendacion /* || !tieneFotosAntesDespues */
               ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
               : 'bg-gray-600 text-white hover:bg-gray-700'
             }`}
@@ -633,13 +599,13 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
         </div>
       )}
 
-      {!tieneFotosAntesDespues && (
+      {/* {!tieneFotosAntesDespues && (
         <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
           <p className="text-gray-700 text-sm">
             ⚠️ Debe cargar mínimo una foto de antes y una foto de después.
           </p>
         </div>
-      )}
+      )} */}
 
       {/* Nota sobre guardado automático */}
       <div className="p-2 bg-gray-50 border border-gray-200 rounded text-center">

@@ -70,6 +70,40 @@ export default function SystemUsersPage() {
     return sedeNamesById[sedeId] || "Sede no disponible";
   };
 
+  const getAllowedSedesDisplayName = (
+    systemUser: Pick<SystemUser, "sede_id" | "sede_nombre" | "sedes_permitidas">
+  ) => {
+    const sedesPermitidas = Array.from(
+      new Set(
+        (systemUser.sedes_permitidas || [])
+          .map((sedeId) => String(sedeId ?? "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (sedesPermitidas.length === 0) {
+      return "No disponible en este endpoint";
+    }
+
+    const nombres = Array.from(
+      new Set(
+        sedesPermitidas.map((sedeId) => {
+          if (sedeId === systemUser.sede_id?.trim()) {
+            const sedePrincipal = getSedeDisplayName(systemUser);
+            if (sedePrincipal && sedePrincipal !== "Sede no disponible") {
+              return sedePrincipal;
+            }
+          }
+
+          const sedeNombre = sedeNamesById[sedeId];
+          return sedeNombre ? formatSedeNombre(sedeNombre, sedeNombre) : "Sede no disponible";
+        })
+      )
+    );
+
+    return nombres.join(", ");
+  };
+
   const filteredUsers = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     if (!query) return users;
@@ -445,9 +479,7 @@ export default function SystemUsersPage() {
                   <div>
                     <p className="text-gray-500 mb-1">Sedes permitidas</p>
                     <p className="text-gray-900 font-medium">
-                      {selectedUser.sedes_permitidas?.length
-                        ? selectedUser.sedes_permitidas.join(", ")
-                        : "No disponible en este endpoint"}
+                      {getAllowedSedesDisplayName(selectedUser)}
                     </p>
                   </div>
                   <div>

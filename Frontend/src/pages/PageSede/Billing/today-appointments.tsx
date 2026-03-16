@@ -50,6 +50,13 @@ const PERIOD_LABELS: Record<string, string> = {
   custom: "Rango personalizado",
 }
 
+const BILLING_VISIBLE_STATES = new Set([
+  "finalizado",
+  "finalizada",
+  "completada",
+  "completado",
+])
+
 const toYmd = (date: Date): string => {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, "0")
@@ -107,12 +114,21 @@ const getAppointmentTimestamp = (appointment: Appointment): number => {
 const getEstadoColor = (estado: string) => {
   const estadoLower = estado.toLowerCase()
 
-  if (estadoLower === "finalizado") {
+  if (estadoLower === "finalizado" || estadoLower === "finalizada") {
     return {
       bg: "bg-green-100",
       text: "text-green-800",
       border: "border-green-200",
       label: "Finalizado",
+    }
+  }
+
+  if (estadoLower === "completado" || estadoLower === "completada") {
+    return {
+      bg: "bg-gray-100",
+      text: "text-gray-800",
+      border: "border-gray-300",
+      label: "Completada",
     }
   }
 
@@ -132,7 +148,6 @@ export function TodayAppointments({
   onVisibleAppointmentIdsChange,
 }: TodayAppointmentsProps) {
   const [appointments, setAppointments] = useState<Appointment[]>([])
-  const [allAppointments, setAllAppointments] = useState<Appointment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -144,7 +159,7 @@ export function TodayAppointments({
     const filtered = source
       .filter((appointment) => {
         const estado = String(appointment.estado || "").toLowerCase()
-        if (estado !== "finalizado") {
+        if (!BILLING_VISIBLE_STATES.has(estado)) {
           return false
         }
 
@@ -173,7 +188,7 @@ export function TodayAppointments({
         return
       }
 
-      const response = await fetch(`${API_BASE_URL}scheduling/quotes/citas-sede`, {
+      const response = await fetch(`${API_BASE_URL}scheduling/quotes/`, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -185,9 +200,12 @@ export function TodayAppointments({
         throw new Error(`Error ${response.status}: ${response.statusText}`)
       }
 
-      const data: ApiResponse = await response.json()
-      const citas = Array.isArray(data.citas) ? data.citas : []
-      setAllAppointments(citas)
+      const data: ApiResponse | Appointment[] = await response.json()
+      const citas = Array.isArray(data)
+        ? data
+        : Array.isArray(data.citas)
+          ? data.citas
+          : []
       applyGlobalFilter(citas)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar citas")
@@ -199,11 +217,7 @@ export function TodayAppointments({
 
   useEffect(() => {
     void fetchCitas()
-  }, [])
-
-  useEffect(() => {
-    applyGlobalFilter(allAppointments)
-  }, [allAppointments, appliedRange.start_date, appliedRange.end_date])
+  }, [period, appliedRange.start_date, appliedRange.end_date])
 
   if (loading) {
     return (

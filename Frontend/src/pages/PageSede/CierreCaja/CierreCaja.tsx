@@ -12,6 +12,16 @@ import type { CashCierre, CashEgreso, CashIngreso, CashResumen, CashReporteRaw }
 import { formatDateDMY, parseDateToDate, toBackendDate } from "../../../lib/dateFormat";
 import { toast } from "../../../hooks/use-toast";
 import { useAuth } from "../../../components/Auth/AuthContext";
+import {
+  CASH_EXPENSE_TYPE_OPTIONS,
+  CASH_INCOME_TYPE_OPTIONS,
+  CASH_PAYMENT_METHOD_OPTIONS,
+  DEFAULT_CASH_EXPENSE_TYPE,
+  DEFAULT_CASH_INCOME_TYPE,
+  DEFAULT_CASH_PAYMENT_METHOD,
+  getCashMovementTypeLabel,
+  getCashPaymentMethodLabel,
+} from "./constants";
 
 const toLocalDateString = (date: Date) => {
   const year = date.getFullYear();
@@ -169,11 +179,7 @@ const formatHeaderDate = (value?: string) => {
   return `${day} ${capitalizedMonth} ${year}`;
 };
 
-const normalizePaymentMethod = (value?: string) => {
-  const method = String(value || "otros").replace(/_/g, " ").trim();
-  if (!method) return "Otros";
-  return method.charAt(0).toUpperCase() + method.slice(1);
-};
+const normalizePaymentMethod = (value?: string) => getCashPaymentMethodLabel(value);
 
 const normalizePaymentMethodKey = (value?: string) => {
   return String(value || "otros")
@@ -291,15 +297,16 @@ export default function CierreCajaPage() {
 
   // Form states
   const [ingresoMonto, setIngresoMonto] = useState("");
-  const [ingresoMetodoPago, setIngresoMetodoPago] = useState("efectivo");
+  const [ingresoMetodoPago, setIngresoMetodoPago] = useState<string>(DEFAULT_CASH_PAYMENT_METHOD);
+  const [ingresoTipo, setIngresoTipo] = useState<string>(DEFAULT_CASH_INCOME_TYPE);
   const [ingresoMotivo, setIngresoMotivo] = useState("");
   const [ingresoFecha, setIngresoFecha] = useState(getToday());
 
   const [egresoMonto, setEgresoMonto] = useState("");
   const [egresoMotivo, setEgresoMotivo] = useState("");
   const [egresoFecha, setEgresoFecha] = useState(getToday());
-  const [egresoMetodoPago, setEgresoMetodoPago] = useState("efectivo");
-  const [egresoTipo, setEgresoTipo] = useState("gasto_operativo");
+  const [egresoMetodoPago, setEgresoMetodoPago] = useState<string>(DEFAULT_CASH_PAYMENT_METHOD);
+  const [egresoTipo, setEgresoTipo] = useState<string>(DEFAULT_CASH_EXPENSE_TYPE);
 
   const [efectivoEnCaja, setEfectivoEnCaja] = useState<number | null>(null);
   const [loadingEfectivoEnCaja, setLoadingEfectivoEnCaja] = useState(false);
@@ -533,6 +540,7 @@ export default function CierreCajaPage() {
           item.nota ??
           item.observacion ??
           "Ingreso manual",
+        tipo: item.tipo ?? item.tipo_movimiento ?? item.categoria ?? "otro",
         metodo_pago: item.metodo_pago ?? item.metodo ?? item.medio_pago ?? item.medio ?? "otros",
         fecha:
           item.fecha ??
@@ -831,6 +839,7 @@ export default function CierreCajaPage() {
       await cashService.createIngreso({
         sede_id: sedeId,
         monto: montoValue,
+        tipo: ingresoTipo,
         metodo_pago: ingresoMetodoPago,
         motivo: ingresoMotivo.trim(),
         fecha: toBackendDate(ingresoFecha),
@@ -838,7 +847,8 @@ export default function CierreCajaPage() {
       });
 
       setIngresoMonto("");
-      setIngresoMetodoPago("efectivo");
+      setIngresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
+      setIngresoTipo(DEFAULT_CASH_INCOME_TYPE);
       setIngresoMotivo("");
       setIngresoFecha(getToday());
       setSuccess("Ingreso registrado correctamente");
@@ -913,8 +923,8 @@ export default function CierreCajaPage() {
 
       setEgresoMonto("");
       setEgresoMotivo("");
-      setEgresoMetodoPago("efectivo");
-      setEgresoTipo("gasto_operativo");
+      setEgresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
+      setEgresoTipo(DEFAULT_CASH_EXPENSE_TYPE);
       setSuccess("Egreso registrado correctamente");
       await loadAll();
     } catch (err: any) {
@@ -1103,7 +1113,10 @@ export default function CierreCajaPage() {
       return {
         id: `ingreso-${ingreso.id}`,
         tipo: "ingreso",
-        etiquetaTipo: metodo === "abonos" ? "Abono" : "Ingreso manual",
+        etiquetaTipo:
+          metodo === "abonos"
+            ? "Abono"
+            : getCashMovementTypeLabel("ingreso", ingreso.tipo, "Ingreso manual"),
         detalle: ingreso.motivo || "Ingreso manual",
         medio: normalizePaymentMethod(ingreso.metodo_pago),
         monto: ingreso.monto || 0,
@@ -1118,7 +1131,7 @@ export default function CierreCajaPage() {
       return {
         id: `egreso-${egreso.id}`,
         tipo: "egreso",
-        etiquetaTipo: "Egreso",
+        etiquetaTipo: getCashMovementTypeLabel("egreso", egreso.tipo, "Egreso"),
         detalle: egreso.concepto || egreso.motivo || "Egreso",
         medio: normalizePaymentMethod(egreso.metodo_pago),
         monto: -Math.abs(egreso.monto || 0),
@@ -1316,7 +1329,8 @@ export default function CierreCajaPage() {
 
   const resetIngresoForm = () => {
     setIngresoMonto("");
-    setIngresoMetodoPago("efectivo");
+    setIngresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
+    setIngresoTipo(DEFAULT_CASH_INCOME_TYPE);
     setIngresoMotivo("");
     setIngresoFecha(getToday());
     setError(null);
@@ -1325,8 +1339,8 @@ export default function CierreCajaPage() {
   const resetEgresoForm = () => {
     setEgresoMonto("");
     setEgresoMotivo("");
-    setEgresoMetodoPago("efectivo");
-    setEgresoTipo("gasto_operativo");
+    setEgresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
+    setEgresoTipo(DEFAULT_CASH_EXPENSE_TYPE);
     setEgresoFecha(getToday());
     setError(null);
   };
@@ -1752,16 +1766,11 @@ export default function CierreCajaPage() {
                             onChange={(e) => setEgresoMetodoPago(e.target.value)}
                             className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            <option value="efectivo">Efectivo</option>
-                            <option value="tarjeta_credito">Tarjeta crédito</option>
-                            <option value="tarjeta_debito">Tarjeta débito</option>
-                            <option value="pos">POS</option>
-                            <option value="transferencia">Transferencia</option>
-                            <option value="link_de_pago">Link de pago</option>
-                            <option value="giftcard">Giftcard</option>
-                            <option value="addi">Addi</option>
-                            <option value="abonos">Abonos</option>
-                            <option value="otros">Otros</option>
+                            {CASH_PAYMENT_METHOD_OPTIONS.map((option) => (
+                              <option key={`egreso-metodo-${option.value}`} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div>
@@ -1771,10 +1780,11 @@ export default function CierreCajaPage() {
                             onChange={(e) => setEgresoTipo(e.target.value)}
                             className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            <option value="compra_interna">Compra interna</option>
-                            <option value="gasto_operativo">Gasto operativo</option>
-                            <option value="retiro_caja">Retiro de caja</option>
-                            <option value="otro">Otro</option>
+                            {CASH_EXPENSE_TYPE_OPTIONS.map((option) => (
+                              <option key={`egreso-tipo-${option.value}`} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
                           </select>
                         </div>
                         <div>
@@ -1827,9 +1837,39 @@ export default function CierreCajaPage() {
                         </div>
                       </div>
 
-                      <div>
-                        <label className="text-xs font-medium text-[#666370]">Fecha</label>
-                        <Input type="date" value={ingresoFecha} onChange={(e) => setIngresoFecha(e.target.value)} />
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div>
+                          <label className="text-xs font-medium text-[#666370]">Método de pago</label>
+                          <select
+                            value={ingresoMetodoPago}
+                            onChange={(e) => setIngresoMetodoPago(e.target.value)}
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {CASH_PAYMENT_METHOD_OPTIONS.map((option) => (
+                              <option key={`ingreso-metodo-${option.value}`} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-[#666370]">Tipo</label>
+                          <select
+                            value={ingresoTipo}
+                            onChange={(e) => setIngresoTipo(e.target.value)}
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {CASH_INCOME_TYPE_OPTIONS.map((option) => (
+                              <option key={`ingreso-tipo-${option.value}`} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-[#666370]">Fecha</label>
+                          <Input type="date" value={ingresoFecha} onChange={(e) => setIngresoFecha(e.target.value)} />
+                        </div>
                       </div>
                     </div>
 

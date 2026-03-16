@@ -269,6 +269,15 @@ const normalizarComparacionServicios = (servicios: ServicioSeleccionado[]) => {
     .sort((a, b) => a.servicio_id.localeCompare(b.servicio_id));
 };
 
+const normalizarComparacionServiciosHorario = (servicios: ServicioSeleccionado[]) => {
+  return [...servicios]
+    .map((servicio) => ({
+      servicio_id: servicio.servicio_id,
+      cantidad: servicio.cantidad
+    }))
+    .sort((a, b) => a.servicio_id.localeCompare(b.servicio_id));
+};
+
 const normalizarProductosCita = (productos: any[] | undefined): ProductoSeleccionado[] => {
   if (!Array.isArray(productos)) return [];
 
@@ -672,6 +681,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
   const hasUnsavedServiceChanges = JSON.stringify(normalizarComparacionServicios(serviciosSeleccionados))
     !== JSON.stringify(normalizarComparacionServicios(serviciosOriginales));
+  const hasUnsavedServiceDurationChanges = JSON.stringify(normalizarComparacionServiciosHorario(serviciosSeleccionados))
+    !== JSON.stringify(normalizarComparacionServiciosHorario(serviciosOriginales));
   const hasUnsavedProductChanges = JSON.stringify(normalizarComparacionProductos(productos))
     !== JSON.stringify(normalizarComparacionProductos(productosOriginales));
   const hasUnsavedScheduleChanges = (
@@ -707,12 +718,32 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     return (hours * 60) + minutes;
   };
 
+  const calcularDuracionEntreHoras = (horaInicio: string, horaFin: string): number => {
+    const inicioMinutos = convertirHoraAMinutos(horaInicio);
+    const finMinutos = convertirHoraAMinutos(horaFin);
+    if (!Number.isFinite(inicioMinutos) || !Number.isFinite(finMinutos)) return 0;
+    return Math.max(0, finMinutos - inicioMinutos);
+  };
+
+  const duracionGuardadaPorHorario = calcularDuracionEntreHoras(
+    horarioOriginal.hora_inicio,
+    horarioOriginal.hora_fin
+  );
+  const duracionProgramadaGuardada = duracionGuardadaPorHorario > 0
+    ? duracionGuardadaPorHorario
+    : Math.max(0, toNumber(appointmentDetails?.rawData?.servicio_duracion));
+  const duracionProgramadaActual = calcularDuracionEntreHoras(horaInicioEditada, horaFinEditada);
+  const duracionReferenciaHorario = hasUnsavedServiceDurationChanges
+    ? (duracionTotalServicios > 0
+      ? duracionTotalServicios
+      : (duracionProgramadaActual > 0 ? duracionProgramadaActual : duracionProgramadaGuardada))
+    : (duracionProgramadaGuardada > 0
+      ? duracionProgramadaGuardada
+      : (duracionTotalServicios > 0 ? duracionTotalServicios : duracionProgramadaActual));
+
   useEffect(() => {
     if (!horaInicioEditada || horaFinManual) return;
-
-    const duracionParaCalculo = duracionTotalServicios > 0
-      ? duracionTotalServicios
-      : Math.max(0, toNumber(horaFinEditada.split(':')[0]) * 60 + toNumber(horaFinEditada.split(':')[1]) - toNumber(horaInicioEditada.split(':')[0]) * 60 - toNumber(horaInicioEditada.split(':')[1]));
+    const duracionParaCalculo = duracionReferenciaHorario;
 
     if (duracionParaCalculo <= 0) return;
 
@@ -720,7 +751,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     if (horaFinCalculada !== horaFinEditada) {
       setHoraFinEditada(horaFinCalculada);
     }
-  }, [horaInicioEditada, duracionTotalServicios, horaFinEditada, horaFinManual]);
+  }, [duracionReferenciaHorario, horaFinEditada, horaFinManual, horaInicioEditada]);
 
   const getPagosData = () => {
     if (!appointmentDetails?.rawData) {
@@ -2019,11 +2050,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                             type="button"
                             onClick={() => {
                               if (!horaInicioEditada) return;
-
-                              const duracionActual = convertirHoraAMinutos(horaFinEditada) - convertirHoraAMinutos(horaInicioEditada);
-                              const duracionParaAuto = duracionTotalServicios > 0
-                                ? duracionTotalServicios
-                                : (Number.isFinite(duracionActual) && duracionActual > 0 ? duracionActual : 30);
+                              const duracionParaAuto = duracionReferenciaHorario > 0 ? duracionReferenciaHorario : 30;
                               setHoraFinEditada(sumarMinutosAHora(horaInicioEditada, duracionParaAuto));
                               setHoraFinManual(false);
                             }}
@@ -2048,8 +2075,13 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                     </div>
 
                     <div className="text-[10px] text-gray-600">
-                      Duración total estimada: <span className="font-semibold">{duracionTotalServicios} min</span>
+                      Duración programada: <span className="font-semibold">{duracionProgramadaActual > 0 ? duracionProgramadaActual : duracionReferenciaHorario} min</span>
                     </div>
+                    {duracionTotalServicios > 0 && duracionTotalServicios !== (duracionProgramadaActual > 0 ? duracionProgramadaActual : duracionReferenciaHorario) && (
+                      <div className="text-[10px] text-gray-500">
+                        Estimada por servicios: {duracionTotalServicios} min
+                      </div>
+                    )}
                     <div className="text-[10px] text-gray-500">
                       Horario actual: {formatAgendaTime(horaInicioEditada)} - {formatAgendaTime(horaFinEditada)} ({horaFinManual ? 'manual' : 'automática'})
                     </div>

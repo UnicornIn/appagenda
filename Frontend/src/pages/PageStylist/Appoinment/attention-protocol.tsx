@@ -366,7 +366,7 @@ export function AttentionProtocol({
     return response.statusText || "Error desconocido";
   };
 
-  const toIdString = (value: unknown): string => {
+  /* const toIdString = (value: unknown): string => {
     if (typeof value === "string") return value.trim();
     if (typeof value === "number") return String(value);
 
@@ -599,7 +599,7 @@ export function AttentionProtocol({
       esValido: false,
       mensaje: "Faltan fotos de DESPUÉS. Debes cargarlas para finalizar la cita.",
     };
-  };
+  }; */
 
   // useEffect(() => {
   //   setCalificacionCliente(cargarCalificacionClienteGuardada(citaSeleccionada));
@@ -679,10 +679,10 @@ export function AttentionProtocol({
       //   throw new Error("Debes asignar una puntuación al cliente antes de finalizar el servicio.");
       // }
 
-      const validacionFotos = await validarFotosRequeridasParaFinalizar(citaId, token);
-      if (!validacionFotos.esValido) {
-        throw new Error(validacionFotos.mensaje);
-      }
+      // const validacionFotos = await validarFotosRequeridasParaFinalizar(citaId, token);
+      // if (!validacionFotos.esValido) {
+      //   throw new Error(validacionFotos.mensaje);
+      // }
 
       console.log(`👤 Rol del usuario: ${usuarioRol}`);
       let seGeneroPdf = true;
