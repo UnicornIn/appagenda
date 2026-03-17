@@ -211,6 +211,7 @@ async def create_profesional(
 @router.get("/", response_model=list)
 async def list_professionals(
     activo: bool = None,
+    sede_id: str = None,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -218,10 +219,13 @@ async def list_professionals(
     Incluye nombres de servicios y nombre de la sede.
     """
     query = {"rol": "estilista"}
+    sede_activa = sede_id or current_user.get("sede_id")  # ← usar sede_activa
 
     # Filtrar por sede si es admin_sede
     if current_user["rol"] == "admin_sede":
-        query["sede_id"] = current_user["sede_id"]
+        query["sede_id"] = sede_activa
+    elif sede_activa and current_user["rol"] != "super_admin":
+        query["sede_id"] = sede_activa
     
     # Filtrar por estado activo
     if activo is not None:

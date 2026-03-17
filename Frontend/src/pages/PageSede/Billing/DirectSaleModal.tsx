@@ -15,6 +15,7 @@ import { Badge } from "../../../components/ui/badge";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import { giftcardsService } from "../../GiftCards/giftcardsService";
 import type { GiftCardClientOption } from "../../GiftCards/types";
+import { PAYROLL_PAYMENT_METHOD } from "../../../lib/payment-methods";
 import {
   createDirectSale,
   deleteAllDirectSaleProducts,
@@ -57,6 +58,7 @@ const ALL_PAYMENT_BREAKDOWN_METHODS = [
   "tarjeta_debito",
   "giftcard",
   "addi",
+  PAYROLL_PAYMENT_METHOD,
 ] as const;
 type PaymentBreakdownMethod = (typeof ALL_PAYMENT_BREAKDOWN_METHODS)[number];
 
@@ -67,6 +69,7 @@ const ALL_PAYMENT_METHOD_OPTIONS: Array<{ value: PaymentMethod; label: string }>
   { value: "tarjeta_debito", label: "Tarjeta de Débito" },
   { value: "giftcard", label: "Gift Card" },
   { value: "addi", label: "Addi" },
+  { value: PAYROLL_PAYMENT_METHOD, label: "Descuento por nómina" },
   { value: "tarjeta", label: "Tarjeta (legacy)" },
 ];
 
@@ -77,6 +80,7 @@ const buildEmptyPaymentBreakdown = (): Record<PaymentBreakdownMethod, number> =>
   tarjeta_debito: 0,
   giftcard: 0,
   addi: 0,
+  [PAYROLL_PAYMENT_METHOD]: 0,
 });
 
 const roundMoney = (value: number): number => Math.round(value * 100) / 100;
@@ -1362,6 +1366,8 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                             ? "Gift Card"
                             : method === "addi"
                             ? "Addi"
+                            : method === PAYROLL_PAYMENT_METHOD
+                            ? "Descuento por nómina"
                             : "Efectivo"
                         }
                       </label>

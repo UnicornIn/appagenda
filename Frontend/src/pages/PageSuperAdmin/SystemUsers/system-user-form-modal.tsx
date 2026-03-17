@@ -664,7 +664,7 @@ export function SystemUserFormModal({
               </button>
               <button
                 type="submit"
-                className="flex-1 px-4 py-2 bg-[oklch(0.65_0.25_280)] text-white rounded-lg hover:bg-[oklch(0.60_0.25_280)] disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-2 bg-black text-white rounded-lg hover:bg-neutral-900 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                 disabled={!canSubmit || isSaving}
               >
                 {isSaving ? (

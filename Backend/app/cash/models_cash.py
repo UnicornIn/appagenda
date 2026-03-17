@@ -69,6 +69,7 @@ class RegistroEgresoRequest(BaseModel):
     descripcion: Optional[str] = Field(None, max_length=1000, description="Descripción detallada")
     fecha: Optional[str] = Field(None, description="Fecha del egreso (default: hoy)")
     moneda: Moneda = Field(default=Moneda.COP)
+    metodo_pago: MetodoPagoIngreso = Field(default=MetodoPagoIngreso.EFECTIVO, description="Método de pago del egreso")  # ← NUEVO
     comprobante_numero: Optional[str] = None
     comprobante_tipo: Optional[str] = None
     categoria: Optional[str] = None
@@ -160,6 +161,7 @@ class EgresoResponse(BaseModel):
     descripcion: Optional[str]
     monto: float
     moneda: str
+    metodo_pago: str
     fecha: str
     registrado_por: str
     registrado_por_nombre: Optional[str]

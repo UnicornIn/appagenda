@@ -72,6 +72,11 @@ const buildCrearClientePayload = (clienteData: CrearClienteRequest): Record<stri
   return payload;
 };
 
+const resolveSedeId = (value?: string): string | undefined => {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+};
+
 const normalizarCliente = (c: any): Cliente => ({
   _id: c._id,
   cliente_id: c.cliente_id || c.id || c._id,
@@ -89,17 +94,23 @@ const normalizarCliente = (c: any): Cliente => ({
 
 const fetchClientesLivianos = async (
   token: string,
-  opciones?: FetchClientesOpts
+  opciones?: FetchClientesOpts,
+  sedeId?: string
 ): Promise<Cliente[]> => {
   const pagina = opciones?.pagina ?? 1;
   const limite = Math.min(Math.max(opciones?.limite ?? DEFAULT_LIMIT, 1), 100);
   const filtro = opciones?.filtro?.trim();
+  const normalizedSedeId = resolveSedeId(sedeId);
 
-  const { clientes } = await clientesService.getClientesPaginados(token, {
-    pagina,
-    limite,
-    filtro,
-  });
+  const { clientes } = await clientesService.getClientesPaginados(
+    token,
+    {
+      pagina,
+      limite,
+      filtro,
+    },
+    normalizedSedeId
+  );
 
   return clientes.map(normalizarCliente);
 };
@@ -185,7 +196,7 @@ export async function getClientesPorSede(
       `🔄 Obteniendo clientes para reservas (sede: ${sedeId || "auto"})...`
     );
 
-    const clientes = await fetchClientesLivianos(token, opciones);
+    const clientes = await fetchClientesLivianos(token, opciones, sedeId);
 
     console.log(`✅ Clientes cargados para reservas: ${clientes.length}`);
     return clientes;
@@ -276,12 +287,14 @@ export async function buscarClientesConDebounce(
 export async function crearCliente(token: string, clienteData: CrearClienteRequest): Promise<{success: boolean; cliente: Cliente}> {
   try {
     const payload = buildCrearClientePayload(clienteData);
+    const sedeId = resolveSedeId(clienteData.sede_id);
     console.log('🔄 Creando nuevo cliente:', payload);
     const res = await fetch(`${API_BASE_URL}clientes/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        ...(sedeId ? { 'X-Sede-Id': sedeId } : {}),
       },
       credentials: "include",
       body: JSON.stringify(payload),

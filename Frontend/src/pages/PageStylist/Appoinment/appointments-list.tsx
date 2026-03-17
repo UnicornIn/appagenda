@@ -35,24 +35,25 @@ const obtenerNombresServicios = (cita: any): string => {
 
 // 🔥 HELPER: Calcular precio total
 const calcularPrecioTotal = (cita: any): number => {
-  // Si tiene precio_total directo del backend
-  if (cita.precio_total) {
-    return cita.precio_total;
-  }
-  
-  // Si tiene array de servicios
+  const valor =
+    cita.valor_total ||
+    cita.precio_total ||
+    0;
+
+  if (valor > 1) return valor;
+
+  // Si viene en servicios, considerar subtotal como prioridad
   if (cita.servicios && Array.isArray(cita.servicios) && cita.servicios.length > 0) {
-    return cita.servicios.reduce((total: number, servicio: any) => {
-      return total + (servicio.precio || 0);
+    const totalServicios = cita.servicios.reduce((total: number, servicio: any) => {
+      const subtotal = servicio.subtotal ?? servicio.precio ?? servicio.precio_local ?? 0;
+      return total + subtotal;
     }, 0);
+    if (totalServicios > 0) return totalServicios;
   }
-  
-  // Si tiene servicio único
-  if (cita.servicio?.precio) {
-    return cita.servicio.precio;
-  }
-  
-  return 0;
+
+  if (cita.servicio?.precio) return cita.servicio.precio;
+
+  return valor; // 0 o 1 si no hay datos
 };
 
 export function AppointmentsList({ 

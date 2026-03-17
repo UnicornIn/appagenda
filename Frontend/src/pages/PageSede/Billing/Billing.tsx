@@ -11,6 +11,7 @@ import { Button } from "../../../components/ui/button"
 import { ShoppingBag } from "lucide-react"
 import { DirectSaleModal } from "./DirectSaleModal"
 import { DEFAULT_PERIOD } from "../../../lib/period"
+import { useAuth } from "../../../components/Auth/AuthContext"
 // Asegúrate de que esta interfaz coincida con la de TodayAppointments
 interface Appointment {
   _id: string
@@ -36,6 +37,7 @@ interface GlobalDateRange {
 }
 
 export default function Billing() {
+  const { user } = useAuth()
   // Estado para la cita seleccionada
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null)
   const [showDirectSaleModal, setShowDirectSaleModal] = useState(false)
@@ -43,6 +45,11 @@ export default function Billing() {
   const [globalPeriod, setGlobalPeriod] = useState(DEFAULT_PERIOD)
   const [globalDateRange, setGlobalDateRange] = useState<GlobalDateRange>({ start_date: "", end_date: "" })
   const [visibleAppointmentIds, setVisibleAppointmentIds] = useState<string[]>([])
+  const isRecepcionista =
+    String(user?.role ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_") === "recepcionista"
 
   const handleSelectAppointment = (appointment: Appointment) => {
     setSelectedAppointment(appointment)
@@ -95,6 +102,7 @@ export default function Billing() {
               dateRange={globalDateRange}
               onPeriodChange={setGlobalPeriod}
               onDateRangeChange={setGlobalDateRange}
+              hideSummaryCards={isRecepcionista}
             />
 
             {/* Main Content Grid */}

@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui
 import { SalesChart } from "./sales-chart";
 import { SalesDonutChart } from "./sales-donut-chart";
 import { ClientIndicators } from "./client-indicators";
+import { SuperAdminGlobalDashboard } from "./SuperAdminGlobalDashboard";
 import { Button } from "../../../components/ui/button";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import { formatSedeNombre } from "../../../lib/sede";
@@ -31,7 +32,6 @@ import {
   SelectValue,
 } from "../../../components/ui/select";
 import {
-  BarChart3,
   AlertCircle,
   Calendar,
   RefreshCw,
@@ -63,12 +63,13 @@ import {
   resolveCurrencyFromSede,
   resolveCurrencyLocale,
 } from "../../../lib/currency";
-import { DEFAULT_PERIOD } from "../../../lib/period";
 
 interface DateRange {
   start_date: string;
   end_date: string;
 }
+
+const SUPER_ADMIN_DEFAULT_PERIOD = "month";
 
 export default function DashboardPage() {
   const { user, isAuthenticated } = useAuth();
@@ -76,10 +77,9 @@ export default function DashboardPage() {
   const [loadingSedes, setLoadingSedes] = useState(false);
   const [dashboardData, setDashboardData] = useState<DashboardResponse | null>(null);
   const [ventasData, setVentasData] = useState<VentasDashboardResponse | null>(null);
-  const [globalData, setGlobalData] = useState<DashboardResponse | null>(null);
   const [sedes, setSedes] = useState<Sede[]>([]);
   const [, setPeriods] = useState<any[]>([]);
-  const [selectedPeriod, setSelectedPeriod] = useState(DEFAULT_PERIOD);
+  const [selectedPeriod, setSelectedPeriod] = useState(SUPER_ADMIN_DEFAULT_PERIOD);
   const [selectedSede, setSelectedSede] = useState<string>("global");
   const [showChurnList, setShowChurnList] = useState(false);
   const [churnData, setChurnData] = useState<any[]>([]);
@@ -110,7 +110,7 @@ export default function DashboardPage() {
     { id: "today", label: "Hoy" },
     { id: "last_7_days", label: "Últimos 7 días" },
     { id: "last_30_days", label: "Últimos 30 días" },
-    { id: "month", label: "Mes actual" },
+    { id: "month", label: "Mes" },
     { id: "custom", label: "Rango personalizado" },
   ];
 
@@ -144,9 +144,7 @@ export default function DashboardPage() {
   // Cargar datos cuando cambia sede o período
   useEffect(() => {
     if (isAuthenticated && user) {
-      if (selectedSede === "global") {
-        loadGlobalData();
-      } else {
+      if (selectedSede !== "global") {
         loadDashboardData();
       }
     }
@@ -159,8 +157,7 @@ export default function DashboardPage() {
       // Cargar en paralelo solo lo esencial
       await Promise.all([
         loadSedes(),
-        loadPeriods(),
-        loadGlobalData()
+        loadPeriods()
       ]);
     } catch (error: any) {
       console.error("Error cargando datos iniciales:", error);
@@ -180,73 +177,6 @@ export default function DashboardPage() {
       setError("Error al cargar las sedes");
     } finally {
       setLoadingSedes(false);
-    }
-  };
-
-  const loadGlobalData = async () => {
-    try {
-      if (selectedSede !== "global") return;
-
-      setError(null);
-      const ventasParams: any = {};
-      if (selectedPeriod === "custom") {
-        if (!dateRange.start_date || !dateRange.end_date) {
-          setError("Por favor selecciona un rango de fechas");
-          return;
-        }
-        ventasParams.start_date = dateRange.start_date;
-        ventasParams.end_date = dateRange.end_date;
-        ventasParams.period = "custom";
-      } else if (selectedPeriod === "today") {
-        const todayLocal = toLocalYMD(new Date());
-        ventasParams.period = "custom";
-        ventasParams.start_date = todayLocal;
-        ventasParams.end_date = todayLocal;
-      } else {
-        ventasParams.period = selectedPeriod;
-      }
-
-      let ventasResponse: VentasDashboardResponse | null = null;
-      let analyticsResponse: DashboardResponse | null = null;
-
-      try {
-        ventasResponse = await getVentasDashboard(user!.access_token, ventasParams);
-        setVentasData(ventasResponse);
-      } catch (ventasError: any) {
-        console.warn("Error cargando ventas globales:", ventasError.message);
-      }
-
-      try {
-        const analyticsParams: any = {};
-        if (selectedPeriod === "custom") {
-          analyticsParams.start_date = dateRange.start_date;
-          analyticsParams.end_date = dateRange.end_date;
-          analyticsParams.period = "custom";
-        } else if (selectedPeriod === "today") {
-          const todayLocal = toLocalYMD(new Date());
-          analyticsParams.period = "custom";
-          analyticsParams.start_date = todayLocal;
-          analyticsParams.end_date = todayLocal;
-        } else {
-          analyticsParams.period = selectedPeriod;
-        }
-        analyticsResponse = await getDashboard(user!.access_token, analyticsParams);
-        setGlobalData(analyticsResponse);
-      } catch (analyticsError: any) {
-        console.warn("Error cargando analytics globales:", analyticsError.message);
-      }
-
-      // Limpiar datos de sede específica
-      setDashboardData(null);
-      setChurnData([]);
-
-      if (!ventasResponse && !analyticsResponse) {
-        setError("No se pudieron cargar datos globales");
-      }
-    } catch (error: any) {
-      console.error("Error cargando datos globales:", error);
-      setError("Error al cargar datos globales");
-      setGlobalData(null);
     }
   };
 
@@ -372,9 +302,7 @@ export default function DashboardPage() {
   };
 
   const handleRefresh = useCallback(() => {
-    if (selectedSede === "global") {
-      loadGlobalData();
-    } else {
+    if (selectedSede !== "global") {
       loadDashboardData();
     }
   }, [selectedSede, selectedPeriod]);
@@ -386,9 +314,7 @@ export default function DashboardPage() {
     setChurnData([]);
     setError(null);
 
-    if (sedeId === "global") {
-      loadGlobalData();
-    } else {
+    if (sedeId !== "global") {
       // Activar delay de 5 segundos al cambiar sede
       setShowLoadingDelay(true);
       setTimeout(() => {
@@ -427,13 +353,15 @@ export default function DashboardPage() {
     setDateRange(tempDateRange);
     setShowDateModal(false);
     setSelectedPeriod("custom");
-    
-    // Cargar datos con delay de 5 segundos
-    setShowLoadingDelay(true);
-    setTimeout(() => {
-      setShowLoadingDelay(false);
-      loadDashboardData();
-    }, 5000);
+
+    if (selectedSede !== "global") {
+      // Cargar datos con delay de 5 segundos
+      setShowLoadingDelay(true);
+      setTimeout(() => {
+        setShowLoadingDelay(false);
+        loadDashboardData();
+      }, 5000);
+    }
   };
 
   // Función para seleccionar rango rápido
@@ -722,132 +650,6 @@ export default function DashboardPage() {
     return paymentMethods;
   };
 
-  const VentasOverview = () => (
-    <>
-      {/* KPIs principales */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="border border-gray-200">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-              <DollarSign className="w-4 h-4" />
-              Ventas Totales
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(getMetricasVentas().ventas_totales)}
-            </div>
-            <p className="text-sm text-gray-500 mt-2">
-              {getMetricasVentas().cantidad_ventas || 0} transacciones
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border border-gray-200">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-              <Receipt className="w-4 h-4" />
-              Transacciones
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {getMetricasVentas().cantidad_ventas || 0}
-            </div>
-            <p className="text-sm text-gray-500 mt-2">
-              Ticket promedio: {formatCurrency(getMetricasVentas().ticket_promedio || 0)}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border border-gray-200">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-              <Users className="w-4 h-4" />
-              Servicios
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(getMetricasVentas().ventas_servicios)}
-            </div>
-            <p className="text-sm text-gray-500 mt-2">
-              {getMetricasVentas().ventas_servicios > 0 && getMetricasVentas().ventas_totales > 0
-                ? `${Math.round((getMetricasVentas().ventas_servicios / getMetricasVentas().ventas_totales) * 100)}% del total`
-                : 'Sin datos'}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border border-gray-200">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-              <Package className="w-4 h-4" />
-              Productos
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(getMetricasVentas().ventas_productos)}
-            </div>
-            <p className="text-sm text-gray-500 mt-2">
-              {getMetricasVentas().ventas_productos > 0 && getMetricasVentas().ventas_totales > 0
-                ? `${Math.round((getMetricasVentas().ventas_productos / getMetricasVentas().ventas_totales) * 100)}% del total`
-                : 'Sin datos'}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Main Dashboard Grid con gráficos */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Left Column */}
-        <div className="flex flex-col gap-6">
-          <SalesChart
-            salesData={getSalesChartData()}
-            formatCurrency={formatCurrencyShort}
-            title="Ventas Semanales"
-          />
-
-          <SalesDonutChart
-            donutData={getDonutData()}
-            formatCurrency={formatCurrency}
-            title="Distribución de Ventas"
-          />
-        </div>
-
-        {/* Right Column */}
-        <div className="flex flex-col gap-6">
-          {/* Métodos de Pago */}
-          <Card className="border border-gray-200">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-sm font-medium text-gray-900 flex items-center gap-2">
-                <CreditCard className="w-4 h-4" />
-                Métodos de Pago
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 pt-2">
-              <div className="grid grid-cols-2 gap-3">
-                {getPaymentMethodData().map((method, index) => (
-                  <div key={index} className="flex flex-col items-center justify-center p-3 bg-gray-50 rounded-lg border border-gray-200">
-                    <div
-                      className="w-3 h-3 rounded-full mb-1"
-                      style={{ backgroundColor: method.color }}
-                    />
-                    <span className="text-xs font-medium">{method.name}</span>
-                    <span className="text-sm font-bold mt-1">
-                      {formatCurrency(method.value)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </>
-  );
-
   // Función para convertir TicketPromedioKPI a KPI
   const convertTicketPromedioToKPI = (ticketPromedio: TicketPromedioKPI): KPI => {
     if (typeof ticketPromedio === 'object' && ticketPromedio.valor !== undefined) {
@@ -859,16 +661,6 @@ export default function DashboardPage() {
 
     // Si es un KPI normal (string/number)
     return ticketPromedio as KPI;
-  };
-
-  // Función segura para obtener valor de ticket promedio
-  const getSafeTicketPromedioValue = (ticketPromedio: TicketPromedioKPI | KPI): string | number => {
-    if (typeof ticketPromedio === 'object') {
-      if ('valor' in ticketPromedio && ticketPromedio.valor !== undefined) {
-        return ticketPromedio.valor;
-      }
-    }
-    return (ticketPromedio as KPI).valor;
   };
 
   // Modal de selección de fechas
@@ -1145,7 +937,7 @@ export default function DashboardPage() {
             {/* Tabs Content */}
             <div className="p-4">
               <TabsContent value="dashboard" className="m-0">
-                {loading && selectedSede === "global" && !globalData && !ventasData ? (
+                {loading && selectedSede === "global" && sedes.length === 0 ? (
                   <div className="flex items-center justify-center h-64">
                     <div className="text-center">
                       <div className="w-10 h-10 border-3 border-gray-200 border-t-gray-900 rounded-full animate-spin mx-auto mb-4" />
@@ -1176,114 +968,13 @@ export default function DashboardPage() {
                     </Button>
                   </div>
                 ) : selectedSede === "global" ? (
-                  // Vista Global
-                  globalData ? (
-                    <div className="space-y-4">
-                      <Card className="border border-gray-200 bg-gray-50">
-                        <CardContent className="p-6">
-                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                            <div className="flex items-start gap-4">
-                              <div className="p-3 bg-gray-100 rounded-xl">
-                                <Globe className="w-6 h-6 text-gray-800" />
-                              </div>
-                              <div>
-                                <h3 className="text-xl font-bold">Vista Global</h3>
-                                <p className="text-gray-600 mt-2">
-                                  {sedes.length} sedes activas • Período: {getPeriodDisplay()}
-                                </p>
-                                {globalData.range && (
-                                  <p className="text-sm text-gray-500">
-                                    {formatDateDMY(globalData.range.start)} - {formatDateDMY(globalData.range.end)}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            {/* <Badge className="bg-gray-900 text-white">
-                              {globalData.calidad_datos || 'BUENA'}
-                            </Badge> */}
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      {/* Charts Grid para vista global */}
-                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                        {/* Left Column */}
-                        <div className="space-y-4">
-                          <Card>
-                            <CardContent className="p-4">
-                              <div className="text-2xl font-bold text-gray-900 mb-1">
-                                {formatCurrency(getSafeTicketPromedioValue(globalData.kpis.ticket_promedio))}
-                              </div>
-                              <p className="text-sm text-gray-600">
-                                Ticket promedio del período
-                              </p>
-                            </CardContent>
-                          </Card>
-
-                          <SalesDonutChart
-                            donutData={[
-                              { name: "Servicios", value: 80, color: "#333" },
-                              { name: "Productos", value: 20, color: "#666" }
-                            ]}
-                            formatCurrency={formatCurrency}
-                          />
-                        </div>
-
-                        {/* Right Column */}
-                        <div className="space-y-4">
-                          <SalesChart
-                            salesData={[
-                              { month: "Ene", value: 4000 },
-                              { month: "Feb", value: 3000 },
-                              { month: "Mar", value: 2000 },
-                              { month: "Abr", value: 2780 },
-                              { month: "May", value: 1890 },
-                            ]}
-                            formatCurrency={formatCurrencyShort}
-                          />
-
-                          <ClientIndicators
-                            nuevosClientes={globalData.kpis.nuevos_clientes}
-                            tasaRecurrencia={globalData.kpis.tasa_recurrencia}
-                            tasaChurn={globalData.kpis.tasa_churn}
-                            ticketPromedio={convertTicketPromedioToKPI(globalData.kpis.ticket_promedio)}
-                            currency={getMetricasVentas().moneda}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ) : ventasData ? (
-                    <div className="space-y-4">
-                      <Card className="border border-gray-200 bg-gray-50">
-                        <CardContent className="p-6">
-                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                            <div className="flex items-start gap-4">
-                              <div className="p-3 bg-gray-100 rounded-xl">
-                                <Globe className="w-6 h-6 text-gray-800" />
-                              </div>
-                              <div>
-                                <h3 className="text-xl font-bold">Vista Global (Ventas)</h3>
-                                <p className="text-gray-600 mt-2">
-                                  {sedes.length} sedes activas • Período: {getPeriodDisplay()}
-                                </p>
-                              </div>
-                            </div>
-                            {/* <Badge className="bg-gray-900 text-white">Ventas</Badge> */}
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      <VentasOverview />
-                    </div>
-                  ) : (
-                    <div className="text-center py-12">
-                      <BarChart3 className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">No hay datos globales disponibles</h3>
-                      <Button onClick={handleRefresh} className="bg-gray-900 hover:bg-gray-800 text-white">
-                        Recargar datos
-                      </Button>
-                    </div>
-                  )
+                  <SuperAdminGlobalDashboard
+                    token={user!.access_token}
+                    sedes={sedes}
+                    selectedPeriod={selectedPeriod}
+                    dateRange={dateRange}
+                    preferredCurrency={monedaUsuario}
+                  />
                 ) : (
                   // Vista de Sede Específica
                   <div className="space-y-6">

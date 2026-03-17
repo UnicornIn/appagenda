@@ -15,7 +15,7 @@ interface ClientFormModalProps {
 }
 
 export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, sedeId }: ClientFormModalProps) {
-  const { user } = useAuth()
+  const { user, activeSedeId } = useAuth()
   const [formData, setFormData] = useState({
     nombre: "",
     correo: "",
@@ -29,6 +29,14 @@ export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, 
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [localIsSaving, setLocalIsSaving] = useState(false)
+  const resolvedSedeId = String(
+    sedeId ||
+      activeSedeId ||
+      user?.sede_id ||
+      sessionStorage.getItem("beaux-sede_id") ||
+      localStorage.getItem("beaux-sede_id") ||
+      ""
+  ).trim()
 
   // Resetear form cuando se abre
   useEffect(() => {
@@ -78,7 +86,7 @@ export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, 
         ...(formData.cedula?.trim() ? { cedula: formData.cedula.trim() } : {}),
         ...(formData.ciudad?.trim() ? { ciudad: formData.ciudad.trim() } : {}),
         ...(formData.fecha_de_nacimiento?.trim() ? { fecha_de_nacimiento: formData.fecha_de_nacimiento.trim() } : {}),
-        ...(sedeId?.trim() ? { sede_id: sedeId.trim() } : {}),
+        ...(resolvedSedeId ? { sede_id: resolvedSedeId } : {}),
         ...(formData.notas?.trim() ? { notas: formData.notas.trim() } : {})
       }
 

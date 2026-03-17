@@ -10,6 +10,7 @@ export interface Estilista {
   franquicia_id: string | null;
   created_by: string;
   comision: number | null;
+  comisiones_por_categoria?: Record<string, number>;
   created_at: string;
   updated_at: string;
   especialidades_detalle: Array<{
@@ -27,6 +28,7 @@ export type CreateEstilistaData = {
   sede_id: string;
   especialidades: string[];
   comision: number | null;
+  telefono?: string;
   password: string;
   activo?: boolean;
 };
@@ -37,6 +39,7 @@ export type UpdateEstilistaData = {
   sede_id?: string;
   especialidades?: string[];
   comision?: number | null;
+  comisiones_por_categoria?: Record<string, number>;
   activo?: boolean;
 };
 
@@ -54,6 +57,7 @@ export interface Estilista {
   rol: string;
   profesional_id: string;
   sede_id: string;
+  telefono?: string;
   sede_nombre?: string; // 🔥 NUEVO: Nombre de la sede
   franquicia_id: string | null;
   created_by: string;

@@ -1,5 +1,6 @@
 // services/citasApi.ts
 import { API_BASE_URL } from "../../types/config";
+import { normalizePaymentMethodForBackend } from "../../lib/payment-methods";
 
 export async function getCitas(params?: { sede_id?: string; profesional_id?: string; fecha?: string }, token?: string) {
   const query = new URLSearchParams();
@@ -67,7 +68,9 @@ export async function crearCita(data: any, token: string) {
     hora_fin: data.hora_fin,
     
     // Pago
-    metodo_pago_inicial: data.metodo_pago || data.metodo_pago_inicial || "sin_pago",
+    metodo_pago_inicial: normalizePaymentMethodForBackend(
+      data.metodo_pago || data.metodo_pago_inicial || "sin_pago"
+    ),
     abono: Number(data.abono) || 0,
     
     // Opcional

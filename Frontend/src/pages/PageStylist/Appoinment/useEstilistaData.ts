@@ -56,8 +56,16 @@ export function useEstilistaData() {
           comentario: cita.comentario || cita.notas || "",
         }));
         
-        console.log('✅ Citas cargadas:', citasFormateadas);
-        setCitas(citasFormateadas);
+        const requierePrecioReal = citasFormateadas.some(
+          (c) => (c.precio_total ?? 0) <= 1 && (c.servicios?.length ?? 0) > 0
+        );
+
+        const citasConPrecio = requierePrecioReal
+          ? await hidratarPreciosReales(citasFormateadas, token)
+          : citasFormateadas;
+
+        console.log('✅ Citas cargadas:', citasConPrecio);
+        setCitas(citasConPrecio);
         setError(null);
       }
     } catch (err) {
@@ -177,3 +185,73 @@ export function useEstilistaData() {
     getCurrentToken,
   };
 }
+
+// 🔥 Si el endpoint de estilista devuelve precio 0/1, traer el valor real desde /scheduling/quotes
+const hidratarPreciosReales = async (citas: any[], token: string) => {
+  const citasPorFecha: Record<string, any[]> = {};
+
+  citas.forEach((cita) => {
+    if (!cita.fecha) return;
+    if (!citasPorFecha[cita.fecha]) citasPorFecha[cita.fecha] = [];
+    citasPorFecha[cita.fecha].push(cita);
+  });
+
+  const resultado = [...citas];
+
+  for (const [fecha, citasDia] of Object.entries(citasPorFecha)) {
+    const profesionalId = citasDia[0].profesional_id || citasDia[0].estilista_id;
+    if (!profesionalId) continue;
+
+    try {
+      const resp = await fetch(
+        `${API_BASE_URL}scheduling/quotes/?profesional_id=${profesionalId}&fecha=${fecha}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/json',
+          },
+        }
+      );
+
+      if (!resp.ok) continue;
+      const payload = await resp.json();
+      const citasBackend: any[] = payload?.citas || [];
+
+      citasBackend.forEach((raw) => {
+        const rawId = raw.cita_id || raw._id || raw.id;
+        const precioReal =
+          raw.valor_total ||
+          raw.precio_total ||
+          (Array.isArray(raw.servicios)
+            ? raw.servicios.reduce(
+                (sum: number, s: any) =>
+                  sum +
+                  (s.subtotal ||
+                    s.precio ||
+                    s.precio_local ||
+                    0),
+                0
+              )
+            : 0);
+
+        if (!precioReal || !rawId) return;
+
+        const idx = resultado.findIndex(
+          (c) => c.cita_id === rawId || c.cita_id === String(rawId)
+        );
+
+        if (idx !== -1) {
+          resultado[idx] = {
+            ...resultado[idx],
+            precio_total: precioReal,
+            valor_total: precioReal,
+          };
+        }
+      });
+    } catch (error) {
+      console.warn('No se pudo hidratar precios para', fecha, error);
+    }
+  }
+
+  return resultado;
+};

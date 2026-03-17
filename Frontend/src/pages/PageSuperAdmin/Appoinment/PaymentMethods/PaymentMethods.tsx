@@ -15,6 +15,7 @@ import {
     normalizeCurrencyCode,
     resolveCurrencyLocale
 } from "../../../../lib/currency"
+import { normalizePaymentMethodForBackend } from "../../../../lib/payment-methods"
 
 // 🔥 INTERFAZ PARA LOS DATOS DE LA CITA
 interface CitaParaPago {
@@ -90,8 +91,9 @@ export default function PagosPage() {
     const userCurrency = normalizeCurrencyCode(user?.moneda || getStoredCurrency("USD"))
     const isCopCurrency = userCurrency === "COP"
     const sanitizePaymentMethod = (method: string): string => {
-        if (!isCopCurrency && method === "addi") return "efectivo"
-        return method
+        const normalizedMethod = normalizePaymentMethodForBackend(method)
+        if (!isCopCurrency && normalizedMethod === "addi") return "efectivo"
+        return normalizedMethod
     }
     
     // 🔥 ABONO FIJO DE $50,000 COP
@@ -501,7 +503,7 @@ export default function PagosPage() {
                             </Button>
                             <Button
                                 size="lg"
-                                className="bg-[oklch(0.55_0.25_280)] hover:bg-[oklch(0.50_0.25_280)]"
+                                className="bg-black text-white hover:bg-neutral-900"
                                 onClick={handleConfirm}
                                 disabled={
                                     loading ||

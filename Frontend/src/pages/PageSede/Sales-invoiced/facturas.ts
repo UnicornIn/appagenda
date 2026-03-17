@@ -5,6 +5,7 @@ import {
   type PaymentMethodTotals,
 } from "../../../lib/payment-methods-summary";
 import { toBackendDate } from "../../../lib/dateFormat";
+import { getSedes } from "../../../components/Branch/sedesApi";
 
 export interface FacturaAPI {
   _id: string;
@@ -134,6 +135,82 @@ export class FacturaService {
       sessionStorage.getItem("access_token") ||
       localStorage.getItem("access_token")
     );
+  }
+
+  private getStoredSedeId(): string | null {
+    return (
+      sessionStorage.getItem("beaux-active-sede_id") ||
+      sessionStorage.getItem("beaux-sede_id") ||
+      localStorage.getItem("beaux-active-sede_id") ||
+      localStorage.getItem("beaux-sede_id")
+    );
+  }
+
+  private getStoredSedeCandidates(): string[] {
+    const seen = new Set<string>();
+    const candidates = [
+      sessionStorage.getItem("beaux-active-sede_id"),
+      sessionStorage.getItem("beaux-sede_id"),
+      sessionStorage.getItem("beaux-sede_id_principal"),
+      sessionStorage.getItem("beaux-selected-sede_id"),
+      localStorage.getItem("beaux-active-sede_id"),
+      localStorage.getItem("beaux-sede_id"),
+      localStorage.getItem("beaux-sede_id_principal"),
+      localStorage.getItem("beaux-selected-sede_id"),
+    ];
+
+    return candidates.reduce<string[]>((acc, value) => {
+      const normalized = String(value ?? "").trim();
+      if (!normalized || seen.has(normalized)) return acc;
+      seen.add(normalized);
+      acc.push(normalized);
+      return acc;
+    }, []);
+  }
+
+  private async getSedeQueryCandidates(preferredSedeId?: string): Promise<string[]> {
+    const initialCandidates = [
+      String(preferredSedeId ?? "").trim(),
+      ...this.getStoredSedeCandidates(),
+    ].filter(Boolean);
+
+    const pushUnique = (target: string[], value: string | null | undefined) => {
+      const normalized = String(value ?? "").trim();
+      if (!normalized || target.includes(normalized)) return;
+      target.push(normalized);
+    };
+
+    const resolvedCandidates: string[] = [];
+    initialCandidates.forEach((candidate) => pushUnique(resolvedCandidates, candidate));
+
+    const token = this.getAuthToken();
+    if (!token || resolvedCandidates.length === 0) {
+      return resolvedCandidates;
+    }
+
+    try {
+      const sedes = await getSedes(token);
+      const normalizedCandidates = new Set(resolvedCandidates.map((candidate) => candidate.toUpperCase()));
+
+      sedes.forEach((sede) => {
+        const ids = [
+          String(sede.sede_id ?? "").trim(),
+          String(sede._id ?? "").trim(),
+          String(sede.unique_id ?? "").trim(),
+        ].filter(Boolean);
+
+        const matchesCandidate = ids.some((id) => normalizedCandidates.has(id.toUpperCase()));
+        if (!matchesCandidate) return;
+
+        pushUnique(resolvedCandidates, sede.sede_id);
+        pushUnique(resolvedCandidates, sede._id);
+        pushUnique(resolvedCandidates, sede.unique_id);
+      });
+    } catch (error) {
+      console.warn("No se pudieron resolver IDs alternos de sede para facturación:", error);
+    }
+
+    return resolvedCandidates;
   }
 
   private normalizeDateRange(
@@ -412,6 +489,63 @@ export class FacturaService {
     return response.json();
   }
 
+  private async fetchFacturasResult(
+    sede_id: string,
+    filtros: {
+      searchTerm?: string;
+      fecha_desde?: string;
+      fecha_hasta?: string;
+      page?: number;
+      limit?: number;
+    }
+  ): Promise<{
+    facturas: FacturaConverted[];
+    pagination?: any;
+    filters_applied?: any;
+    paymentSummary?: PaymentMethodTotals | null;
+  }> {
+    let url = `${API_BASE_URL}api/billing/sales/${sede_id}`;
+    const params = new URLSearchParams();
+    const normalizedRange = this.normalizeDateRange(filtros.fecha_desde, filtros.fecha_hasta);
+
+    params.append("page", (filtros.page || 1).toString());
+    params.append("limit", (filtros.limit || 50).toString());
+    params.append("sort_order", "desc");
+
+    if (filtros.searchTerm) {
+      params.append("search", filtros.searchTerm);
+    }
+
+    params.append("fecha_desde", normalizedRange.fecha_desde);
+    params.append("fecha_hasta", normalizedRange.fecha_hasta);
+
+    url += `?${params.toString()}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: this.getHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Error ${response.status}: ${response.statusText}`);
+    }
+
+    const data: FacturaResponse = await response.json();
+    const paymentSummary = extractPaymentMethodTotalsFromApiSummary(data);
+    const ventas = Array.isArray(data.ventas)
+      ? data.ventas.filter((factura) => factura != null)
+      : [];
+    const facturasIniciales = ventas.map((factura) => this.convertToAppFormat(factura));
+    const facturas = await this.revalidateNonPaidFacturas(sede_id, ventas, facturasIniciales);
+
+    return {
+      facturas,
+      pagination: data.pagination,
+      filters_applied: data.filters_applied,
+      paymentSummary,
+    };
+  }
+
   async getDetalleVenta(sede_id: string, venta_id: string): Promise<FacturaConverted> {
     const factura = await this.fetchDetalleVentaRaw(sede_id, venta_id);
     return this.convertToAppFormat(factura);
@@ -510,8 +644,7 @@ export class FacturaService {
     search?: string
   ): Promise<FacturaConverted[]> {
     try {
-      // Obtener el sede_id del usuario desde sessionStorage
-      const sede_id = sessionStorage.getItem("beaux-sede_id");
+      const sede_id = this.getStoredSedeId();
       
       if (!sede_id) {
         console.warn("No se encontró sede_id en la sesión");
@@ -587,58 +720,46 @@ export class FacturaService {
     paymentSummary?: PaymentMethodTotals | null;
   }> {
     try {
-      // Obtener el sede_id del usuario
-      const sede_id = sessionStorage.getItem("beaux-sede_id");
-      
-      if (!sede_id) {
+      const sedeCandidates = await this.getSedeQueryCandidates(this.getStoredSedeId() ?? undefined);
+
+      if (sedeCandidates.length === 0) {
         console.warn("No se encontró sede_id");
         return { facturas: [], pagination: null, filters_applied: null };
       }
 
-      // Construir URL con filtros
-      let url = `${API_BASE_URL}api/billing/sales/${sede_id}`;
-      const params = new URLSearchParams();
-      const normalizedRange = this.normalizeDateRange(filtros.fecha_desde, filtros.fecha_hasta);
-      
-      params.append('page', (filtros.page || 1).toString());
-      params.append('limit', (filtros.limit || 50).toString());
-      params.append('sort_order', 'desc');
-      
-      if (filtros.searchTerm) {
-        params.append('search', filtros.searchTerm);
-      }
-      
-      // Forzar rango explícito para evitar filtros implícitos del backend.
-      params.append('fecha_desde', normalizedRange.fecha_desde);
-      params.append('fecha_hasta', normalizedRange.fecha_hasta);
-      
-      url += `?${params.toString()}`;
-      
-      const response = await fetch(url, {
-        method: "GET",
-        headers: this.getHeaders(),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Error ${response.status}: ${response.statusText}`);
-      }
-
-      const data: FacturaResponse = await response.json();
-      const paymentSummary = extractPaymentMethodTotalsFromApiSummary(data);
-      
-      // Validar y convertir datos
-      const ventas = Array.isArray(data.ventas)
-        ? data.ventas.filter((factura) => factura != null)
-        : [];
-      const facturasIniciales = ventas.map((factura) => this.convertToAppFormat(factura));
-      const facturas = await this.revalidateNonPaidFacturas(sede_id, ventas, facturasIniciales);
-      
-      return {
-        facturas: facturas,
-        pagination: data.pagination,
-        filters_applied: data.filters_applied,
-        paymentSummary,
+      let lastEmptyResult: {
+        facturas: FacturaConverted[];
+        pagination?: any;
+        filters_applied?: any;
+        paymentSummary?: PaymentMethodTotals | null;
+      } = {
+        facturas: [],
+        pagination: null,
+        filters_applied: null,
+        paymentSummary: null,
       };
+      let lastError: unknown = null;
+
+      for (const sedeId of sedeCandidates) {
+        try {
+          const result = await this.fetchFacturasResult(sedeId, filtros);
+
+          if ((result.facturas?.length || 0) > 0 || (result.pagination?.total || 0) > 0) {
+            return result;
+          }
+
+          lastEmptyResult = result;
+        } catch (error) {
+          lastError = error;
+          console.warn(`No se pudieron cargar facturas para sede ${sedeId}:`, error);
+        }
+      }
+
+      if (lastError && lastEmptyResult.facturas.length === 0) {
+        throw lastError;
+      }
+
+      return lastEmptyResult;
       
     } catch (error) {
       console.error("Error buscando facturas:", error);
