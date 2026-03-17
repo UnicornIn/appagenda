@@ -329,6 +329,29 @@ export function AttentionProtocol({
     const rawId = cita?.cita_id || cita?._id || "";
     return typeof rawId === "string" ? rawId : String(rawId || "");
   };
+
+  const getFichaCitaId = (ficha?: Partial<FichaServidor>): string => {
+    const candidates = [
+      ficha?.cita_id,
+      (ficha as any)?.contenido?.cita_id,
+      (ficha as any)?.contenido?.datos_especificos?.cita_id,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+
+    return "";
+  };
+
+  const existeFichaAsociada = (citaId: string): boolean => {
+    const normalizado = (citaId || "").trim();
+    if (!normalizado) return false;
+
+    return fichasCliente.some((ficha) => getFichaCitaId(ficha) === normalizado);
+  };
   // Código de funciones de calificación del cliente desactivado temporalmente.
 
   const scrollBottomSheetToTop = () => {
@@ -667,6 +690,17 @@ export function AttentionProtocol({
       return;
     }
 
+    // Para perfil de estilista: exigir ficha técnica antes de finalizar
+    if (
+      usuarioRol === "estilista" &&
+      !loadingFichas &&
+      fichasCliente.length > 0 &&
+      !existeFichaAsociada(citaId)
+    ) {
+      alert("Debes crear y guardar la ficha técnica de esta cita antes de finalizar el servicio.");
+      return;
+    }
+
     setLoadingFinalizar(true);
     try {
       const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
@@ -685,10 +719,9 @@ export function AttentionProtocol({
       // }
 
       console.log(`👤 Rol del usuario: ${usuarioRol}`);
-      let seGeneroPdf = true;
 
       // Usar el endpoint PUT /scheduling/quotes/citas/{cita_id}/finalizar
-      let response = await fetch(`${API_BASE_URL}scheduling/quotes/citas/${citaId}/finalizar`, {
+      const response = await fetch(`${API_BASE_URL}scheduling/quotes/citas/${citaId}/finalizar`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -699,40 +732,39 @@ export function AttentionProtocol({
 
       console.log('Response status:', response.status);
 
-      if (!response.ok) {
-        const errorMessage = await extractBackendErrorMessage(response);
-        const requiereFallbackCompletar =
-          response.status === 404 &&
-          errorMessage.toLowerCase().includes("ficha");
-
-        if (!requiereFallbackCompletar) {
-          throw new Error(`Error ${response.status}: ${errorMessage}`);
-        }
-
-        console.warn("Finalización con PDF no disponible, usando fallback de completar cita:", errorMessage);
-        seGeneroPdf = false;
-
-        response = await fetch(`${API_BASE_URL}scheduling/quotes/${citaId}/completar`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (!response.ok) {
-          const fallbackError = await extractBackendErrorMessage(response);
-          throw new Error(`Error ${response.status}: ${fallbackError}`);
-        }
+      const rawBody = await response.text();
+      let data: any = {};
+      try {
+        data = rawBody ? JSON.parse(rawBody) : {};
+      } catch {
+        data = {};
       }
 
-      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const errorMessage =
+          (typeof data?.detail === "string" && data.detail) ||
+          (typeof data?.message === "string" && data.message) ||
+          rawBody ||
+          response.statusText;
+
+        const faltaFicha =
+          response.status === 404 &&
+          typeof errorMessage === "string" &&
+          errorMessage.toLowerCase().includes("ficha");
+
+        const mensajeError = faltaFicha
+          ? "Debes crear y guardar la ficha técnica de esta cita antes de finalizar el servicio."
+          : `Error ${response.status}: ${errorMessage}`;
+
+        throw new Error(mensajeError);
+      }
+
+      const seGeneroPdf = data?.pdf_generado !== false;
       console.log('✅ Servicio finalizado:', data);
 
       // Actualizar estado local de la cita
       if (citaSeleccionada) {
-        citaSeleccionada.estado = seGeneroPdf ? "finalizado" : "completada";
+        citaSeleccionada.estado = "finalizado";
       }
 
       // Limpiar fichas guardadas de esta cita
@@ -752,13 +784,13 @@ export function AttentionProtocol({
       setTipoFichaSeleccionada(null);
 
       // Mostrar mensaje según rol
-      const mensaje = usuarioRol === "estilista"
-        ? seGeneroPdf
-          ? "✅ Servicio finalizado como estilista. El admin puede proceder con la facturación."
-          : "✅ Servicio finalizado sin ficha técnica asociada. La cita quedó completada."
-        : seGeneroPdf
-          ? "✅ Servicio finalizado por administración."
-          : "✅ Servicio finalizado sin ficha técnica asociada.";
+      let mensaje = usuarioRol === "estilista"
+        ? "✅ Servicio finalizado como estilista. El admin puede proceder con la facturación."
+        : "✅ Servicio finalizado por administración.";
+
+      if (!seGeneroPdf) {
+        mensaje += " No se pudo generar o enviar el PDF de la ficha; por favor revisa en administración.";
+      }
 
       alert(mensaje);
 

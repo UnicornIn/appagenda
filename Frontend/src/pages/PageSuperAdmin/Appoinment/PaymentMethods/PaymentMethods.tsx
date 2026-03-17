@@ -503,7 +503,7 @@ export default function PagosPage() {
                             </Button>
                             <Button
                                 size="lg"
-                                className="bg-[oklch(0.55_0.25_280)] hover:bg-[oklch(0.50_0.25_280)]"
+                                className="bg-black text-white hover:bg-neutral-900"
                                 onClick={handleConfirm}
                                 disabled={
                                     loading ||

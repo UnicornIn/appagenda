@@ -133,12 +133,22 @@ const getEstadoUI = (estado?: string) => {
 
 // Helper: calcular precio total de cita
 const calcularPrecioTotalCita = (cita: any): number => {
+  const valor =
+    cita.valor_total ||
+    cita.precio_total ||
+    0;
+
+  if (valor > 1) return valor;
+
   if (cita.servicios && Array.isArray(cita.servicios) && cita.servicios.length > 0) {
-    return cita.servicios.reduce((total: number, servicio: any) => total + (servicio.precio || 0), 0);
+    const total = cita.servicios.reduce((total: number, servicio: any) => {
+      const subtotal = servicio.subtotal ?? servicio.precio ?? servicio.precio_local ?? 0;
+      return total + subtotal;
+    }, 0);
+    if (total > 0) return total;
   }
   if (cita.servicio?.precio) return cita.servicio.precio;
-  if (cita.precio_total) return cita.precio_total;
-  return 0;
+  return valor;
 };
 
 // Helper: obtener nombres de servicios

@@ -147,10 +147,17 @@ export function Sidebar() {
     return sedeOptions[0]?.sede_id || "";
   }, [activeSedeId, user?.sede_id, user?.sede_id_principal, sedeOptions]);
 
-  const shouldShowSedeSelector = !collapsed && supportsMultiSedeSelector && sedeOptions.length > 1;
+  const shouldShowSedeSelector =
+    !collapsed && !isSuperAdmin && supportsMultiSedeSelector && sedeOptions.length > 1;
 
   useEffect(() => {
     const fallbackOptions = allowedSedeIds.map((sedeId) => ({ sede_id: sedeId, nombre: sedeId }));
+
+    if (isSuperAdmin) {
+      setSedeOptions([]);
+      setLoadingSedeOptions(false);
+      return;
+    }
 
     if (!user?.access_token) {
       setSedeOptions(fallbackOptions);
@@ -175,9 +182,9 @@ export function Sidebar() {
           .filter((sede): sede is SedeOption => Boolean(sede));
 
         const allowedSet = new Set(allowedSedeIds.map((sedeId) => sedeId.toUpperCase()));
-        const scopedSedes = isSuperAdmin
-          ? normalizedSedes
-          : normalizedSedes.filter((sede) => allowedSet.has(sede.sede_id.toUpperCase()));
+        const scopedSedes = normalizedSedes.filter((sede) =>
+          allowedSet.has(sede.sede_id.toUpperCase())
+        );
 
         const mergedById = new Map<string, SedeOption>();
         scopedSedes.forEach((sede) => {
@@ -211,12 +218,10 @@ export function Sidebar() {
           });
         }
 
-        if (!isSuperAdmin) {
-          allowedSedeIds.forEach((sedeId) => {
-            if (mergedById.has(sedeId.toUpperCase())) return;
-            mergedById.set(sedeId.toUpperCase(), { sede_id: sedeId, nombre: sedeId });
-          });
-        }
+        allowedSedeIds.forEach((sedeId) => {
+          if (mergedById.has(sedeId.toUpperCase())) return;
+          mergedById.set(sedeId.toUpperCase(), { sede_id: sedeId, nombre: sedeId });
+        });
 
         const nextOptions = Array.from(mergedById.values());
         if (isMounted) {
@@ -225,7 +230,7 @@ export function Sidebar() {
       } catch (error) {
         console.error("Error cargando sedes en sidebar:", error);
         if (isMounted) {
-          setSedeOptions(isSuperAdmin ? [] : fallbackOptions);
+          setSedeOptions(fallbackOptions);
         }
       } finally {
         if (isMounted) {
@@ -242,10 +247,11 @@ export function Sidebar() {
   }, [allowedSedeIds, isSuperAdmin, user?.access_token]);
 
   useEffect(() => {
+    if (isSuperAdmin) return;
     if (!selectedSedeId) return;
     if (normalizeSedeId(activeSedeId) === selectedSedeId) return;
     setActiveSedeId(selectedSedeId);
-  }, [activeSedeId, selectedSedeId, setActiveSedeId]);
+  }, [activeSedeId, isSuperAdmin, selectedSedeId, setActiveSedeId]);
 
   const handleSedeChange = (sedeId: string) => {
     const normalized = normalizeSedeId(sedeId);
