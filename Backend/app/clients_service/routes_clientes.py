@@ -6,6 +6,7 @@ from app.database.mongo import (
 )
 from app.auth.routes import get_current_user
 from app.id_generator.generator import generar_id
+from pymongo.errors import DuplicateKeyError
 from datetime import datetime
 from typing import List, Optional
 from bson import ObjectId
@@ -108,9 +109,17 @@ async def crear_cliente(
         # Limpiar campo obsoleto si venía en el payload
         data.pop("es_global", None)
 
-        result = await collection_clients.insert_one(data)
-        data["_id"] = str(result.inserted_id)
+        for intento in range(5):
+            try:
+                result = await collection_clients.insert_one(data)
+                break  # éxito
+            except DuplicateKeyError:
+                if intento == 4:
+                    raise HTTPException(500, "No se pudo generar un ID único. Intenta de nuevo.")
+                data.pop("_id", None)  # ← LÍNEA 1: limpiar _id que Motor inyectó
+                data["cliente_id"] = await generar_id("cliente", sede_objetivo)
 
+        data["_id"] = str(result.inserted_id)  # ← LÍNEA 2: convertir para el return
         return {"success": True, "cliente": data}
 
     except HTTPException:

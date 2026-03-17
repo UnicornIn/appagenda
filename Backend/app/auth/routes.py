@@ -136,7 +136,7 @@ async def create_user(
         "hashed_password": hashed_password,
         "rol": rol,  # ⭐ ESTE ES EL ROL REAL que se usará en el login
         "sede_id": sede_id,
-        "sedes_permitidas": sedes_permitidas.split(",") if sedes_permitidas else [],  # ← Convertir a lista
+        "sedes_permitidas": sedes_permitidas or [],  # ← Convertir a lista
         "franquicia_id": franquicia_id,
         "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "activo": True,

@@ -369,7 +369,7 @@ async def crear_cita(
             "fecha": today(sede).replace(tzinfo=None),
             "monto": float(abono),
             "metodo": cita.metodo_pago_inicial,
-            "tipo": "abono_inicial",
+            "tipo": "pago_completo" if saldo_pendiente <= 0 else "abono_inicial",
             "registrado_por": current_user.get("email"),
             "saldo_despues": float(saldo_pendiente)
         })
@@ -1762,12 +1762,17 @@ async def registrar_pago(
     nuevo_saldo_pendiente = round(saldo_pendiente_actual - monto_real, 2)
     nuevo_abono = round(float(cita.get("abono", 0) or 0) + monto_real, 2)
     estado_pago = "pagado" if nuevo_saldo_pendiente <= 0 else "abonado"
+    abono_previo = round(float(cita.get("abono", 0) or 0), 2)
+    if abono_previo == 0:
+        tipo_pago = "pago_completo" if nuevo_saldo_pendiente <= 0 else "abono_inicial"
+    else:
+        tipo_pago = "pago_adicional"
 
     nuevo_pago = {
         "fecha": today(sede).replace(tzinfo=None),
         "monto": num(monto_real),
         "metodo": data.metodo_pago,
-        "tipo": "pago_adicional",
+        "tipo": tipo_pago,
         "registrado_por": current_user.get("email"),
         "saldo_despues": num(nuevo_saldo_pendiente),
         "notas": data.notas,

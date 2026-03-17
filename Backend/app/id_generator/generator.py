@@ -263,7 +263,7 @@ async def _obtener_siguiente_numero_disperso(
             continue
         
         # 🔑 PASO 4: Marcar en used_id_numbers (verificación secundaria)
-        used_key = f"{sequence_key}:{numero_disperso}"
+        used_key = f"{prefijo}-GLOBAL:{numero_disperso}"
         
         try:
             # Intentar marcar como usado atómicamente
@@ -521,7 +521,7 @@ async def generar_ids_lote(
                 "version": "v5.0-non-sequential"
             })
             
-            used_key = f"{sequence_key}:{numero_disperso}"
+            used_key = f"{prefijo}-GLOBAL:{numero_disperso}" 
             documentos_used.append({
                 "_id": used_key,
                 "prefijo": prefijo,
