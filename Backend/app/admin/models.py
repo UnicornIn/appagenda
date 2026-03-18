@@ -44,8 +44,10 @@ class Profesional(BaseModel):
     email: EmailStr
     sede_id: str
     especialidades: bool = Field(default=True)
+    telefono: Optional[str] = None
     servicios_no_presta: Optional[List[str]] = Field(default=[])
     activo: bool = True
+    comision_productos: Optional[float] = None
     comisiones_por_categoria: Optional[Dict[str, float]] = Field(
         default=None,
         description="Mapa de comisiones por categoría. Ej: {'Peluquería': 35, 'Color': 45}"

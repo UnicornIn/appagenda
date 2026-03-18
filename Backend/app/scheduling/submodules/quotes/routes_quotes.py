@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.scheduling.submodules.fichas.controllers import generar_y_enviar_pdf_ficha
+from app.bills.routes import obtener_porcentaje_comision_producto
 from app.scheduling.models import Cita, ProductoItem, PagoRequest, ServicioEnCita, ServicioEnFicha
 from app.database.mongo import (
     collection_citas,
@@ -20,6 +21,7 @@ from app.database.mongo import (
     collection_estilista,
     collection_clients,
     collection_locales,
+    collection_auth,
     collection_block,
     collection_card,
     collection_commissions,
@@ -369,7 +371,7 @@ async def crear_cita(
             "fecha": today(sede).replace(tzinfo=None),
             "monto": float(abono),
             "metodo": cita.metodo_pago_inicial,
-            "tipo": "abono_inicial",
+            "tipo": "pago_completo" if saldo_pendiente <= 0 else "abono_inicial",
             "registrado_por": current_user.get("email"),
             "saldo_despues": float(saldo_pendiente)
         })
@@ -1762,12 +1764,17 @@ async def registrar_pago(
     nuevo_saldo_pendiente = round(saldo_pendiente_actual - monto_real, 2)
     nuevo_abono = round(float(cita.get("abono", 0) or 0) + monto_real, 2)
     estado_pago = "pagado" if nuevo_saldo_pendiente <= 0 else "abonado"
+    abono_previo = round(float(cita.get("abono", 0) or 0), 2)
+    if abono_previo == 0:
+        tipo_pago = "pago_completo" if nuevo_saldo_pendiente <= 0 else "abono_inicial"
+    else:
+        tipo_pago = "pago_adicional"
 
     nuevo_pago = {
         "fecha": today(sede).replace(tzinfo=None),
         "monto": num(monto_real),
         "metodo": data.metodo_pago,
-        "tipo": "pago_adicional",
+        "tipo": tipo_pago,
         "registrado_por": current_user.get("email"),
         "saldo_despues": num(nuevo_saldo_pendiente),
         "notas": data.notas,
@@ -2201,8 +2208,20 @@ async def agregar_productos_a_cita(
     # Verificar si la sede permite comisión de productos
     permite_comision_productos = tipo_comision in ["productos", "mixto"]
     
-    # ⭐ REGLA: Solo comisiona si es ESTILISTA
-    aplica_comision = permite_comision_productos and rol_usuario == "estilista"
+    # ⭐ REGLA: Solo comisiona si es ESTILISTA, recepcionista, call_center, admin_sede
+    ROLES_CON_COMISION_PRODUCTOS = {"estilista", "recepcionista", "call_center", "admin_sede"}
+    aplica_comision = permite_comision_productos and rol_usuario in ROLES_CON_COMISION_PRODUCTOS
+
+    vendedor_doc = None
+    if aplica_comision:
+        if rol_usuario == "estilista":
+            vendedor_doc = await collection_estilista.find_one(
+                {"profesional_id": profesional_id}
+            )
+        else:
+            vendedor_doc = await collection_auth.find_one(
+                {"correo_electronico": email_usuario}
+            )
 
     # Productos actuales
     productos_actuales = cita.get("productos", [])
@@ -2239,7 +2258,9 @@ async def agregar_productos_a_cita(
         comision_producto = 0
         
         if aplica_comision:
-            comision_porcentaje = producto_db.get("comision", 0)
+            comision_porcentaje = obtener_porcentaje_comision_producto(
+                producto_db, vendedor_doc
+            )
             comision_producto = round((subtotal * comision_porcentaje) / 100, 2)
             total_comision_productos += comision_producto
         
