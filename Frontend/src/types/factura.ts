@@ -20,6 +20,7 @@ export interface Factura {
   profesional_nombre: string;
   metodo_pago: string;
   facturado_por: string;
+  vendido_por?: string;
   estado: string;
   // Campos opcionales para detalle
   items?: Array<{

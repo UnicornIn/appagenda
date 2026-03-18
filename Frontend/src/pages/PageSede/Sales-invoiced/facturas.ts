@@ -27,6 +27,7 @@ export interface FacturaAPI {
   profesional_nombre?: string;
   numero_comprobante: string;
   facturado_por?: string;
+  vendido_por?: string;
   estado?: string;
   estado_pago?: string;
   saldo_pendiente?: number | string | null;
@@ -118,6 +119,7 @@ export interface FacturaConverted {
   profesional_nombre: string;
   metodo_pago: string;
   facturado_por: string;
+  vendido_por?: string;
   estado: string;
   items?: ItemFactura[];
   historial_pagos?: HistorialPago[];
@@ -698,7 +700,8 @@ export class FacturaService {
       profesional_id: profesionalId,
       profesional_nombre: profesionalNombre,
       metodo_pago: metodoPago,
-      facturado_por: factura.facturado_por || 'Sistema',
+      facturado_por: factura.facturado_por || factura.vendido_por || 'Sistema',
+      vendido_por: factura.vendido_por || factura.facturado_por || 'Sistema',
       estado: estado,
       items: factura.items || [],
       historial_pagos: historial,

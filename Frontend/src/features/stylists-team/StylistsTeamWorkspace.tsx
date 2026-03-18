@@ -393,7 +393,7 @@ export function StylistsTeamWorkspace({
 
   const categoryOptions = useMemo(() => {
     if (!selectedStylist) return [];
-    const categoryMap = (selectedStylist as Record<string, unknown>).comisiones_por_categoria;
+    const categoryMap = selectedStylist.comisiones_por_categoria;
     if (!categoryMap || typeof categoryMap !== "object" || Array.isArray(categoryMap)) return [];
 
     return Object.keys(categoryMap as Record<string, unknown>)
@@ -417,9 +417,9 @@ export function StylistsTeamWorkspace({
         ? stylist.especialidades_detalle.map((detail) => detail.id).filter(Boolean)
         : [];
 
-      const categoryServiceIds = buildServiceIdsFromCategoryCommissions(
-        (stylist as Record<string, unknown>).comisiones_por_categoria,
-      );
+    const categoryServiceIds = buildServiceIdsFromCategoryCommissions(
+      stylist.comisiones_por_categoria,
+    );
 
       const commissionServiceIds = resolvedCommissions.entries.map((entry) => entry.servicio_id);
 
@@ -436,16 +436,23 @@ export function StylistsTeamWorkspace({
   );
 
   const selectServiceOptions = useMemo(() => {
-    if (useCategoryOptions) {
-      return categoryOptions.map(({ category, serviceId }) => ({
-        id: serviceId,
-        nombre: category,
-        categoria: category,
-        duracion: 0,
-        precio: 0,
-      }));
+    if (!useCategoryOptions) {
+      return services;
     }
-    return services;
+
+    // Priorizar las categorías ya configuradas, pero mostrar todos los servicios disponibles
+    const categoryServices = categoryOptions.map(({ category, serviceId }) => ({
+      id: serviceId,
+      nombre: category,
+      categoria: category,
+      duracion: 0,
+      precio: 0,
+    }));
+
+    const categoryIds = new Set(categoryServices.map((s) => s.id));
+    const remainingServices = services.filter((s) => !categoryIds.has(s.id));
+
+    return [...categoryServices, ...remainingServices];
   }, [categoryOptions, services, useCategoryOptions]);
 
   const dashboardRows = useMemo(
@@ -529,7 +536,10 @@ export function StylistsTeamWorkspace({
         ...entry,
         tipo: "%",
       })),
-        productCommission: "",
+        productCommission:
+          stylist.comision_productos !== null && stylist.comision_productos !== undefined
+            ? String(stylist.comision_productos)
+            : "",
       });
     },
     [primarySelectedSedeId, resolveServiceIdsAndCommissions, selectedSedeId, services, systemUsers],
@@ -968,6 +978,13 @@ export function StylistsTeamWorkspace({
     try {
       setIsSaving(true);
       const commission = parseCommissionValue(editorState.comision);
+      const productCommission = parseCommissionValue(editorState.productCommission);
+
+      if (productCommission !== null && (productCommission < 0 || productCommission > 100)) {
+        setBootError("La comisión por productos debe estar entre 0 y 100.");
+        setIsSaving(false);
+        return;
+      }
 
       if (editorState.mode === "create") {
         const payload: CreateEstilistaData = {
@@ -976,6 +993,7 @@ export function StylistsTeamWorkspace({
           sede_id: targetSedeId,
           especialidades: editorState.serviceIds,
           comision: commission,
+          comision_productos: productCommission,
           password: editorState.password.trim(),
           activo: editorState.activo,
         };
@@ -1013,12 +1031,14 @@ export function StylistsTeamWorkspace({
           JSON.stringify(normalizedInitialServiceIds) !== JSON.stringify(normalizedNextServiceIds);
 
         const initialCommission = selectedStylist.comision ?? null;
+        const initialProductCommission = selectedStylist.comision_productos ?? null;
         const hasBasicChanges =
           selectedStylist.nombre !== editorState.nombre.trim() ||
           selectedStylist.email !== editorState.email.trim() ||
           String(selectedStylist.sede_id ?? "").trim() !== targetSedeId ||
           Boolean(selectedStylist.activo) !== editorState.activo ||
-          initialCommission !== commission;
+          initialCommission !== commission ||
+          initialProductCommission !== productCommission;
 
         const initialCommissionEntries = resolveCategoryCommissionEntries(
           selectedStylist as unknown as Record<string, unknown>,
@@ -1047,6 +1067,7 @@ export function StylistsTeamWorkspace({
             especialidades: nextServiceIds,
             activo: editorState.activo,
             comision: commission,
+            comision_productos: productCommission,
           };
 
           await stylistApi.updateEstilista(token, selectedStylist.profesional_id, payload);
@@ -2013,24 +2034,32 @@ export function StylistsTeamWorkspace({
                         </label>
                         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_76px_52px]">
                           <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={0.01}
                             value={editorState.productCommission}
+                            onChange={(event) => updateEditor("productCommission", event.target.value)}
                             className="h-11 rounded-2xl border-slate-200 bg-white"
-                            placeholder="No disponible con el payload actual"
-                            disabled
+                            placeholder="Ej: 10"
                           />
                           <Input
-                            value={editorState.productCommission}
+                            value={
+                              editorState.productCommission
+                                ? `${editorState.productCommission}%`
+                                : ""
+                            }
                             className="h-11 rounded-2xl border-slate-200 bg-white text-center"
-                            disabled
+                            readOnly
                           />
                           <Input
                             value="%"
                             className="h-11 rounded-2xl border-slate-200 bg-white text-center"
-                            disabled
+                            readOnly
                           />
                         </div>
                         <p className="mt-2 text-xs text-slate-500">
-                          La vista queda preparada, pero el backend actual no expone un campo claro para leer o guardar esta comisión.
+                          Opcional. Valor entre 0 y 100. Si se deja vacío se usará la comisión del inventario/sede o la global del producto.
                         </p>
                       </div>
                     </div>

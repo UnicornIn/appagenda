@@ -10,6 +10,7 @@ export interface SystemUser {
   nombre: string;
   email: string;
   role: SystemUserRole;
+  comision_productos?: number | null;
   sede_id?: string | null;
   sede_id_principal?: string | null;
   sedes_permitidas?: string[];
@@ -25,6 +26,7 @@ export interface CreateSystemUserPayload {
   nombre: string;
   email: string;
   role: SystemUserRole;
+  comision_productos?: number | null;
   sede_id?: string | null;
   sedes_permitidas?: string[];
   especialidades?: string[];

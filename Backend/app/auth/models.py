@@ -33,6 +33,7 @@ class UserResponse(BaseModel):
     sede_id: Optional[str] = None
     franquicia_id: Optional[str] = None
     sedes_permitidas: Optional[List[str]] = []  # ← agregar esto
+    comision_productos: Optional[float] = None 
     activo: bool
     fecha_creacion: Optional[str] = None
     creado_por: Optional[str] = None
@@ -70,6 +71,7 @@ class UserUpdate(BaseModel):
     activo: Optional[bool] = None
     sedes_permitidas: Optional[List[str]] = None  # ← NUEVO
     password: Optional[str] = None
+    comision_productos: Optional[float] = None
 
 
 class UserUpdateResponse(BaseModel):
@@ -83,3 +85,4 @@ class UserUpdateResponse(BaseModel):
     activo: bool
     modificado_por: str
     fecha_modificacion: str
+    comision_productos: Optional[float] = None
