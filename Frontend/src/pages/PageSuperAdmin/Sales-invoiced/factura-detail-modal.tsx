@@ -88,7 +88,14 @@ export function FacturaDetailModal({ factura, open, onOpenChange }: FacturaDetai
               <DetailRow label="Método de pago" value={factura.metodo_pago} />
               <DetailRow label="Monto" value={formatCurrency(factura.monto, factura.moneda)} />
               <DetailRow label="Total" value={formatCurrency(factura.total, factura.moneda)} highlight />
-              <DetailRow label="Facturado por" value={factura.facturado_por} />
+              <DetailRow
+                label="Vendido por"
+                value={factura.vendido_por || factura.facturado_por || "Sin dato"}
+              />
+              <DetailRow
+                label="Facturado por"
+                value={factura.facturado_por || factura.vendido_por || "Sin dato"}
+              />
               <DetailRow
                 label="Estado"
                 value={

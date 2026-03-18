@@ -21,6 +21,7 @@ from app.database.mongo import (
     collection_sales,
     collection_inventarios,
     collection_inventory_motions,
+    collection_auth,
     collection_productos,
     collection_estilista
 )
@@ -32,6 +33,38 @@ def _normalizar_categoria(valor: Optional[str]) -> str:
     """Normaliza nombre de categoría para comparación robusta."""
     return (valor or "").strip().lower()
 
+def obtener_porcentaje_comision_producto(
+    producto_db: dict,
+    vendedor_doc: Optional[dict] = None,        # estilista O usuario auth
+    inventario_db: Optional[dict] = None,
+) -> float:
+    """
+    Prioridad:
+    1. comision_productos del vendedor (estilista o usuario auth)
+    2. comision del inventario de esa sede
+    3. comision global del producto
+    4. 0
+    """
+    if vendedor_doc:
+        comision_vendedor = vendedor_doc.get("comision_productos")
+        if comision_vendedor is not None:
+            try:
+                return float(comision_vendedor)
+            except (TypeError, ValueError):
+                pass
+
+    if inventario_db:
+        comision_inv = inventario_db.get("comision")
+        if comision_inv is not None:
+            try:
+                return float(comision_inv)
+            except (TypeError, ValueError):
+                pass
+
+    try:
+        return float(producto_db.get("comision", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 def _obtener_porcentaje_comision_servicio(servicio_db: dict, profesional_db: Optional[dict]) -> float:
     """
@@ -232,7 +265,10 @@ async def facturar_cita_o_venta(
                     "nombre": item["nombre"],
                     "cantidad": item["cantidad"],
                     "precio_unitario": item["precio_unitario"],
-                    "subtotal": item["subtotal"]
+                    "subtotal": item["subtotal"],
+                    "comision_ya_calculada": item.get("comision", None),  # ← preservar
+                    "agregado_por_rol": item.get("agregado_por_rol", ""),
+                    "agregado_por_email": item.get("agregado_por_email", ""),
                 })
 
     for producto in productos_lista:
@@ -242,10 +278,40 @@ async def facturar_cita_o_venta(
         subtotal_producto = producto.get("subtotal", precio_producto * cantidad)
 
         comision_producto = 0
-        if tipo_comision in ["productos", "mixto"] and profesional_id:
-            producto_db = await collection_productos.find_one({"id": producto_id})
-            if producto_db:
-                porcentaje_producto = producto_db.get("comision", 0)
+        agregado_por_rol = producto.get("agregado_por_rol", "")
+        agregado_por_email = producto.get("agregado_por_email", "")
+        comision_ya_calculada = producto.get("comision_ya_calculada")
+
+        if comision_ya_calculada is not None:
+            comision_producto = float(comision_ya_calculada)
+            total_comision_productos += comision_producto
+
+        elif tipo_comision in ["productos", "mixto"]:
+            producto_db_item = await collection_productos.find_one({"id": producto_id})
+            if producto_db_item:
+                inventario_db = await collection_inventarios.find_one({
+                    "producto_id": producto_id,
+                    "sede_id": sede_id
+                })
+
+                ROLES_PRODUCTO_PROPIO = {"recepcionista", "call_center", "admin_sede"}
+
+                # Prioridad: quien agregó el producto vs profesional de la cita
+                if agregado_por_rol in ROLES_PRODUCTO_PROPIO and agregado_por_email:
+                    vendedor_auth = await collection_auth.find_one(
+                        {"correo_electronico": agregado_por_email}
+                    )
+                    porcentaje_producto = obtener_porcentaje_comision_producto(
+                        producto_db_item, vendedor_auth, inventario_db
+                )
+                elif profesional_id:
+                    porcentaje_producto = obtener_porcentaje_comision_producto(
+                        producto_db_item, profesional_db, inventario_db
+                    )
+                else:
+                    porcentaje_producto = obtener_porcentaje_comision_producto(
+                        producto_db_item, None, inventario_db
+                    )
                 comision_producto = round((subtotal_producto * porcentaje_producto) / 100, 2)
                 total_comision_productos += comision_producto
 
@@ -455,13 +521,16 @@ async def facturar_cita_o_venta(
     # ====================================
     comision_msg = "No aplica comisión para esta sede"
 
-    if valor_comision_total > 0 and profesional_id:
-        comision_document = await collection_commissions.find_one({
-            "profesional_id": profesional_id,
-            "sede_id": sede_id,
-            "estado": "pendiente"
-        })
+    # ─── Si es venta directa ya comisionada, no duplicar ───────────
+    if tipo == "venta" and documento.get("comision_registrada"):
+        comision_msg = "Comisión ya registrada al crear la venta directa"
 
+    else:
+        # ─── Determinar receptor de la comisión ────────────────────
+        ROLES_PRODUCTO_PROPIO = {"recepcionista", "call_center", "admin_sede"}
+        fecha_actual_str = fecha_actual.strftime("%Y-%m-%d")
+
+        # ─── Construir listas de comisiones ────────────────────────────
         servicios_comision = [
             {
                 "servicio_id": item["servicio_id"],
@@ -495,101 +564,207 @@ async def facturar_cita_o_venta(
             if item["tipo"] == "producto" and item.get("comision", 0) > 0
         ]
 
-        crear_nuevo_documento = False
-        fecha_actual_str = fecha_actual.strftime("%Y-%m-%d")
+        # ─── Determinar receptor de SERVICIOS (siempre el profesional) ─
+        receptor_servicios_id = profesional_id
+        receptor_servicios_nombre = profesional_nombre
 
-        if comision_document:
-            servicios_existentes = comision_document.get("servicios_detalle", [])
+        # ─── Determinar receptor de PRODUCTOS ──────────────────────────
+        # Para citas: el que agregó el producto (si es rol no-estilista)
+        # Para ventas sin profesional: el vendedor por facturado_por
+        receptor_productos_id = profesional_id
+        receptor_productos_nombre = profesional_nombre
 
-            if servicios_existentes and "periodo_inicio" not in comision_document:
-                fechas_migracion = []
-                for s in servicios_existentes:
-                    try:
-                        fechas_migracion.append(datetime.strptime(s["fecha"], "%Y-%m-%d"))
-                    except:
-                        continue
-                if fechas_migracion:
-                    await collection_commissions.update_one(
-                        {"_id": comision_document["_id"]},
-                        {"$set": {
-                            "periodo_inicio": min(fechas_migracion).strftime("%Y-%m-%d"),
-                            "periodo_fin": max(fechas_migracion).strftime("%Y-%m-%d")
-                        }}
+        if tipo == "cita" and productos_comision:
+            primer_producto_no_estilista = next(
+                (p for p in documento.get("productos", [])
+                if p.get("agregado_por_rol") in ROLES_PRODUCTO_PROPIO),
+                None
+            )
+            if primer_producto_no_estilista:
+                email_agregador = primer_producto_no_estilista.get("agregado_por_email", "")
+                if email_agregador:
+                    auth_agregador = await collection_auth.find_one(
+                        {"correo_electronico": email_agregador}
                     )
+                    if auth_agregador:
+                        receptor_productos_id = str(auth_agregador["_id"])
+                        receptor_productos_nombre = auth_agregador.get("nombre", email_agregador)
 
-            if servicios_existentes:
-                fechas = []
-                for s in servicios_existentes:
-                    try:
-                        fechas.append(datetime.strptime(s["fecha"], "%Y-%m-%d"))
-                    except:
-                        continue
-                if fechas:
-                    fecha_inicio_rango = min(min(fechas), fecha_actual)
-                    fecha_fin_rango = max(max(fechas), fecha_actual)
-                    if (fecha_fin_rango - fecha_inicio_rango).days + 1 > 15:
-                        crear_nuevo_documento = True
+        elif tipo == "venta" and not profesional_id:
+            facturado_por_email = documento.get("facturado_por", "")
+            if facturado_por_email:
+                auth_doc = await collection_auth.find_one(
+                    {"correo_electronico": facturado_por_email}
+                )
+                if auth_doc and auth_doc.get("rol") in ("recepcionista", "call_center", "admin_sede"):
+                    receptor_productos_id = str(auth_doc["_id"])
+                    receptor_productos_nombre = auth_doc.get("nombre", facturado_por_email)
+
+        # ─── Registrar comisión de SERVICIOS ───────────────────────────
+        if servicios_comision and receptor_servicios_id:
+            total_comision_servicios_reg = round(
+                sum(s["valor_comision"] for s in servicios_comision), 2
+            )
+            comision_doc_srv = await collection_commissions.find_one({
+                "profesional_id": receptor_servicios_id,
+                "sede_id": sede_id,
+                "estado": "pendiente"
+            })
+
+            crear_nuevo_srv = False
+            if comision_doc_srv:
+                existentes = comision_doc_srv.get("servicios_detalle", [])
+                if existentes and "periodo_inicio" not in comision_doc_srv:
+                    fechas_m = []
+                    for s in existentes:
+                        try:
+                            fechas_m.append(datetime.strptime(s["fecha"], "%Y-%m-%d"))
+                        except:
+                            continue
+                    if fechas_m:
                         await collection_commissions.update_one(
-                            {"_id": comision_document["_id"]},
+                            {"_id": comision_doc_srv["_id"]},
                             {"$set": {
-                                "periodo_inicio": min(fechas).strftime("%Y-%m-%d"),
-                                "periodo_fin": max(fechas).strftime("%Y-%m-%d")
+                                "periodo_inicio": min(fechas_m).strftime("%Y-%m-%d"),
+                                "periodo_fin": max(fechas_m).strftime("%Y-%m-%d")
                             }}
                         )
+                if existentes:
+                    fechas = []
+                    for s in existentes:
+                        try:
+                            fechas.append(datetime.strptime(s["fecha"], "%Y-%m-%d"))
+                        except:
+                            continue
+                    if fechas:
+                        fi = min(min(fechas), fecha_actual)
+                        ff = max(max(fechas), fecha_actual)
+                        if (ff - fi).days + 1 > 15:
+                            crear_nuevo_srv = True
+                            await collection_commissions.update_one(
+                                {"_id": comision_doc_srv["_id"]},
+                                {"$set": {
+                                    "periodo_inicio": min(fechas).strftime("%Y-%m-%d"),
+                                    "periodo_fin": max(fechas).strftime("%Y-%m-%d")
+                                }}
+                            )
 
-        if comision_document and not crear_nuevo_documento:
-            update_operations = {
-                "$inc": {
+            if comision_doc_srv and not crear_nuevo_srv:
+                ops = {
+                    "$inc": {"total_comisiones": total_comision_servicios_reg},
+                    "$set": {"estado": "pendiente", "periodo_fin": fecha_actual_str}
+                }
+                if "servicios_detalle" not in comision_doc_srv:
+                    ops["$set"]["servicios_detalle"] = servicios_comision
+                else:
+                    ops["$push"] = {"servicios_detalle": {"$each": servicios_comision}}
+                if "periodo_inicio" not in comision_doc_srv:
+                    ops["$set"]["periodo_inicio"] = fecha_actual_str
+                await collection_commissions.update_one({"_id": comision_doc_srv["_id"]}, ops)
+                doc_act = await collection_commissions.find_one({"_id": comision_doc_srv["_id"]})
+                if doc_act:
+                    await collection_commissions.update_one(
+                        {"_id": doc_act["_id"]},
+                        {"$set": {"total_comisiones": round(doc_act.get("total_comisiones", 0), 2)}}
+                    )
+                comision_msg = f"Comisión servicios actualizada (+{total_comision_servicios_reg} {moneda_sede})"
+            else:
+                await collection_commissions.insert_one({
+                    "profesional_id": receptor_servicios_id,
+                    "profesional_nombre": receptor_servicios_nombre,
+                    "sede_id": sede_id,
+                    "sede_nombre": sede.get("nombre", ""),
+                    "moneda": moneda_sede,
+                    "tipo_comision": tipo_comision,
                     "total_servicios": len(servicios_comision),
-                    "total_productos": len(productos_comision),
-                    "total_comisiones": valor_comision_total
-                },
-                "$set": {"estado": "pendiente", "periodo_fin": fecha_actual_str}
-            }
-            if servicios_comision:
-                if "servicios_detalle" not in comision_document:
-                    update_operations["$set"]["servicios_detalle"] = servicios_comision
-                else:
-                    update_operations["$push"] = {"servicios_detalle": {"$each": servicios_comision}}
-            if productos_comision:
-                if "productos_detalle" not in comision_document:
-                    update_operations["$set"]["productos_detalle"] = productos_comision
-                else:
-                    if "$push" not in update_operations:
-                        update_operations["$push"] = {}
-                    update_operations["$push"]["productos_detalle"] = {"$each": productos_comision}
-            if "periodo_inicio" not in comision_document:
-                update_operations["$set"]["periodo_inicio"] = fecha_actual_str
+                    "total_productos": 0,
+                    "total_comisiones": total_comision_servicios_reg,
+                    "servicios_detalle": servicios_comision,
+                    "productos_detalle": [],
+                    "periodo_inicio": fecha_actual_str,
+                    "periodo_fin": fecha_actual_str,
+                    "estado": "pendiente",
+                    "creado_en": fecha_actual
+                })
+                comision_msg = f"Comisión servicios creada ({total_comision_servicios_reg} {moneda_sede})"
 
-            await collection_commissions.update_one({"_id": comision_document["_id"]}, update_operations)
-
-            doc_actualizado = await collection_commissions.find_one({"_id": comision_document["_id"]})
-            if doc_actualizado:
-                await collection_commissions.update_one(
-                    {"_id": doc_actualizado["_id"]},
-                    {"$set": {"total_comisiones": round(doc_actualizado.get("total_comisiones", 0), 2)}}
-                )
-
-            comision_msg = f"Comisión actualizada (+{valor_comision_total} {moneda_sede})"
-        else:
-            await collection_commissions.insert_one({
-                "profesional_id": profesional_id,
-                "profesional_nombre": profesional_nombre,
+        # ─── Registrar comisión de PRODUCTOS ───────────────────────────
+        if productos_comision and receptor_productos_id:
+            total_comision_productos_reg = round(
+                sum(p["valor_comision"] for p in productos_comision), 2
+            )
+            comision_doc_prod = await collection_commissions.find_one({
+                "profesional_id": receptor_productos_id,
                 "sede_id": sede_id,
-                "sede_nombre": sede.get("nombre", ""),
-                "moneda": moneda_sede,
-                "tipo_comision": tipo_comision,
-                "total_servicios": len(servicios_comision),
-                "total_productos": len(productos_comision),
-                "total_comisiones": round(valor_comision_total, 2),
-                "servicios_detalle": servicios_comision,
-                "productos_detalle": productos_comision,
-                "periodo_inicio": fecha_actual_str,
-                "periodo_fin": fecha_actual_str,
-                "estado": "pendiente",
-                "creado_en": fecha_actual
+                "estado": "pendiente"
             })
-            comision_msg = f"Comisión creada ({valor_comision_total} {moneda_sede})"
+
+            crear_nuevo_prod = False
+            if comision_doc_prod:
+                existentes = comision_doc_prod.get("servicios_detalle", [])
+                if existentes:
+                    fechas = []
+                    for s in existentes:
+                        try:
+                            fechas.append(datetime.strptime(s["fecha"], "%Y-%m-%d"))
+                        except:
+                            continue
+                    if fechas:
+                        fi = min(min(fechas), fecha_actual)
+                        ff = max(max(fechas), fecha_actual)
+                        if (ff - fi).days + 1 > 15:
+                            crear_nuevo_prod = True
+                            await collection_commissions.update_one(
+                                {"_id": comision_doc_prod["_id"]},
+                                {"$set": {
+                                    "periodo_inicio": min(fechas).strftime("%Y-%m-%d"),
+                                    "periodo_fin": max(fechas).strftime("%Y-%m-%d")
+                                }}
+                            )
+
+            if comision_doc_prod and not crear_nuevo_prod:
+                ops = {
+                    "$inc": {"total_comisiones": total_comision_productos_reg},
+                    "$set": {"estado": "pendiente", "periodo_fin": fecha_actual_str}
+                }
+                if "productos_detalle" not in comision_doc_prod:
+                    ops["$set"]["productos_detalle"] = productos_comision
+                else:
+                    if "$push" not in ops:
+                        ops["$push"] = {}
+                    ops["$push"]["productos_detalle"] = {"$each": productos_comision}
+                if "periodo_inicio" not in comision_doc_prod:
+                    ops["$set"]["periodo_inicio"] = fecha_actual_str
+                await collection_commissions.update_one({"_id": comision_doc_prod["_id"]}, ops)
+                doc_act = await collection_commissions.find_one({"_id": comision_doc_prod["_id"]})
+                if doc_act:
+                    await collection_commissions.update_one(
+                        {"_id": doc_act["_id"]},
+                        {"$set": {"total_comisiones": round(doc_act.get("total_comisiones", 0), 2)}}
+                    )
+                comision_msg += f" | Comisión productos actualizada (+{total_comision_productos_reg} {moneda_sede})"
+            else:
+                await collection_commissions.insert_one({
+                    "profesional_id": receptor_productos_id,
+                    "profesional_nombre": receptor_productos_nombre,
+                    "sede_id": sede_id,
+                    "sede_nombre": sede.get("nombre", ""),
+                    "moneda": moneda_sede,
+                    "tipo_comision": tipo_comision,
+                    "total_servicios": 0,
+                    "total_productos": len(productos_comision),
+                    "total_comisiones": total_comision_productos_reg,
+                    "servicios_detalle": [],
+                    "productos_detalle": productos_comision,
+                    "periodo_inicio": fecha_actual_str,
+                    "periodo_fin": fecha_actual_str,
+                    "estado": "pendiente",
+                    "creado_en": fecha_actual
+                })
+                comision_msg += f" | Comisión productos creada ({total_comision_productos_reg} {moneda_sede})"
+
+        if comision_msg == "No aplica comisión para esta sede" and (servicios_comision or productos_comision):
+            comision_msg = "Sin receptor válido para registrar comisión"
 
     # ====================================
     # ⭐ INTEGRACIÓN GIFTCARD
@@ -777,7 +952,7 @@ async def obtener_ventas_sede(
             "sede_id": 1, "cliente_id": 1, "nombre_cliente": 1, "cedula_cliente": 1,
             "email_cliente": 1, "telefono_cliente": 1, "items": 1, "desglose_pagos": 1,
             "facturado_por": 1, "numero_comprobante": 1, "tipo_comision": 1,
-            "profesional_id": 1, "profesional_nombre": 1, "historial_pagos": 1
+            "profesional_id": 1, "profesional_nombre": 1, "vendido_por": 1, "historial_pagos": 1
         }
 
         ventas = await collection_sales.find(filtros, projection)\

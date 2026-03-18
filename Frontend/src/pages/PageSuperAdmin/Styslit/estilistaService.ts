@@ -15,6 +15,7 @@ interface ApiEstilista {
   }>;
   activo: boolean;
   comision: number | null;
+  comision_productos?: number | null;
   profesional_id: string;
   rol: string;
   sede_id: string;
@@ -31,6 +32,14 @@ interface UpdateEstilistaResponse {
   msg: string;
   profesional: ApiEstilista;
 }
+
+const normalizeCommission = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  if (parsed < 0 || parsed > 100) return null;
+  return Math.round(parsed * 100) / 100;
+};
 
 const formatApiErrorDetail = (detail: unknown): string => {
   if (typeof detail === "string") {
@@ -135,6 +144,7 @@ export const estilistaService = {
       franquicia_id: null,
       created_by: estilista.created_by,
       comision: estilista.comision,
+      comision_productos: normalizeCommission(estilista.comision_productos),
       comisiones_por_categoria:
         estilista && typeof estilista.comisiones_por_categoria === "object"
             ? (estilista.comisiones_por_categoria as Record<string, number>)
@@ -156,6 +166,7 @@ export const estilistaService = {
       sede_id: estilistaData.sede_id,
       especialidades: estilistaData.especialidades || [],
       comision: estilistaData.comision,
+      comision_productos: normalizeCommission(estilistaData.comision_productos) ?? undefined,
       telefono: estilistaData.telefono,
       password: estilistaData.password,
       activo: estilistaData.activo !== undefined ? estilistaData.activo : true
@@ -227,6 +238,7 @@ export const estilistaService = {
           franquicia_id: null,
           created_by: 'system',
           comision: requestData.comision,
+          comision_productos: normalizeCommission(estilistaData.comision_productos) ?? null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           especialidades_detalle: requestData.especialidades.map(id => ({ id, nombre: id }))
@@ -335,6 +347,10 @@ export const estilistaService = {
       requestData.comision = estilistaData.comision;
     }
 
+    if (estilistaData.comision_productos !== undefined) {
+      requestData.comision_productos = normalizeCommission(estilistaData.comision_productos);
+    }
+
     if (typeof estilistaData.telefono === "string") {
       requestData.telefono = estilistaData.telefono.trim();
     }
@@ -387,6 +403,7 @@ export const estilistaService = {
       franquicia_id: null,
       created_by: result.profesional.created_by,
       comision: result.profesional.comision,
+      comision_productos: normalizeCommission(result.profesional.comision_productos),
       created_at: result.profesional.created_at,
       updated_at: result.profesional.updated_at,
       especialidades_detalle: especialidadesDetalle
@@ -511,6 +528,7 @@ export const estilistaService = {
       franquicia_id: null,
       created_by: data.created_by,
       comision: data.comision,
+      comision_productos: normalizeCommission(data.comision_productos),
       comisiones_por_categoria:
         data && typeof data.comisiones_por_categoria === "object"
           ? (data.comisiones_por_categoria as Record<string, number>)

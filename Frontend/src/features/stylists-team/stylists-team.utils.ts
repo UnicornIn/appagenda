@@ -456,7 +456,7 @@ export function buildVendorRows(
   }
 
   for (const invoice of invoices) {
-    const billedBy = normalizeText(invoice.facturado_por);
+    const billedBy = normalizeText(invoice.vendido_por || invoice.facturado_por);
     if (!billedBy) {
       continue;
     }

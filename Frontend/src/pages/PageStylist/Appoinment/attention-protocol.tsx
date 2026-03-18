@@ -388,6 +388,8 @@ export function AttentionProtocol({
 
     return response.statusText || "Error desconocido";
   };
+  // Referencia explícita para evitar que TypeScript marque la helper como no usada
+  void extractBackendErrorMessage;
 
   /* const toIdString = (value: unknown): string => {
     if (typeof value === "string") return value.trim();

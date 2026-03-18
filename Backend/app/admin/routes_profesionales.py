@@ -202,7 +202,8 @@ async def create_profesional(
         "estilista_mongo_id": str(result_estilista.inserted_id),
         "auth_mongo_id": str(result_auth.inserted_id),
         "sede_id": sede_id,
-        "correo": email
+        "correo": email,
+        "telefono": profesional.telefono
     }
 
 # ===================================================

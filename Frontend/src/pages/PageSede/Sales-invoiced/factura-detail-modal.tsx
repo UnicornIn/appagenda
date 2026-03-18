@@ -394,7 +394,11 @@ export function FacturaDetailModal({ factura, open, onOpenChange }: FacturaDetai
                 <DetailRow label="N° Comprobante" value={factura.numero_comprobante || ''} />
                 <DetailRow label="Fecha comprobante" value={formatDate(factura.fecha_comprobante)} />
                 <DetailRow label="Método de pago" value={factura.metodo_pago || ''} />
-                <DetailRow label="Facturado por" value={factura.facturado_por || ''} />
+                <DetailRow
+                  label="Vendido por"
+                  value={factura.vendido_por || factura.facturado_por || ''}
+                />
+                <DetailRow label="Facturado por" value={factura.facturado_por || factura.vendido_por || ''} />
               </Section>
             </div>
           </div>

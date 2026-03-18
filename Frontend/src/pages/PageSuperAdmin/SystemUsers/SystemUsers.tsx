@@ -104,6 +104,11 @@ export default function SystemUsersPage() {
     return nombres.join(", ");
   };
 
+  const formatProductCommission = (value: number | null | undefined) => {
+    if (value === null || value === undefined) return "No configurada";
+    return `${value}%`;
+  };
+
   const filteredUsers = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     if (!query) return users;
@@ -485,6 +490,12 @@ export default function SystemUsersPage() {
                   <div>
                     <p className="text-gray-500 mb-1">Tipo de usuario</p>
                     <p className="text-gray-900 font-medium">{selectedUser.user_type || "system"}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500 mb-1">Comisión productos</p>
+                    <p className="text-gray-900 font-medium">
+                      {formatProductCommission(selectedUser.comision_productos)}
+                    </p>
                   </div>
                   <div>
                     <p className="text-gray-500 mb-1">Especialidades</p>
