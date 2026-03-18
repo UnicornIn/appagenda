@@ -22,6 +22,7 @@ export type CashIngreso = {
   sede_id?: string;
   monto: number;
   motivo: string;
+  tipo?: string;
   metodo_pago?: string;
   fecha: string;
   creado_en?: string;

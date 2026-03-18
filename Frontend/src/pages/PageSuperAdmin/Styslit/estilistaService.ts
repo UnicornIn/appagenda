@@ -1,6 +1,5 @@
 import { API_BASE_URL } from "../../../types/config";
 import type { Estilista, CreateEstilistaData } from "../../../types/estilista";
-import { extractKnownServiceCommissionFields } from "../../../lib/serviceCommissions";
 
 // Interface para la respuesta de la API
 interface ApiEstilista {
@@ -32,6 +31,37 @@ interface UpdateEstilistaResponse {
   msg: string;
   profesional: ApiEstilista;
 }
+
+const formatApiErrorDetail = (detail: unknown): string => {
+  if (typeof detail === "string") {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+        if (item && typeof item === "object") {
+          const record = item as Record<string, unknown>;
+          const field = Array.isArray(record.loc) ? record.loc.at(-1) : record.field;
+          const message = record.msg ?? record.message ?? "Error de validación";
+          return field ? `${String(field)}: ${String(message)}` : String(message);
+        }
+        return String(item);
+      })
+      .join("; ");
+  }
+
+  if (detail && typeof detail === "object") {
+    return Object.entries(detail as Record<string, unknown>)
+      .map(([key, value]) => `${key}: ${String(value)}`)
+      .join("; ");
+  }
+
+  return "";
+};
 
 // Interface para disponibilidad
 interface Disponibilidad {
@@ -94,21 +124,26 @@ export const estilistaService = {
         nombre: estilista.nombre,
         email: estilista.email,
         especialidades: especialidadesArray,
-        servicios_no_presta: estilista.servicios_no_presta || [],
-        servicios_presta: estilista.servicios_presta || [],
-        activo: estilista.activo,
-        rol: estilista.rol,
-        profesional_id: estilista.profesional_id,
-        sede_id: estilista.sede_id,
-        sede_nombre: estilista.sede_nombre,
-        franquicia_id: null,
-        created_by: estilista.created_by,
-        comision: estilista.comision,
-        created_at: estilista.created_at,
-        updated_at: estilista.updated_at,
-        especialidades_detalle: especialidadesDetalle,
-        updated_by: estilista.updated_by,
-        deleted_at: estilista.deleted_at,
+      servicios_no_presta: estilista.servicios_no_presta || [],
+      servicios_presta: estilista.servicios_presta || [],
+      activo: estilista.activo,
+      rol: estilista.rol,
+      profesional_id: estilista.profesional_id,
+      sede_id: estilista.sede_id,
+      sede_nombre: estilista.sede_nombre,
+      telefono: typeof estilista.telefono === "string" ? estilista.telefono : undefined,
+      franquicia_id: null,
+      created_by: estilista.created_by,
+      comision: estilista.comision,
+      comisiones_por_categoria:
+        estilista && typeof estilista.comisiones_por_categoria === "object"
+            ? (estilista.comisiones_por_categoria as Record<string, number>)
+            : undefined,
+      created_at: estilista.created_at,
+      updated_at: estilista.updated_at,
+      especialidades_detalle: especialidadesDetalle,
+      updated_by: estilista.updated_by,
+      deleted_at: estilista.deleted_at,
         deleted_by: estilista.deleted_by
       };
     });
@@ -121,6 +156,7 @@ export const estilistaService = {
       sede_id: estilistaData.sede_id,
       especialidades: estilistaData.especialidades || [],
       comision: estilistaData.comision,
+      telefono: estilistaData.telefono,
       password: estilistaData.password,
       activo: estilistaData.activo !== undefined ? estilistaData.activo : true
     };
@@ -298,11 +334,10 @@ export const estilistaService = {
     if (estilistaData.comision !== undefined) {
       requestData.comision = estilistaData.comision;
     }
-    
-    Object.assign(
-      requestData,
-      extractKnownServiceCommissionFields(estilistaData),
-    );
+
+    if (typeof estilistaData.telefono === "string") {
+      requestData.telefono = estilistaData.telefono.trim();
+    }
 
     console.log('📤 Actualizando estilista:', requestData);
 
@@ -318,7 +353,10 @@ export const estilistaService = {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
-      throw new Error(errorData?.detail || `Error al actualizar estilista: ${response.statusText}`);
+      throw new Error(
+        formatApiErrorDetail(errorData?.detail) ||
+          `Error al actualizar estilista: ${response.statusText}`,
+      );
     }
 
     const result: UpdateEstilistaResponse = await response.json();
@@ -353,6 +391,68 @@ export const estilistaService = {
       updated_at: result.profesional.updated_at,
       especialidades_detalle: especialidadesDetalle
     };
+  },
+
+  async updateServiceCommissions(
+    token: string,
+    profesionalId: string,
+    comisionesPorCategoria: Record<string, number>,
+  ): Promise<{
+    msg: string;
+    profesional_id: string;
+    nombre?: string;
+    comisiones_por_categoria: Record<string, number>;
+  }> {
+    const response = await fetch(`${API_BASE_URL}admin/profesionales/${profesionalId}/comisiones`, {
+      method: "PATCH",
+      headers: {
+        accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(comisionesPorCategoria),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(
+        formatApiErrorDetail(errorData?.detail) ||
+          `Error al actualizar comisiones del estilista: ${response.statusText}`,
+      );
+    }
+
+    return response.json();
+  },
+
+  async updateServicios(
+    token: string,
+    profesionalId: string,
+    serviciosNoPresta: string[],
+  ): Promise<{
+    msg: string;
+    profesional_id: string;
+    servicios_no_presta_actualizados: number;
+    total_servicios_no_presta: number;
+  }> {
+    const response = await fetch(`${API_BASE_URL}admin/profesionales/${profesionalId}/servicios`, {
+      method: "PATCH",
+      headers: {
+        accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(serviciosNoPresta),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(
+        formatApiErrorDetail(errorData?.detail) ||
+          `Error al actualizar servicios del estilista: ${response.statusText}`,
+      );
+    }
+
+    return response.json();
   },
 
   async deleteEstilista(token: string, profesionalId: string): Promise<void> {
@@ -407,9 +507,14 @@ export const estilistaService = {
       profesional_id: data.profesional_id,
       sede_id: data.sede_id,
       sede_nombre: data.sede_nombre,
+      telefono: typeof data.telefono === "string" ? data.telefono : undefined,
       franquicia_id: null,
       created_by: data.created_by,
       comision: data.comision,
+      comisiones_por_categoria:
+        data && typeof data.comisiones_por_categoria === "object"
+          ? (data.comisiones_por_categoria as Record<string, number>)
+          : undefined,
       created_at: data.created_at,
       updated_at: data.updated_at,
       especialidades_detalle: especialidadesDetalle

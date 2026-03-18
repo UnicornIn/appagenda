@@ -468,6 +468,15 @@ async def update_user(
     if "activo" in raw_changes:
         changes["activo"] = raw_changes["activo"]
 
+    if "comision_productos" in raw_changes:
+        val = raw_changes["comision_productos"]
+        if val is not None and not (0 <= val <= 100):
+            raise HTTPException(
+                status_code=400,
+                detail="comision_productos debe estar entre 0 y 100"
+            )
+        changes["comision_productos"] = val
+
     # Password
     if "password" in raw_changes:
         pwd = raw_changes["password"]
@@ -505,6 +514,7 @@ async def update_user(
         activo=updated.get("activo", True),
         modificado_por=changes["modificado_por"],
         fecha_modificacion=changes["fecha_modificacion"],
+        comision_productos=updated.get("comision_productos"),
     )
 
 

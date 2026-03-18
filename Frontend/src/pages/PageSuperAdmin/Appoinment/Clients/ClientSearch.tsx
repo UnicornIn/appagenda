@@ -31,13 +31,21 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
   onClientClear,
   required = true
 }) => {
-  const { user } = useAuth();
+  const { user, activeSedeId } = useAuth();
   const [clientSearch, setClientSearch] = useState('');
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [showClientModal, setShowClientModal] = useState(false);
   const [loadingClientes, setLoadingClientes] = useState(false);
   const [creatingClient, setCreatingClient] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const resolvedSedeId = String(
+    sedeId ||
+      activeSedeId ||
+      user?.sede_id ||
+      sessionStorage.getItem('beaux-sede_id') ||
+      localStorage.getItem('beaux-sede_id') ||
+      ''
+  ).trim();
 
   const [newClient, setNewClient] = useState<NewClientForm>({
     nombre: '',
@@ -46,16 +54,29 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
     cedula: '',
     ciudad: '',
     fecha_de_nacimiento: '',
-    sede_id: sedeId,
+    sede_id: resolvedSedeId,
     notas: ''
   });
+
+  useEffect(() => {
+    setNewClient((prev) => {
+      if (prev.sede_id === resolvedSedeId) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        sede_id: resolvedSedeId,
+      };
+    });
+  }, [resolvedSedeId]);
 
   // Cargar y buscar clientes (una sola llamada, paginada y con debounce)
   useEffect(() => {
     let cancel = false;
 
     const buscar = async () => {
-      if (!user?.access_token || !sedeId) {
+      if (!user?.access_token || !resolvedSedeId) {
         setClientes([]);
         setLoadingClientes(false);
         return;
@@ -65,8 +86,8 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
       try {
         const filtro = clientSearch.trim();
         const resultados = filtro
-          ? await buscarClientesPorSede(user.access_token, sedeId, filtro, 25)
-          : await getClientesPorSede(user.access_token, sedeId, { limite: 25, pagina: 1 });
+          ? await buscarClientesPorSede(user.access_token, resolvedSedeId, filtro, 25)
+          : await getClientesPorSede(user.access_token, resolvedSedeId, { limite: 25, pagina: 1 });
 
         if (!cancel) {
           setClientes(resultados);
@@ -83,7 +104,7 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
       cancel = true;
       clearTimeout(timeoutId);
     };
-  }, [clientSearch, user?.access_token, sedeId]);
+  }, [clientSearch, resolvedSedeId, user?.access_token]);
 
   // Función para crear nuevo cliente
   const handleCreateClient = async () => {
@@ -96,6 +117,12 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
       setError('No hay sesión activa');
       return;
     }
+
+    const targetSedeId = String(newClient.sede_id || resolvedSedeId).trim();
+    if (!targetSedeId) {
+      setError('No se pudo determinar la sede activa');
+      return;
+    }
     
     setCreatingClient(true);
     setError(null);
@@ -103,12 +130,26 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
     try {
       const result = await crearCliente(user.access_token, {
         ...newClient,
-        sede_id: sedeId
+        sede_id: targetSedeId
       });
       
       if (result.success) {
-        const clientesActualizados = await getClientesPorSede(user.access_token, sedeId);
-        setClientes(clientesActualizados);
+        try {
+          const clientesActualizados = await getClientesPorSede(user.access_token, targetSedeId, {
+            limite: 25,
+            pagina: 1,
+          });
+          setClientes(clientesActualizados);
+        } catch (refreshError) {
+          console.warn('No se pudo refrescar la lista de clientes tras crear uno nuevo:', refreshError);
+          setClientes((prev) => {
+            const next = [
+              result.cliente,
+              ...prev.filter((cliente) => cliente.cliente_id !== result.cliente.cliente_id),
+            ];
+            return next.slice(0, 25);
+          });
+        }
         
         onClientSelect(result.cliente);
         setClientSearch(result.cliente.nombre);
@@ -120,7 +161,7 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
           cedula: '',
           ciudad: '',
           fecha_de_nacimiento: '',
-          sede_id: sedeId,
+          sede_id: targetSedeId,
           notas: ''
         });
       }

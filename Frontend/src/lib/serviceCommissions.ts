@@ -9,6 +9,11 @@ export interface ServiceCommissionEntry {
 export type ServiceCommissionScope = "direct" | "by_sede";
 export type ServiceCommissionCollectionType = "array" | "object";
 
+export interface ServiceCommissionCatalogItem {
+  id: string;
+  categoria?: string | null;
+}
+
 export interface ServiceCommissionBinding {
   key: string;
   scope: ServiceCommissionScope;
@@ -32,6 +37,8 @@ export const SERVICE_COMMISSION_BY_SEDE_KEYS = [
   "comisiones_servicios_por_sede",
   "service_commissions_by_sede",
 ] as const;
+
+export const SERVICE_COMMISSION_CATEGORY_KEY = "comisiones_por_categoria";
 
 const ITEM_ID_KEYS = [
   "servicio_id",
@@ -311,6 +318,10 @@ function serializeAsObject(
   return result;
 }
 
+function normalizeCategory(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export function resolveServiceCommissions(
   source: unknown,
   sedeId?: string,
@@ -407,4 +418,83 @@ export function extractKnownServiceCommissionFields(
   }
 
   return result;
+}
+
+export function resolveCategoryCommissionEntries(
+  source: unknown,
+  services: ServiceCommissionCatalogItem[],
+  serviceIds: string[],
+): ServiceCommissionEntry[] {
+  if (!isRecord(source) || !hasOwn(source, SERVICE_COMMISSION_CATEGORY_KEY)) {
+    return [];
+  }
+
+  const categoryMap = isRecord(source[SERVICE_COMMISSION_CATEGORY_KEY])
+    ? (source[SERVICE_COMMISSION_CATEGORY_KEY] as Record<string, unknown>)
+    : null;
+
+  if (!categoryMap) {
+    return [];
+  }
+
+  const servicesById = new Map(
+    services.map((service) => [service.id, normalizeCategory(service.categoria)]),
+  );
+
+  return serviceIds
+    .filter(Boolean)
+    .map((serviceId) => {
+      const category = servicesById.get(serviceId) ?? "";
+      const value = category && hasOwn(categoryMap, category) ? categoryMap[category] : 0;
+
+      return {
+        servicio_id: serviceId,
+        valor: sanitizeNumber(value),
+        tipo: "%",
+      } satisfies ServiceCommissionEntry;
+    })
+    .sort((a, b) => a.servicio_id.localeCompare(b.servicio_id));
+}
+
+export function buildCategoryCommissionPayload(
+  services: ServiceCommissionCatalogItem[],
+  serviceIds: string[],
+  entries: ServiceCommissionEntry[],
+): Record<string, number> {
+  const servicesById = new Map(
+    services.map((service) => [service.id, normalizeCategory(service.categoria)]),
+  );
+  const entriesByServiceId = new Map(entries.map((entry) => [entry.servicio_id, entry]));
+  const payload = new Map<string, number>();
+
+  for (const serviceId of serviceIds.filter(Boolean)) {
+    const category = servicesById.get(serviceId) ?? "";
+    if (!category) {
+      throw new Error(`El servicio ${serviceId} no tiene categoría y no puede guardar comisión.`);
+    }
+
+    const entry = entriesByServiceId.get(serviceId);
+    const type = entry?.tipo ?? "%";
+    if (type !== "%") {
+      throw new Error(
+        `La categoría "${category}" solo admite comisión en porcentaje con el endpoint actual.`,
+      );
+    }
+
+    const rawValue = entry?.valor ?? 0;
+    const value = Number(rawValue);
+    if (!Number.isFinite(value) || Number.isNaN(value) || value < 0 || value > 100) {
+      throw new Error(`La comisión de "${category}" debe estar entre 0 y 100.`);
+    }
+
+    if (payload.has(category) && payload.get(category) !== value) {
+      throw new Error(
+        `Todos los servicios de la categoría "${category}" deben compartir el mismo porcentaje.`,
+      );
+    }
+
+    payload.set(category, value);
+  }
+
+  return Object.fromEntries(payload);
 }

@@ -7,7 +7,6 @@ import { ClientDetail } from "./client-detail"
 import { ClientFormModal } from "./ClientFormModal"
 import type { Cliente } from "../../../types/cliente"
 import { clientesService, type ClientesPaginadosMetadata } from "./clientesService"
-import { sedeService } from "../../PageSuperAdmin/Sedes/sedeService"
 import { useAuth } from "../../../components/Auth/AuthContext"
 import { Loader } from "lucide-react"
 
@@ -82,14 +81,13 @@ export default function ClientsPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [sedes, setSedes] = useState<any[]>([])
   const [itemsPorPagina] = useState(10)
   const hasLoadedInitialRef = useRef(false)
   const latestRequestIdRef = useRef(0)
   const latestCedulaHydrationRef = useRef(0)
   const cedulaCacheRef = useRef<Map<string, string | null>>(new Map())
 
-  const { user, isLoading: authLoading } = useAuth()
+  const { user, isLoading: authLoading, activeSedeId } = useAuth()
   const getAccessToken = useCallback((): string => {
     if (user?.access_token) return user.access_token
     return (
@@ -99,16 +97,13 @@ export default function ClientsPage() {
     )
   }, [user?.access_token])
 
-  const loadSedes = useCallback(async () => {
-    const token = getAccessToken()
-    if (!token) return
-    try {
-      const sedesData = await sedeService.getSedes(token)
-      setSedes(sedesData)
-    } catch (err) {
-      console.error("Error cargando sedes:", err)
-    }
-  }, [getAccessToken])
+  const currentSedeId = String(
+    activeSedeId ||
+      user?.sede_id ||
+      sessionStorage.getItem("beaux-sede_id") ||
+      localStorage.getItem("beaux-sede_id") ||
+      ""
+  ).trim()
 
   const applyCedulaCache = useCallback((listado: Cliente[]): Cliente[] => {
     return listado.map((cliente) => {
@@ -173,12 +168,6 @@ export default function ClientsPage() {
       setIsFetching(false)
     }
   }, [getAccessToken, itemsPorPagina, applyCedulaCache])
-
-  useEffect(() => {
-    if (!authLoading && user) {
-      loadSedes()
-    }
-  }, [user, authLoading, loadSedes])
 
   useEffect(() => {
     const token = getAccessToken()
@@ -376,7 +365,7 @@ export default function ClientsPage() {
         onClose={handleCloseModal}
         onSuccess={handleSaveClient}
         isSaving={isSaving}
-        sedeId={sedes.length > 0 ? (sedes[0].id || sedes[0]._id || "") : ""}
+        sedeId={currentSedeId}
       />
     </div>
   )

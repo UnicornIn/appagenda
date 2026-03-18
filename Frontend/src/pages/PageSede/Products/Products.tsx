@@ -228,7 +228,7 @@ export function ProductsList() {
           <p className="text-gray-600 mb-4">Debes iniciar sesión para acceder a esta página</p>
           <Button
             onClick={() => window.location.href = "/login"} // Ajusta la ruta según tu aplicación
-            className="bg-blue-600 hover:bg-blue-700"
+            className="bg-black text-white hover:bg-neutral-900"
           >
             Ir al inicio de sesión
           </Button>
