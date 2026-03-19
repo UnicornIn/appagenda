@@ -50,6 +50,8 @@ const MULTI_SEDE_ROLES = new Set([
   "estilista",
 ]);
 
+// Catálogo de rutas por rol (cada entrada valida acceso vía APP_MODULES y canAccess).
+// Las entradas de "Comisiones" se repiten para super_admin, admin_sede y estilista.
 const navItems: NavItem[] = [
   { title: "Dashboard", href: "/superadmin/dashboard", icon: LayoutDashboard, module: APP_MODULES.SUPER_DASHBOARD },
   { title: "Dashboard", href: "/sede/dashboard", icon: LayoutDashboard, module: APP_MODULES.SEDE_DASHBOARD },
@@ -57,7 +59,7 @@ const navItems: NavItem[] = [
 
   { title: "Productos", href: "/superadmin/products", icon: Package, module: APP_MODULES.SUPER_PRODUCTS },
   { title: "Clientes", href: "/superadmin/clients", icon: Users, module: APP_MODULES.SUPER_CLIENTS },
-  { title: "Comisiones", href: "/superadmin/commissions", icon: CreditCard, module: APP_MODULES.SUPER_COMMISSIONS },
+  // { title: "Comisiones", href: "/superadmin/commissions", icon: CreditCard, module: APP_MODULES.SUPER_COMMISSIONS },
   { title: "Sedes", href: "/superadmin/sedes", icon: Home, module: APP_MODULES.SUPER_SEDES },
   { title: "Estilistas", href: "/superadmin/stylists", icon: Users, module: APP_MODULES.SUPER_STYLISTS },
   { title: "Usuarios Sistema", href: "/superadmin/system-users", icon: Users, module: APP_MODULES.SUPER_SYSTEM_USERS },
@@ -71,11 +73,11 @@ const navItems: NavItem[] = [
   { title: "Facturación", href: "/sede/billing", icon: CreditCard, module: APP_MODULES.SEDE_BILLING },
   { title: "Gift Cards", href: "/sede/gift-cards", icon: Gift, module: APP_MODULES.SEDE_GIFT_CARDS },
   { title: "Estilistas", href: "/sede/stylists", icon: Users, module: APP_MODULES.SEDE_STYLISTS },
-  { title: "Comisiones", href: "/sede/commissions", icon: CreditCard, module: APP_MODULES.SEDE_COMMISSIONS },
+  // { title: "Comisiones", href: "/sede/commissions", icon: CreditCard, module: APP_MODULES.SEDE_COMMISSIONS }, // Admin_sede ve comisiones de su sede
   { title: "Ventas Facturadas", href: "/sede/sales-invoiced", icon: CreditCard, module: APP_MODULES.SEDE_SALES_INVOICED },
   { title: "Cierre de Caja", href: "/sede/cierre-caja", icon: Wallet, module: APP_MODULES.SEDE_CIERRE_CAJA },
 
-  { title: "Comisiones", href: "/stylist/commissions", icon: CreditCard, module: APP_MODULES.STYLIST_COMMISSIONS },
+  // { title: "Comisiones", href: "/stylist/commissions", icon: CreditCard, module: APP_MODULES.STYLIST_COMMISSIONS },
 ];
 
 export function Sidebar() {
@@ -264,11 +266,9 @@ export function Sidebar() {
     setIsMobileOpen(false);
   };
 
-  const handleLogout = () => {
-    localStorage.clear();
-    sessionStorage.clear();
-    logout?.();
-    navigate("/");
+  const handleLogout = async () => {
+    await logout?.();
+    navigate("/", { replace: true });
   };
 
   const visibleItems = navItems.filter((item) => {

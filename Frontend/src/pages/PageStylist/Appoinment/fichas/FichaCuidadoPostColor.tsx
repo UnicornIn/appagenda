@@ -6,6 +6,7 @@ import { Cita } from '../../../../types/fichas';
 import { Camera, Loader2, X, Save, CheckCircle, Check } from "lucide-react";
 import { API_BASE_URL } from '../../../../types/config';
 import { getEstilistaDataFromCita, getFichaAuthToken } from './fichaHelpers';
+import { handleTextareaAutoResize } from "../../../../lib/textareaAutosize";
 
 interface FichaCuidadoPostColorProps {
   cita: Cita;
@@ -498,9 +499,10 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
       <div>
         <label className="block text-sm font-medium mb-2">Observaciones Personalizadas</label>
         <textarea 
-          className="w-full p-3 border rounded-lg h-24"
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[140px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
           value={formData.observaciones_personalizadas}
           onChange={(e) => handleInputChange('observaciones_personalizadas', e.target.value)}
+          onInput={handleTextareaAutoResize}
           placeholder="Agrega observaciones específicas para este cliente..."
         />
       </div>
@@ -509,9 +511,10 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
       <div>
         <label className="block text-sm font-medium mb-2">Tenga en cuenta</label>
         <textarea 
-          className="w-full p-3 border rounded-lg h-20"
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[140px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
           value={formData.tenga_en_cuenta}
           onChange={(e) => handleInputChange('tenga_en_cuenta', e.target.value)}
+          onInput={handleTextareaAutoResize}
           placeholder="Información adicional importante que el cliente debe considerar..."
         />
       </div>

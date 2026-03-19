@@ -1,5 +1,7 @@
 "use client"
 
+// Resumen de comisiones para ESTILISTA (UI preparada para consumir su propia data).
+
 import { useState, useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
 

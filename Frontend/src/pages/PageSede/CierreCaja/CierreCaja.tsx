@@ -313,6 +313,7 @@ export default function CierreCajaPage() {
 
   const [aperturaMonto, setAperturaMonto] = useState("");
   const [aperturaNota, setAperturaNota] = useState("");
+  const [aperturaFecha, setAperturaFecha] = useState(getToday());
 
   const [cierreNota, setCierreNota] = useState("");
   const [cierreFecha, setCierreFecha] = useState(getToday());
@@ -998,6 +999,11 @@ export default function CierreCajaPage() {
       return;
     }
 
+    if (!aperturaFecha) {
+      setError("Debes seleccionar la fecha de apertura");
+      return;
+    }
+
     const montoValue = toNumber(aperturaMonto);
     if (!montoValue || montoValue <= 0) {
       setError("El monto inicial debe ser mayor a 0");
@@ -1018,10 +1024,13 @@ export default function CierreCajaPage() {
         notas: aperturaNota.trim() || undefined,
         observaciones: aperturaNota.trim() || undefined,
         moneda: monedaSede,
+        fecha: toBackendDate(aperturaFecha),
+        fecha_apertura: toBackendDate(aperturaFecha),
       });
 
       setAperturaMonto("");
       setAperturaNota("");
+      setAperturaFecha(getToday());
       setSuccess("Caja abierta correctamente");
       toast({
         title: "Caja abierta",
@@ -1576,7 +1585,11 @@ export default function CierreCajaPage() {
                 <CardHeader className="border-b border-[#e3e0ea] pb-2">
                   <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Abrir caja</CardTitle>
                 </CardHeader>
-                <CardContent className="grid grid-cols-1 gap-3 pt-4 md:grid-cols-4">
+                <CardContent className="grid grid-cols-1 gap-3 pt-4 md:grid-cols-5">
+                  <div>
+                    <label className="text-xs font-medium text-[#666370]">Fecha de apertura</label>
+                    <Input type="date" value={aperturaFecha} onChange={(e) => setAperturaFecha(e.target.value)} />
+                  </div>
                   <div>
                     <label className="text-xs font-medium text-[#666370]">Monto inicial</label>
                     <Input

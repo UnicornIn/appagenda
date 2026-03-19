@@ -140,6 +140,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   const [products, setProducts] = useState<InventoryProduct[]>([]);
   const [cartByProductId, setCartByProductId] = useState<Record<string, CartItem>>({});
   const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>({});
+  const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState("");
   const [buyerSearch, setBuyerSearch] = useState("");
   const [knownClients, setKnownClients] = useState<GiftCardClientOption[]>([]);
@@ -467,12 +468,20 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   };
 
   const getQuantityInput = (productId: string): string => quantityInputs[productId] || "1";
+  const getPriceInput = (productId: string, fallback?: number): string =>
+    priceInputs[productId] ?? (fallback !== undefined ? String(fallback) : "");
 
   const parseInputQuantity = (value: string): number => {
     const parsed = Number.parseInt(value, 10);
     if (!Number.isFinite(parsed)) {
       return 0;
     }
+    return parsed;
+  };
+
+  const parseInputPrice = (value: string, fallback: number): number => {
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
     return parsed;
   };
 
@@ -571,6 +580,10 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
         fallbackInventoryId: product.productId,
         currency,
       });
+      const priceValue = parseInputPrice(
+        getPriceInput(product.productId, productDetail.unitPrice),
+        productDetail.unitPrice
+      );
 
       const currentQuantity = cartByProductId[product.productId]?.quantity || 0;
       const nextQuantity = currentQuantity + desiredQuantity;
@@ -590,11 +603,15 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
           name: productDetail.name,
           category: product.category,
           quantity: nextQuantity,
-          unitPrice: productDetail.unitPrice,
+          unitPrice: priceValue,
           stockAvailable: productDetail.stockAvailable,
         },
       }));
 
+      setPriceInputs((prev) => ({
+        ...prev,
+        [product.productId]: getPriceInput(product.productId, productDetail.unitPrice),
+      }));
       setQuantityInputs((prev) => ({ ...prev, [product.productId]: "1" }));
       setSuccess(`"${productDetail.name}" agregado (${desiredQuantity}).`);
     } catch (error) {
@@ -633,6 +650,23 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
         ...current,
         quantity: nextQuantity,
       },
+    }));
+  };
+
+  const updateCartItemPrice = (productId: string, raw: string) => {
+    if (isCatalogLocked) {
+      setError("No puedes editar precios después de crear la venta.");
+      return;
+    }
+
+    const current = cartByProductId[productId];
+    if (!current) return;
+
+    const nextPrice = parseInputPrice(raw, current.unitPrice);
+    setPriceInputs((prev) => ({ ...prev, [productId]: raw }));
+    setCartByProductId((prev) => ({
+      ...prev,
+      [productId]: { ...current, unitPrice: nextPrice },
     }));
   };
 
@@ -1187,6 +1221,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                   {filteredProducts.map((product) => {
                     const isValidating = validatingProductId === product.productId;
                     const quantityValue = getQuantityInput(product.productId);
+                    const priceValue = getPriceInput(product.productId, product.unitPrice);
                     return (
                       <div key={product.productId} className="rounded-lg border border-gray-200 p-3">
                         <div className="flex items-start justify-between gap-2">
@@ -1200,20 +1235,36 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                           </div>
                         </div>
 
-                        <div className="mt-3 flex items-center gap-2">
-                          <Input
-                            type="number"
-                            min={1}
-                            value={quantityValue}
-                            onChange={(event) =>
-                              setQuantityInputs((prev) => ({
-                                ...prev,
-                                [product.productId]: event.target.value,
-                              }))
-                            }
-                            className="h-9 w-20"
-                            disabled={isCatalogLocked || isBusy}
-                          />
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              min={1}
+                              value={quantityValue}
+                              onChange={(event) =>
+                                setQuantityInputs((prev) => ({
+                                  ...prev,
+                                  [product.productId]: event.target.value,
+                                }))
+                              }
+                              className="h-9 w-20"
+                              disabled={isCatalogLocked || isBusy}
+                            />
+                            <Input
+                              type="number"
+                              min={0}
+                              step="100"
+                              value={priceValue}
+                              onChange={(event) =>
+                                setPriceInputs((prev) => ({
+                                  ...prev,
+                                  [product.productId]: event.target.value,
+                                }))
+                              }
+                              className="h-9 w-28"
+                              disabled={isCatalogLocked || isBusy}
+                            />
+                          </div>
                           <Button
                             className="h-9 flex-1 bg-black text-white hover:bg-gray-800"
                             onClick={() => {
@@ -1305,6 +1356,15 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                               >
                                 +
                               </Button>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="100"
+                                value={getPriceInput(item.productId, item.unitPrice)}
+                                onChange={(event) => updateCartItemPrice(item.productId, event.target.value)}
+                                className="h-9 w-24"
+                                disabled={isBusy}
+                              />
                             </div>
                           )}
 

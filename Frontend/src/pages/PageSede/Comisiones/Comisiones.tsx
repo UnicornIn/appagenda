@@ -1,4 +1,4 @@
-// app/comisiones/page.tsx
+// Módulo de Comisiones para ADMIN_SEDE: contenedor principal de la vista.
 "use client";
 
 import { useState, useCallback } from "react";
