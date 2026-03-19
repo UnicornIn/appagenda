@@ -1146,10 +1146,8 @@ export function StylistsTeamWorkspace({
           nombre: String(payload.nombre ?? legacyEditStylist.nombre ?? "").trim(),
           email: String(payload.email ?? legacyEditStylist.email ?? "").trim(),
           sede_id: targetSedeId,
-          especialidades: Array.isArray(payload.especialidades)
-            ? payload.especialidades.filter(Boolean)
-            : legacyEditStylist.especialidades_detalle.map((d) => d.id),
           comision: normalizeCommission(payload.comision),
+          comision_productos: normalizeCommission((payload as any).comision_productos),
           activo: payload.activo ?? legacyEditStylist.activo ?? true,
           telefono: typeof payload.telefono === "string" ? payload.telefono.trim() : undefined,
         };

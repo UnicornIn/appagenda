@@ -1,5 +1,8 @@
 "use client";
 
+// Filtros del módulo de Comisiones (SUPER_ADMIN):
+// obliga a elegir sede y estilista; arma payload que se envía al servicio de comisiones.
+
 import { useState, useEffect } from "react";
 import {
   Select,

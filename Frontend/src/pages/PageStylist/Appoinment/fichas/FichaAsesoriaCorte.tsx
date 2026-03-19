@@ -6,6 +6,7 @@ import { Cita } from '../../../../types/fichas';
 import { Camera, Loader2, X, Save, CheckCircle } from 'lucide-react';
 import { API_BASE_URL } from '../../../../types/config';
 import { getEstilistaDataFromCita, getFichaAuthToken } from './fichaHelpers';
+import { handleTextareaAutoResize } from "../../../../lib/textareaAutosize";
 
 interface FichaAsesoriaCorteProps {
   cita: Cita;
@@ -433,9 +434,10 @@ export function FichaAsesoriaCorte({ cita, datosIniciales, onGuardar, onSubmit, 
           Descripción del corte realizado *
         </label>
         <textarea
-          className="w-full p-3 border rounded-lg h-32"
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[140px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
           value={formData.descripcion}
           onChange={(e) => handleInputChange('descripcion', e.target.value)}
+          onInput={handleTextareaAutoResize}
           placeholder="Describe en detalle el corte realizado, técnicas utilizadas, estilo, etc."
           required
         />
@@ -448,9 +450,10 @@ export function FichaAsesoriaCorte({ cita, datosIniciales, onGuardar, onSubmit, 
       <div>
         <label className="block text-sm font-medium mb-2">Observaciones</label>
         <textarea
-          className="w-full p-3 border rounded-lg h-24"
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[140px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
           value={formData.observaciones}
           onChange={(e) => handleInputChange('observaciones', e.target.value)}
+          onInput={handleTextareaAutoResize}
           placeholder="Observaciones adicionales, recomendaciones, cuidados específicos..."
         />
       </div>

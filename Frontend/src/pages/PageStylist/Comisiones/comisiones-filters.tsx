@@ -1,5 +1,7 @@
 "use client"
 
+// Filtros del módulo Comisiones para ESTILISTA: por ahora solo estructura visual.
+
 import { useState } from "react";
 import { Select, SelectContent, SelectItem } from "../../../components/ui/select"
 import { Calendar } from "lucide-react";

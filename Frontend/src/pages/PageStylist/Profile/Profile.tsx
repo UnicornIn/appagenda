@@ -1,14 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { ArrowLeft, Mail, MapPin, Phone } from "lucide-react";
+import { ArrowLeft, LogOut, Mail, MapPin, Phone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import StylistBottomNav from "../../../components/Layout/StylistBottomNav";
 
 export default function StylistProfilePage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
   const initials = useMemo(() => {
     const name = user?.name || "";
@@ -69,8 +69,7 @@ export default function StylistProfilePage() {
                 <div className="flex items-center gap-2">
                   <MapPin className="h-4 w-4 text-gray-500" />
                   <span>
-                    {user?.nombre_local ? `${user.nombre_local}` : "Sede"}{" "}
-                    {user?.sede_id ? `(${user.sede_id})` : ""}
+                    {user?.nombre_local ? `${user.nombre_local}` : "Sede"}
                   </span>
                 </div>
               )}
@@ -94,7 +93,22 @@ export default function StylistProfilePage() {
               </div>
             </div>
           </section>
+
         </main>
+
+        <div className="px-4 pb-8">
+          <button
+            type="button"
+            onClick={async () => {
+              await logout();
+              navigate("/", { replace: true });
+            }}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-gray-800"
+          >
+            <LogOut className="h-4 w-4" />
+            Cerrar sesión
+          </button>
+        </div>
       </div>
 
       <StylistBottomNav active="profile" />
