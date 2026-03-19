@@ -1,4 +1,5 @@
-// src/services/commissionsService.ts
+// Servicio frontend para el módulo de Comisiones (SUPER_ADMIN).
+// Centraliza llamadas y transforma payloads para servicios y productos en una sola estructura.
 import { apiClient } from './apiClient';
 import { 
   Commission, 

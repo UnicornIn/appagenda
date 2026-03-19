@@ -158,6 +158,7 @@ export const ROUTE_ACCESS_MAP: Record<string, AppModule> = {
   "/sede/dashboard": APP_MODULES.SEDE_DASHBOARD,
   "/sede/sales-invoiced": APP_MODULES.SEDE_SALES_INVOICED,
   "/sede/cierre-caja": APP_MODULES.SEDE_CIERRE_CAJA,
+  // Módulo de comisiones para admin_sede
   "/sede/commissions": APP_MODULES.SEDE_COMMISSIONS,
   "/sede/billing": APP_MODULES.SEDE_BILLING,
   "/sede/gift-cards": APP_MODULES.SEDE_GIFT_CARDS,

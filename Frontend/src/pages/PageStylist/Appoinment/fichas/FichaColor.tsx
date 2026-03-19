@@ -6,6 +6,7 @@ import { Cita } from '../../../../types/fichas';
 import { Camera, Loader2, X, Save, CheckCircle } from 'lucide-react';
 import { API_BASE_URL } from '../../../../types/config';
 import { getEstilistaDataFromCita, getFichaAuthToken } from './fichaHelpers';
+import { handleTextareaAutoResize } from "../../../../lib/textareaAutosize";
 
 interface FichaColorProps {
   cita: Cita;
@@ -474,9 +475,10 @@ export function FichaColor({ cita, datosIniciales, onGuardar, onSubmit, onCancel
           Descripción del servicio de color realizado *
         </label>
         <textarea
-          className="w-full p-3 border rounded-lg h-32"
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[160px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
           value={formData.descripcion}
           onChange={(e) => handleInputChange('descripcion', e.target.value)}
+          onInput={handleTextareaAutoResize}
           placeholder="Describe en detalle el servicio de color realizado, tonalidades utilizadas, técnicas aplicadas, etc."
           required
         />
@@ -489,9 +491,10 @@ export function FichaColor({ cita, datosIniciales, onGuardar, onSubmit, onCancel
       <div>
         <label className="block text-sm font-medium mb-2">Observaciones</label>
         <textarea
-          className="w-full p-3 border rounded-lg h-24"
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[140px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
           value={formData.observaciones}
           onChange={(e) => handleInputChange('observaciones', e.target.value)}
+          onInput={handleTextareaAutoResize}
           placeholder="Observaciones adicionales, recomendaciones de cuidado, productos utilizados..."
         />
       </div>
@@ -536,11 +539,11 @@ export function FichaColor({ cita, datosIniciales, onGuardar, onSubmit, onCancel
             <div>
               <label className="block text-sm font-medium mb-1">Observaciones:</label>
               <textarea
-                className="w-full p-2 border rounded text-sm"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[140px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
                 value={respuesta.observaciones}
                 onChange={(e) => updateRespuesta(index, 'observaciones', e.target.value)}
+                onInput={handleTextareaAutoResize}
                 placeholder="Observaciones adicionales..."
-                rows={2}
               />
             </div>
           </div>

@@ -35,7 +35,7 @@ import SedeClients from "./pages/PageSede/Clients/Clients";
 import SedeBilling from "./pages/PageSede/Billing/Billing";
 import SedeServices from './pages/PageSede/Services/Services';
 import SedeStylists from './pages/PageSede/Styslit/Sytlist';
-import SedeCommissions from './pages/PageSede/Comisiones/Comisiones'
+import SedeCommissions from './pages/PageSede/Comisiones/Comisiones'; // Módulo de comisiones para admin_sede
 import SedeInvoices from "./pages/PageSede/Sales-invoiced/Sales-invoiced"
 import CierreCajaPage from "./pages/PageSede/CierreCaja/CierreCaja"
 
@@ -262,6 +262,7 @@ function App() {
                 </PrivateRoute>
               }
             />
+            {/* Ruta del módulo de Comisiones para admin_sede */}
             <Route
               path="/sede/commissions"
               element={

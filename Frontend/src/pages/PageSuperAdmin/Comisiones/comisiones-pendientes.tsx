@@ -9,7 +9,7 @@ import type { Sede } from "../../../types/sede";
 import { formatSedeNombre } from "../../../lib/sede";
 import { formatCurrencyNoDecimals, getStoredCurrency } from "../../../lib/currency";
 
-// Función para formatear moneda
+// Formatea valores con la moneda persistida para el usuario.
 const formatMoneda = (monto: number, moneda: string = getStoredCurrency("USD")): string => {
   return formatCurrencyNoDecimals(monto, moneda);
 };
@@ -22,7 +22,7 @@ export function ComisionesPendientes() {
   const [sedes, setSedes] = useState<Sede[]>([]);
   const [cargandoSedes, setCargandoSedes] = useState(false);
 
-  // Cargar sedes disponibles
+  // Cargar sedes disponibles (super_admin debe elegir en qué sede ver pendientes).
   useEffect(() => {
     const cargarSedes = async () => {
       setCargandoSedes(true);
@@ -50,7 +50,7 @@ export function ComisionesPendientes() {
     cargarSedes();
   }, []);
 
-  // Cargar resumen cuando se selecciona una sede
+  // Cargar resumen cuando se selecciona una sede; evita llamadas sin contexto.
   useEffect(() => {
     if (selectedSede) {
       cargarResumen();
@@ -69,8 +69,8 @@ export function ComisionesPendientes() {
     setError(null);
     
     try {
-      // Necesitas modificar el servicio para aceptar sede_id como parámetro
-      // Por ahora, usaremos el filtro existente
+      // ⚠️ TODO backend: aún no acepta sede_id; el backend aplica sede según rol.
+      // La vista fuerza selección de sede para que el usuario tenga contexto claro.
       const data = await commissionsService.getPendientesResumen();
       setResumen(data);
     } catch (err) {

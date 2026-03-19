@@ -1,4 +1,5 @@
-// app/comisiones/page.tsx
+// Página contenedor del módulo de Comisiones (perfil SUPER_ADMIN).
+// Renderiza el sidebar principal y la vista de comisiones pendientes.
 "use client";
 
 import { Sidebar } from "../../../components/Layout/Sidebar";

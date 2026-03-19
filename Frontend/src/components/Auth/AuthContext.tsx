@@ -67,7 +67,7 @@ type AuthContextType = {
   activeSedeId: string | null;
   login: (email: string, password: string, remember?: boolean) => Promise<boolean>;
   setActiveSedeId: (sedeId: string | null) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -498,11 +498,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     [clearAuthStorage, saveUserToStorage]
   );
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // Mejor esfuerzo: si existe endpoint de logout, llamarlo sin bloquear el flujo
+    const token =
+      sessionStorage.getItem("access_token") ||
+      localStorage.getItem("access_token") ||
+      user?.access_token ||
+      user?.token;
+
+    if (token) {
+      try {
+        await fetch(`${API_BASE_URL}auth/logout`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      } catch (error) {
+        console.warn("Logout backend falló, se continúa limpiando frontend:", error);
+      }
+    }
+
     setUser(null);
     setActiveSedeIdState(null);
     clearAuthStorage();
-  }, [clearAuthStorage]);
+  }, [clearAuthStorage, user?.access_token, user?.token]);
 
   return (
     <AuthContext.Provider
