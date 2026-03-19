@@ -43,6 +43,7 @@ export const APP_MODULES = {
   SEDE_STYLISTS: "SEDE_STYLISTS",
 
   STYLIST_COMMISSIONS: "STYLIST_COMMISSIONS",
+  STYLIST_REPORTS: "STYLIST_REPORTS",
 } as const;
 
 export type AppModule = (typeof APP_MODULES)[keyof typeof APP_MODULES];
@@ -110,6 +111,7 @@ const ESTILISTA_MODULES: AppModule[] = [
   APP_MODULES.AGENDA_HOME,
   APP_MODULES.AGENDA_STYLIST,
   APP_MODULES.STYLIST_COMMISSIONS,
+  APP_MODULES.STYLIST_REPORTS,
 ];
 
 const CALL_CENTER_MODULES: AppModule[] = [
@@ -168,6 +170,7 @@ export const ROUTE_ACCESS_MAP: Record<string, AppModule> = {
 
   "/stylist/appointments": APP_MODULES.AGENDA_STYLIST,
   "/stylist/commissions": APP_MODULES.STYLIST_COMMISSIONS,
+  "/stylist/reports": APP_MODULES.STYLIST_REPORTS,
 };
 
 const MODULE_SET = new Set<AppModule>(Object.values(APP_MODULES));

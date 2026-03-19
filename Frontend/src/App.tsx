@@ -42,6 +42,8 @@ import CierreCajaPage from "./pages/PageSede/CierreCaja/CierreCaja"
 /* --- Stylist Pages --- */
 import StylistAppointment from "./pages/PageStylist/Appoinment/Appointment";
 import StylistCommissions from "./pages/PageStylist/Comisiones/Comisiones";
+import StylistReportsPage from "./pages/PageStylist/Reports/Reports";
+import StylistProfilePage from "./pages/PageStylist/Profile/Profile";
 
 /** 🔒 RUTA PRIVADA: Verifica usuario y rol */
 const PrivateRoute = ({
@@ -347,6 +349,22 @@ function App() {
               element={
                 <PrivateRoute requiredAccess={APP_MODULES.STYLIST_COMMISSIONS}>
                   <StylistCommissions />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/stylist/reports"
+              element={
+                <PrivateRoute requiredAccess={APP_MODULES.STYLIST_REPORTS}>
+                  <StylistReportsPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/stylist/profile"
+              element={
+                <PrivateRoute requiredAccess={APP_MODULES.AGENDA_STYLIST}>
+                  <StylistProfilePage />
                 </PrivateRoute>
               }
             />

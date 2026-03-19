@@ -2086,6 +2086,16 @@ export function AttentionProtocol({
       citaSeleccionada?.cliente?.email ||
       citaSeleccionada?.cliente_email ||
       "";
+    const notaCita = (
+      citaSeleccionada?.comentario ||
+      (citaSeleccionada as any)?.comentarios ||
+      (citaSeleccionada as any)?.notas ||
+      (citaSeleccionada as any)?.nota ||
+      (citaSeleccionada as any)?.observaciones ||
+      ""
+    )
+      .toString()
+      .trim();
 
     // Extraer productos de la cita si existen
     const productosCita = citaSeleccionada?.productos || [];
@@ -2117,6 +2127,18 @@ export function AttentionProtocol({
             <span className="font-medium">{estadoInfo.estado}</span>
           </div>
         </div>
+
+        {notaCita && (
+          <div className="mb-4 flex items-start justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800">
+            <div className="flex min-w-0 items-start gap-2">
+              <FileText className="mt-[2px] h-4 w-4 text-gray-600 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-gray-900">Notas de la cita</p>
+                <p className="whitespace-pre-line break-words leading-5 text-gray-800">{notaCita}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {fichasCitaActual.length > 0 && (
           <div className="mb-3 p-2 bg-gray-50 border border-gray-200 rounded">

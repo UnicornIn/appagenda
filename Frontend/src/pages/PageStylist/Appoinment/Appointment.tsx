@@ -594,8 +594,8 @@ export default function VistaEstilistaPage() {
             </p>
 
             <div className="grid grid-cols-7 gap-2 text-sm">
-              {DAY_NAMES.map((day) => (
-                <div key={day} className="text-center text-[11px] font-medium text-gray-500">
+              {DAY_NAMES.map((day, idx) => (
+                <div key={`${day}-${idx}`} className="text-center text-[11px] font-medium text-gray-500">
                   {day}
                 </div>
               ))}
@@ -828,6 +828,22 @@ export default function VistaEstilistaPage() {
             >
               <CreditCard className="h-5 w-5" />
               Comisiones
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                navigate("/stylist/reports");
+                setMenuOpen(false);
+              }}
+              className={`inline-flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-medium ${
+                location.pathname === "/stylist/reports"
+                  ? "bg-gray-900 text-white"
+                  : "text-gray-800"
+              }`}
+            >
+              <CreditCard className="h-5 w-5" />
+              Reportes
             </button>
           </nav>
 
