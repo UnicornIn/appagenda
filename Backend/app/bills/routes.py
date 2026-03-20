@@ -330,7 +330,9 @@ async def facturar_cita_o_venta(
     # ====================================
     # 5️⃣ CALCULAR TOTALES
     # ====================================
-    total_final = round(sum(item["subtotal"] for item in items), 2)
+    total_productos_servicios = round(sum(item["subtotal"] for item in items), 2)
+    costo_domicilio = round(float(documento.get("domicilio", 0) or 0), 2)
+    total_final = round(total_productos_servicios + costo_domicilio, 2)
     valor_comision_total = round(total_comision_servicios + total_comision_productos, 2)
     print(f"💰 Total: ${total_final} {moneda_sede} | Comisión: ${valor_comision_total}")
 
