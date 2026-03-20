@@ -164,7 +164,7 @@ export const estilistaService = {
       nombre: estilistaData.nombre.trim(),
       email: estilistaData.email.trim(),
       sede_id: estilistaData.sede_id,
-      especialidades: estilistaData.especialidades || [],
+      especialidades: true,
       comision: estilistaData.comision,
       comision_productos: normalizeCommission(estilistaData.comision_productos) ?? undefined,
       telefono: estilistaData.telefono,
@@ -227,7 +227,7 @@ export const estilistaService = {
           _id: result.estilista_mongo_id || `temp-${Date.now()}`,
           nombre: requestData.nombre,
           email: requestData.email,
-          especialidades: requestData.especialidades,
+          especialidades: Array.isArray(requestData.especialidades) ? requestData.especialidades : [],
           servicios_no_presta: [],
           servicios_presta: [],
           activo: requestData.activo,
@@ -241,7 +241,9 @@ export const estilistaService = {
           comision_productos: normalizeCommission(estilistaData.comision_productos) ?? null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          especialidades_detalle: requestData.especialidades.map(id => ({ id, nombre: id }))
+          especialidades_detalle: Array.isArray(requestData.especialidades)
+            ? requestData.especialidades.map((id: string) => ({ id, nombre: id }))
+            : [],
         };
         
         return estilistaBasico;
@@ -338,8 +340,12 @@ export const estilistaService = {
       nombre: estilistaData.nombre?.trim(),
       email: estilistaData.email?.trim(),
       sede_id: estilistaData.sede_id,
-      especialidades: estilistaData.especialidades || [],
-      activo: estilistaData.activo
+      especialidades: true,
+      activo: estilistaData.activo ?? true,
+      password:
+        typeof estilistaData.password === "string" && estilistaData.password.trim()
+          ? estilistaData.password.trim()
+          : "Temporal123!",
     };
 
     // Solo enviar comision si tiene valor
@@ -377,7 +383,12 @@ export const estilistaService = {
 
     const result: UpdateEstilistaResponse = await response.json();
     console.log('✅ Respuesta del backend al actualizar:', result);
-    
+
+    // Si el backend no envía el objeto profesional, reconsultar para evitar undefined.
+    if (!result.profesional) {
+      return this.getEstilistaById(token, profesionalId);
+    }
+
     const especialidadesArray = result.profesional.especialidades ? 
       (result.profesional.servicios_presta?.map(servicio => servicio.nombre) || []) : 
       [];
