@@ -330,7 +330,9 @@ async def facturar_cita_o_venta(
     # ====================================
     # 5️⃣ CALCULAR TOTALES
     # ====================================
-    total_final = round(sum(item["subtotal"] for item in items), 2)
+    total_productos_servicios = round(sum(item["subtotal"] for item in items), 2)
+    costo_domicilio = round(float(documento.get("domicilio", 0) or 0), 2)
+    total_final = round(total_productos_servicios + costo_domicilio, 2)
     valor_comision_total = round(total_comision_servicios + total_comision_productos, 2)
     print(f"💰 Total: ${total_final} {moneda_sede} | Comisión: ${valor_comision_total}")
 
@@ -891,7 +893,7 @@ async def obtener_ventas_sede(
     sort_order: str = Query("desc", regex=r"^(asc|desc)$"),
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin","recepcionista"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin","recepcionista", "estilista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     try:
@@ -988,7 +990,7 @@ async def obtener_ventas_sede(
 # ============================================================
 @router.get("/sales/{sede_id}/{venta_id}")
 async def obtener_detalle_venta(sede_id: str, venta_id: str, current_user: dict = Depends(get_current_user)):
-    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "estilista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     try:

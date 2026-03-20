@@ -11,7 +11,7 @@ from app.database.mongo import collection_block
 
 router = APIRouter()
 
-ALLOWED_CREATE_ROLES = {"admin_sede", "admin_franquicia", "super_admin", "superadmin", "estilista"}
+ALLOWED_CREATE_ROLES = {"admin_sede", "admin_franquicia", "super_admin", "superadmin", "estilista", "recepcionista", "call_center"}
 SUPERADMIN_ROLES = {"super_admin", "superadmin"}
 
 
