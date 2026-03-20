@@ -10,6 +10,7 @@ from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
                                  Table, TableStyle, Image,
                                  HRFlowable, KeepTogether)
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from PIL import Image as PILImage
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib import colors
 from reportlab.lib.units import cm
@@ -118,6 +119,43 @@ def _tabla_kv(filas, col1=4*cm, col2=11*cm):
     ]))
     return t
 
+from PIL import Image as PILImage
+
+def comprimir_imagen_para_pdf(buf: BytesIO, max_px: int = 1200, quality: int = 75) -> BytesIO:
+    try:
+        buf.seek(0)
+        img = PILImage.open(buf)
+
+        """
+        Redimensiona y recomprime una imagen para que no reviente la RAM de ReportLab.
+        Convierte siempre a RGB (elimina canal alpha que también causa problemas).
+        """
+
+        # ✅ Si tiene canal alpha, componer sobre fondo BLANCO antes de convertir a RGB
+        if img.mode in ("RGBA", "LA", "P"):
+            fondo = PILImage.new("RGB", img.size, (255, 255, 255))
+            if img.mode == "P":
+                img = img.convert("RGBA")
+            # Pegar usando el canal alpha como máscara
+            fondo.paste(img, mask=img.split()[-1] if img.mode == "RGBA" else None)
+            img = fondo
+        else:
+            img = img.convert("RGB")
+
+        # Redimensionar si es demasiado grande
+        w, h = img.size
+        if max(w, h) > max_px:
+            ratio = max_px / max(w, h)
+            img = img.resize((int(w * ratio), int(h * ratio)), PILImage.LANCZOS)
+
+        out = BytesIO()
+        img.save(out, format="JPEG", quality=quality, optimize=True)
+        out.seek(0)
+        return out
+    except Exception as e:
+        print(f"⚠️ Error comprimiendo imagen: {e}")
+        buf.seek(0)
+        return buf
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GENERADOR PRINCIPAL
@@ -149,8 +187,8 @@ async def generar_pdf_ficha(ficha_data: dict, cita_data: dict) -> bytes:
     # ── ENCABEZADO ───────────────────────────────────────────────────────────
     logo_buf = imgs.get("logo")
     if logo_buf:
+        logo_buf = comprimir_imagen_para_pdf(logo_buf, max_px=800, quality=85)
         logo_img = Image(logo_buf, width=9*cm, height=3.5*cm, kind="proportional")
-        logo_img.hAlign = "CENTER"
         story.append(logo_img)
         story.append(Spacer(1, 2))
     else:
@@ -396,7 +434,7 @@ async def generar_pdf_ficha(ficha_data: dict, cita_data: dict) -> bytes:
                     if j < len(urls):
                         b = imgs.get(f"{prefix}_{j}")
                         if b:
-                            b.seek(0)
+                            b = comprimir_imagen_para_pdf(b, max_px=1200, quality=75)
                             img_el = Image(b, width=8*cm, height=8*cm, kind="proportional")
                             img_el.hAlign = "CENTER"
                             inner = Table(

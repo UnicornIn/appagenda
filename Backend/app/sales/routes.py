@@ -156,6 +156,7 @@ async def registrar_comision_venta_directa(
 class ProductoVenta(BaseModel):
     producto_id: str
     cantidad: int
+    precio_unitario: Optional[float] = None
 
 class VentaDirecta(BaseModel):
     cliente_id: Optional[str] = None
@@ -167,6 +168,7 @@ class VentaDirecta(BaseModel):
     abono: Optional[float] = 0
     notas: Optional[str] = None
     codigo_giftcard: Optional[str] = None
+    domicilio: Optional[float] = 0    # ← NUEVO
 
 class PagoVentaRequest(BaseModel):
     monto: float
@@ -284,15 +286,17 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
                 detail=f"Stock insuficiente para '{producto_db.get('nombre')}'. Disponible: {stock_actual}"
             )
 
-        precios_producto = producto_db.get("precios", {})
-        if moneda not in precios_producto:
-            raise HTTPException(
-                status_code=400,
-                detail=f"El producto '{producto_db.get('nombre')}' no tiene precio en {moneda}"
-            )
-
-        precio_unitario = round(precios_producto[moneda], 2)
-        subtotal        = round(item.cantidad * precio_unitario, 2)
+        if item.precio_unitario is not None and item.precio_unitario > 0:
+            precio_unitario = round(float(item.precio_unitario), 2)
+        else:
+            precios_producto = producto_db.get("precios", {})
+            if moneda not in precios_producto:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El producto '{producto_db.get('nombre')}' no tiene precio definido para la moneda '{moneda}'"
+                )
+            precio_unitario = round(precios_producto[moneda], 2)
+        subtotal = round(item.cantidad * precio_unitario, 2)
 
         # Comisión por producto (solo si aplica)
         comision_porcentaje = 0
@@ -324,7 +328,8 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
                 "comision_valor": comision_valor,
             })
 
-    total_venta              = round(total_venta, 2)
+    costo_domicilio = round(float(venta.domicilio or 0), 2)
+    total_venta     = round(total_venta + costo_domicilio, 2)
     total_comision_productos = round(total_comision_productos, 2)
     abono_solicitado         = round(float(venta.abono or 0), 2)
 
@@ -404,6 +409,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
         "notas": venta.notas,
         "estado_pago": estado_pago,
         "estado_factura": "pendiente",
+        "domicilio": num(costo_domicilio),
         "saldo_pendiente": num(saldo_pendiente),
         "codigo_giftcard": codigo_giftcard_guardado,
         # ⭐ Resumen de comisiones (para referencia rápida)
