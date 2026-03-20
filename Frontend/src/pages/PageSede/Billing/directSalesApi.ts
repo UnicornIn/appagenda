@@ -297,6 +297,8 @@ function buildCreateSalePayload(
     productos: input.items.map((item) => ({
       producto_id: item.productId,
       cantidad: Math.trunc(item.quantity),
+      precio_unitario: roundToTwo(item.unitPrice),
+      nombre: item.name,
     })),
     metodo_pago: normalizeDirectSalePaymentMethod(input.paymentMethod),
     abono: 0,
