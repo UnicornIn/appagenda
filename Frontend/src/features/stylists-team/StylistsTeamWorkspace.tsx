@@ -49,6 +49,8 @@ import {
   type TeamScheduleRecord,
 } from "./stylists-team.utils";
 
+type DashboardRowWithProducts = StylistDashboardRow & { cantidadProductos: number };
+
 type StylistsTeamWorkspaceProps = {
   servicesApi: {
     getServicios: (
@@ -141,10 +143,10 @@ type LegacyCreateModalProps = {
   isSaving?: boolean;
 };
 
-const DASHBOARD_HEADERS: Array<{ key: keyof StylistDashboardRow; lines: string[] }> = [
+const DASHBOARD_HEADERS: Array<{ key: keyof DashboardRowWithProducts; lines: string[] }> = [
   { key: "nombre", lines: ["Estilistas"] },
   { key: "citas", lines: ["# de Citas"] },
-  { key: "ocupacion", lines: ["% Ocupación"] },
+  { key: "cantidadProductos", lines: ["Cantidad de", "Productos"] },
   { key: "totalVentaServicios", lines: ["Total Venta", "Servicios"] },
   { key: "totalVentaProductos", lines: ["Total Ventas", "Productos"] },
   { key: "totalVentas", lines: ["Total", "Ventas"] },
@@ -455,7 +457,7 @@ export function StylistsTeamWorkspace({
     return [...categoryServices, ...remainingServices];
   }, [categoryOptions, services, useCategoryOptions]);
 
-  const dashboardRows = useMemo(
+  const baseDashboardRows = useMemo(
     () =>
       buildStylistDashboardRows({
         stylists: filteredStylists,
@@ -466,6 +468,39 @@ export function StylistsTeamWorkspace({
       }),
     [appointments, dateRange, filteredStylists, invoices, schedulesByStylist],
   );
+
+  const dashboardRows: DashboardRowWithProducts[] = useMemo(() => {
+    if (baseDashboardRows.length === 0) return [];
+
+    const productCountByStylist = new Map<string, number>();
+
+    invoices.forEach((invoice) => {
+      const stylistId = String(invoice.profesional_id ?? "").trim();
+      if (!stylistId || !Array.isArray(invoice.items)) return;
+
+      const productCount = invoice.items.reduce((total, item) => {
+        const itemType = normalizeText(item.tipo);
+        const isProduct =
+          itemType.includes("producto") || (item.producto_id && !item.servicio_id);
+        const quantity = Number(item.cantidad ?? 0);
+
+        if (!isProduct || !Number.isFinite(quantity)) return total;
+        return total + quantity;
+      }, 0);
+
+      if (productCount > 0) {
+        productCountByStylist.set(
+          stylistId,
+          (productCountByStylist.get(stylistId) ?? 0) + productCount,
+        );
+      }
+    });
+
+    return baseDashboardRows.map((row) => ({
+      ...row,
+      cantidadProductos: productCountByStylist.get(row.profesionalId) ?? 0,
+    }));
+  }, [baseDashboardRows, invoices]);
 
   const vendorRows = useMemo(
     () => buildVendorRows(systemUsers, selectedSedeIds, filteredStylists, invoices),
@@ -1443,7 +1478,7 @@ export function StylistsTeamWorkspace({
                               <td className="px-4 py-4 font-medium text-slate-900">{row.nombre}</td>
                               <td className="px-4 py-4 font-medium text-slate-900">{row.citas ?? "--"}</td>
                               <td className="px-4 py-4 font-medium text-slate-900">
-                                {row.ocupacion !== null ? `${row.ocupacion}%` : "--"}
+                                {row.cantidadProductos ?? 0}
                               </td>
                               <td className="px-4 py-4 font-medium text-slate-900">
                                 {formatCurrencyNoDecimals(row.totalVentaServicios, currency)}
