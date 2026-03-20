@@ -893,7 +893,7 @@ async def obtener_ventas_sede(
     sort_order: str = Query("desc", regex=r"^(asc|desc)$"),
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin","recepcionista"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin","recepcionista", "estilista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     try:
@@ -990,7 +990,7 @@ async def obtener_ventas_sede(
 # ============================================================
 @router.get("/sales/{sede_id}/{venta_id}")
 async def obtener_detalle_venta(sede_id: str, venta_id: str, current_user: dict = Depends(get_current_user)):
-    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "estilista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     try:
