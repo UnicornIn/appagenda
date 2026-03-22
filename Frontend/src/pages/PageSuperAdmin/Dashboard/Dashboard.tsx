@@ -207,10 +207,7 @@ export default function DashboardPage() {
         params.end_date = dateRange.end_date;
         params.period = "custom";
       } else if (selectedPeriod === "today") {
-        const todayLocal = toLocalYMD(new Date());
-        params.period = "custom";
-        params.start_date = todayLocal;
-        params.end_date = todayLocal;
+        params.period = "today";
       } else {
         params.period = selectedPeriod;
       }
@@ -236,10 +233,7 @@ export default function DashboardPage() {
           analyticsParams.start_date = dateRange.start_date;
           analyticsParams.end_date = dateRange.end_date;
         } else if (selectedPeriod === "today") {
-          const todayLocal = toLocalYMD(new Date());
-          analyticsParams.period = "custom";
-          analyticsParams.start_date = todayLocal;
-          analyticsParams.end_date = todayLocal;
+          analyticsParams.period = "today";
         } else {
           analyticsParams.period = selectedPeriod;
         }

@@ -114,7 +114,7 @@ const pickArray = (...candidates: any[]): any[] => {
   return [];
 };
 
-const formatDate = (dateString?: string) => formatDateDMY(dateString);
+  const formatDate = (dateString?: string) => formatDateDMY(dateString);
 const hasClockTime = (value?: string) => {
   if (!value) return false;
   return /\d{2}:\d{2}/.test(value);

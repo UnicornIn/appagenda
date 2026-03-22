@@ -1,33 +1,39 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { Search, Package, AlertTriangle, BarChart3, Loader2, Filter, TrendingUp, TrendingDown, Box, Edit2, Save, X } from "lucide-react"
-import { PageHeader } from "../../../components/Layout/PageHeader"
+import { AlertTriangle, Loader2 } from "lucide-react"
 import { Button } from "../../../components/ui/button"
-import { Input } from "../../../components/ui/input"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../../components/ui/card"
-import { Badge } from "../../../components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select"
-import { Separator } from "../../../components/ui/separator"
 import { inventarioService } from "./inventario"
 import type { InventarioProducto } from "./inventario"
 import { Sidebar } from "../../../components/Layout/Sidebar"
 import { useAuth } from "../../../components/Auth/AuthContext" // Ajusta la ruta según tu estructura
-import { formatDateDMY } from "../../../lib/dateFormat"
+import { facturaService } from "../Sales-invoiced/facturas"
+import {
+  mapProductsRows,
+  buildInvoiceDateRange,
+  type DateRange as DashboardDateRange,
+} from "../../PageSuperAdmin/Dashboard/super-admin-dashboard.utils"
+import type { Factura } from "../../../types/factura"
+import { normalizeCurrencyCode } from "../../../lib/currency"
+import {
+  ProductsHeaderFilters,
+  ProductsSalesCard,
+  InventorySummaryCard,
+  type ProductSalesRow,
+} from "../../../features/products-dashboard/components"
 
 export function ProductsList() {
-  const [searchTerm, setSearchTerm] = useState("")
-  const [selectedCategoria, setSelectedCategoria] = useState("all")
-  const [showLowStock, setShowLowStock] = useState(false)
   const [productos, setProductos] = useState<InventarioProducto[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  // Estados para edición de stock
-  const [productoEditando, setProductoEditando] = useState<string | null>(null)
-  const [stockTemporal, setStockTemporal] = useState<number>(0)
-  const [guardandoStock, setGuardandoStock] = useState<string | null>(null)
-  const [mensajeExito, setMensajeExito] = useState<string | null>(null)
+  const [period, setPeriod] = useState<string>("today")
+  const [dateRange, setDateRange] = useState<DashboardDateRange>(() =>
+    buildInvoiceDateRange("today", { start_date: "", end_date: "" })
+  )
+  const [ventasLoading, setVentasLoading] = useState(false)
+  const [ventasError, setVentasError] = useState<string | null>(null)
+  const [productSalesRows, setProductSalesRows] = useState<ProductSalesRow[]>([])
+  const [ventasCurrency, setVentasCurrency] = useState<string>("COP")
 
   // Usar el AuthContext en lugar de sessionStorage
   const { user, isAuthenticated, isLoading: authLoading } = useAuth()
@@ -37,12 +43,21 @@ export function ProductsList() {
   const sedeId = user?.sede_id || sessionStorage.getItem("beaux-sede_id")
   const nombreLocal = user?.nombre_local || sessionStorage.getItem("beaux-nombre_local")
 
+  // Mantener dateRange sincronizado cuando cambia el período (excepto custom)
+  useEffect(() => {
+    if (period === "custom") return
+    const next = buildInvoiceDateRange(period, dateRange)
+    if (next.start_date !== dateRange.start_date || next.end_date !== dateRange.end_date) {
+      setDateRange(next)
+    }
+  }, [period])
+
   // Cargar inventario
   useEffect(() => {
     if (!authLoading && sedeId) {
       cargarInventario()
     }
-  }, [showLowStock, authLoading, sedeId])
+  }, [authLoading, sedeId])
 
   // Mostrar mensaje si no está autenticado
   useEffect(() => {
@@ -52,17 +67,56 @@ export function ProductsList() {
     }
   }, [authLoading, isAuthenticated])
 
-  const categorias = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          productos
-            .map((producto) => producto.categoria)
-            .filter((categoria): categoria is string => Boolean(categoria))
+  // Cargar ventas de productos para el dashboard
+  useEffect(() => {
+    const cargarVentasProductos = async () => {
+      if (!isAuthenticated || !sedeId) {
+        return
+      }
+
+      const effectiveRange =
+        period === "custom" && dateRange.start_date && dateRange.end_date
+          ? dateRange
+          : buildInvoiceDateRange(period === "custom" ? "last_30_days" : period, dateRange)
+
+      try {
+        setVentasLoading(true)
+        setVentasError(null)
+
+        const facturas = await facturaService.getVentasBySede(
+          sedeId,
+          1,
+          200,
+          effectiveRange.start_date,
+          effectiveRange.end_date
         )
-      ),
-    [productos]
-  )
+
+        const currency = normalizeCurrencyCode(facturas[0]?.moneda || "COP")
+        setVentasCurrency(currency)
+
+        const rows = mapProductsRows(facturas as Factura[], currency).map((row) => ({
+          productId: row.productId,
+          nombre: row.producto,
+          unidades: row.unidades,
+          monto: row.ventas,
+          currency: row.currency,
+          participacion: row.participacion,
+        }))
+
+        setProductSalesRows(rows)
+      } catch (err) {
+        console.error("Error cargando ventas de productos:", err)
+        setVentasError(
+          err instanceof Error ? err.message : "No se pudieron cargar las ventas de productos"
+        )
+        setProductSalesRows([])
+      } finally {
+        setVentasLoading(false)
+      }
+    }
+
+    void cargarVentasProductos()
+  }, [period, dateRange, sedeId, isAuthenticated])
 
   const cargarInventario = async () => {
     try {
@@ -80,7 +134,7 @@ export function ProductsList() {
 
       // Pasar el token y sede_id al servicio
       const inventario = await inventarioService.getInventarioUsuario(
-        showLowStock,
+        false,
         user?.token || sessionStorage.getItem("access_token"),
         sedeId
       )
@@ -96,30 +150,6 @@ export function ProductsList() {
       setIsLoading(false)
     }
   }
-
-  const searchTermLower = searchTerm.trim().toLowerCase()
-  const safeLower = (value: unknown) => (typeof value === "string" ? value.toLowerCase() : "")
-
-  const productosFiltrados = useMemo(() => {
-    return productos.filter((producto) => {
-      if (searchTermLower) {
-        const cumpleBusqueda =
-          safeLower(producto.nombre).includes(searchTermLower) ||
-          safeLower(producto.producto_id).includes(searchTermLower) ||
-          safeLower(producto.producto_codigo).includes(searchTermLower)
-
-        if (!cumpleBusqueda) {
-          return false
-        }
-      }
-
-      if (selectedCategoria !== "all" && producto.categoria !== selectedCategoria) {
-        return false
-      }
-
-      return true
-    })
-  }, [productos, searchTermLower, selectedCategoria])
 
   const stats = useMemo(() => {
     const totalProductos = productos.length
@@ -137,77 +167,10 @@ export function ProductsList() {
     }
   }, [productos])
 
-  // Función para iniciar edición de stock
-  const iniciarEdicionStock = (producto: InventarioProducto) => {
-    setProductoEditando(producto._id)
-    setStockTemporal(producto.stock_actual)
-    setMensajeExito(null)
-  }
-
-  // Función para cancelar edición
-  const cancelarEdicionStock = () => {
-    setProductoEditando(null)
-    setStockTemporal(0)
-    setMensajeExito(null)
-  }
-
-  // Función para guardar stock
-  const guardarStock = async (producto: InventarioProducto) => {
-    if (stockTemporal < 0) {
-      setError("El stock no puede ser negativo")
-      return
-    }
-
-    setGuardandoStock(producto._id)
-    setError(null)
-    setMensajeExito(null)
-
-    try {
-      // Backend espera cantidad_ajuste (delta), no valor absoluto
-      const delta = stockTemporal - producto.stock_actual
-      const resultado = await inventarioService.ajustarInventario(
-        producto._id,
-        delta,
-        user?.token || sessionStorage.getItem("access_token")
-      )
-
-      if (resultado.success) {
-        // Actualizar el producto en el estado local
-        setProductos(prevProductos =>
-          prevProductos.map(p =>
-            p._id === producto._id
-              ? { ...p, stock_actual: stockTemporal, fecha_ultima_actualizacion: new Date().toISOString() }
-              : p
-          )
-        )
-        setMensajeExito(resultado.message || "Stock actualizado correctamente")
-        setProductoEditando(null)
-
-        // Ocultar mensaje de éxito después de 3 segundos
-        setTimeout(() => setMensajeExito(null), 3000)
-      } else {
-        setError(resultado.error || "Error al actualizar el stock")
-      }
-    } catch (err) {
-      console.error("Error guardando stock:", err)
-      setError("Error inesperado al guardar el stock")
-    } finally {
-      setGuardandoStock(null)
-    }
-  }
-
-  // Función para determinar el color del stock
-  const getStockColor = (stockActual: number, stockMinimo: number) => {
-    if (stockActual === 0) return "bg-red-50 text-red-700 border-red-100"
-    if (stockActual <= stockMinimo) return "bg-amber-50 text-amber-700 border-amber-100"
-    if (stockActual <= stockMinimo * 2) return "bg-blue-50 text-blue-700 border-blue-100"
-    return "bg-emerald-50 text-emerald-700 border-emerald-100"
-  }
-
   // Mostrar loading mientras se verifica la autenticación
   if (authLoading) {
     return (
-      <div className="flex min-h-screen bg-gray-50">
+      <div className="flex min-h-screen bg-white">
         <Sidebar />
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-gray-400 mb-4" />
@@ -238,401 +201,83 @@ export function ProductsList() {
   }
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar />
-      <div className="flex-1">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Header */}
+    <>
+      <div className="flex min-h-screen bg-white">
+        <Sidebar />
+        <div className="flex-1">
+          <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+            <ProductsHeaderFilters
+              title="Dashboard de Productos"
+              subtitle="Resumen de ventas e inventario de los productos"
+              sedes={sedeId ? [{ sede_id: sedeId, nombre: nombreLocal || "Sede actual" }] : []}
+              selectedSedeId={sedeId || ""}
+              onSedeChange={() => {}}
+              disableSedeSelect
+              period={period}
+              onPeriodChange={setPeriod}
+              dateRange={dateRange}
+              onDateRangeChange={setDateRange}
+              onOpenConfig={() =>
+                document.getElementById("inventario-detalle")?.scrollIntoView({ behavior: "smooth" })
+              }
+            />
 
-          <div className="mb-8">
-            <div className="flex items-center justify-between">
+          {error && (
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <AlertTriangle className="h-4 w-4 mt-0.5" />
               <div>
-                <PageHeader
-                  title="Productos"
-                  subtitle="Gestión de productos y control de stock"
-                  className="mb-0"
-                />
+                <p className="font-semibold text-amber-900">No se pudo cargar el inventario</p>
+                <p className="text-amber-800">{error}</p>
               </div>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <ProductsSalesCard
+              title={`Venta de Productos - ${nombreLocal || "Sede"}`}
+              rows={productSalesRows}
+              currency={ventasCurrency}
+              loading={ventasLoading}
+              error={ventasError}
+              onViewDetail={() => {
+                window.location.href = "/sede/sales-invoiced"
+              }}
+            />
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <ProductsSalesCard
+                title="Top productos"
+                rows={productSalesRows.slice(0, 4)}
+                currency={ventasCurrency}
+                loading={ventasLoading}
+                error={ventasError}
+                compact
+                onViewDetail={() => {
+                  window.location.href = "/sede/sales-invoiced"
+                }}
+              />
+              <InventorySummaryCard
+                totalProductos={stats.totalProductos}
+                stockTotal={stats.totalStock}
+                bajoStock={stats.productosBajoStock}
+                sinStock={stats.productosSinStock}
+                diasRestantes={null}
+                loading={isLoading}
+                onViewInventory={() =>
+                  document.getElementById("inventario-detalle")?.scrollIntoView({ behavior: "smooth" })
+                }
+              />
             </div>
           </div>
 
-          {/* Información de sede */}
-          {sedeId && nombreLocal && (
-            <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-gray-100 rounded-lg">
-                    <Box className="h-5 w-5 text-gray-700" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{nombreLocal}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Badge variant="outline" className="text-xs">
-                    {productos.length} productos
-                  </Badge>
-                  <Badge
-                    variant="outline"
-                    className={`text-xs ${isAuthenticated
-                      ? "border-green-200 bg-green-50 text-green-700"
-                      : "border-gray-200"
-                      }`}
-                  >
-                    {isAuthenticated ? "Conectado" : "Desconectado"}
-                  </Badge>
-                </div>
-              </div>
+          {false && (
+            <div id="inventario-detalle" className="mt-10 space-y-6">
+              {/* Sección de inventario detallado deshabilitada temporalmente */}
             </div>
           )}
-
-          {/* Filtros */}
-          <Card className="mb-6 border-gray-200">
-            <CardContent className="pt-6">
-              <div className="flex flex-col lg:flex-row gap-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <Input
-                    placeholder="Buscar productos por nombre o categoría..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 border-gray-300 focus:border-gray-400 focus:ring-gray-400"
-                    disabled={isLoading}
-                  />
-                </div>
-
-                <div className="flex gap-3">
-                  <Select value={selectedCategoria} onValueChange={setSelectedCategoria} disabled={isLoading}>
-                    <SelectTrigger className="w-full lg:w-48 border-gray-300">
-                      <SelectValue placeholder="Categoría" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todas las categorías</SelectItem>
-                      {categorias.map((categoria, index) => (
-                        <SelectItem key={index} value={categoria}>{categoria}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Button
-                    variant={showLowStock ? "default" : "outline"}
-                    onClick={() => setShowLowStock(!showLowStock)}
-                    className={`border-gray-300 ${showLowStock ? "bg-amber-600 hover:bg-amber-700" : ""}`}
-                    disabled={isLoading}
-                  >
-                    <Filter className="h-4 w-4 mr-2" />
-                    {showLowStock ? "Mostrar Todo" : "Stock Bajo"}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Estadísticas */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <Card className="border-gray-200 hover:border-gray-300 transition-colors">
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 mb-2">Total Productos</p>
-                    <p className="text-2xl font-bold text-gray-900">{stats.totalProductos}</p>
-                  </div>
-                  <div className="p-3 bg-gray-100 rounded-lg">
-                    <Package className="h-5 w-5 text-gray-700" />
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center text-xs text-gray-500">
-                  <TrendingUp className="h-3 w-3 text-gray-500 mr-1" />
-                  <span>En inventario</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-gray-200 hover:border-gray-300 transition-colors">
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 mb-2">Stock Total</p>
-                    <p className="text-2xl font-bold text-gray-900">{stats.totalStock}</p>
-                  </div>
-                  <div className="p-3 bg-gray-100 rounded-lg">
-                    <BarChart3 className="h-5 w-5 text-gray-700" />
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center text-xs text-gray-500">
-                  <span>Promedio: {stats.stockPromedio} por producto</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-gray-200 hover:border-gray-300 transition-colors">
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 mb-2">Bajo Stock</p>
-                    <p className="text-2xl font-bold text-gray-900">{stats.productosBajoStock}</p>
-                  </div>
-                  <div className="p-3 bg-gray-100 rounded-lg">
-                    <AlertTriangle className="h-5 w-5 text-gray-700" />
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <div className="flex items-center text-xs text-gray-500">
-                    <TrendingDown className="h-3 w-3 text-gray-500 mr-1" />
-                    <span>{stats.totalProductos > 0 ? Math.round((stats.productosBajoStock / stats.totalProductos) * 100) : 0}% del inventario</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-gray-200 hover:border-gray-300 transition-colors">
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 mb-2">Sin Stock</p>
-                    <p className="text-2xl font-bold text-gray-900">{stats.productosSinStock}</p>
-                  </div>
-                  <div className="p-3 bg-gray-100 rounded-lg">
-                    <AlertTriangle className="h-5 w-5 text-gray-700" />
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <div className="flex items-center text-xs text-gray-500">
-                    <TrendingDown className="h-3 w-3 text-gray-500 mr-1" />
-                    <span>Requieren atención inmediata</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
           </div>
-
-          {/* Estado de carga/error */}
-          {isLoading && (
-            <div className="flex flex-col items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-gray-400 mb-4" />
-              <p className="text-gray-600">Cargando inventario...</p>
-              <p className="text-sm text-gray-500 mt-1">Obteniendo datos de productos</p>
-            </div>
-          )}
-
-          {error && !isLoading && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-6">
-              <div className="flex items-start">
-                <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5 mr-3" />
-                <div className="flex-1">
-                  <p className="text-red-700">
-                    {typeof error === "string" ? error : "Error al procesar la solicitud"}
-                  </p>                  <p className="text-sm text-red-600 mt-1">
-                    {error.includes("conexión") || error.includes("Error al cargar")
-                      ? "Verifica tu conexión e intenta nuevamente"
-                      : "Por favor, verifica los datos e intenta nuevamente"}
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setError(null)
-                    if (error.includes("conexión") || error.includes("Error al cargar")) {
-                      cargarInventario()
-                    }
-                  }}
-                  className="border-red-300 text-red-700 hover:bg-red-50"
-                >
-                  {error.includes("conexión") || error.includes("Error al cargar") ? "Reintentar" : "Cerrar"}
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Tabla de Productos */}
-          {!isLoading && !error && (
-            <Card className="border-gray-200">
-              <CardHeader className="border-b border-gray-200">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-lg font-semibold text-gray-900">
-                      Productos en Inventario
-                    </CardTitle>
-                    <CardDescription className="text-gray-600">
-                      Lista completa de productos con sus niveles de stock
-                    </CardDescription>
-                  </div>
-                  <Badge variant="outline" className="text-xs font-medium">
-                    {productosFiltrados.length} de {productos.length} productos
-                  </Badge>
-                </div>
-              </CardHeader>
-
-              <CardContent className="pt-6">
-                {productosFiltrados.length === 0 ? (
-                  <div className="text-center py-12">
-                    <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                      <Package className="h-8 w-8 text-gray-400" />
-                    </div>
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">
-                      {productos.length === 0
-                        ? "No hay productos en el inventario"
-                        : "No se encontraron productos"}
-                    </h3>
-                    <p className="text-gray-600 max-w-sm mx-auto">
-                      {productos.length === 0
-                        ? "Aún no hay productos registrados en el inventario de esta sede."
-                        : "Intenta ajustar los filtros o cambiar los términos de búsqueda."}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {productosFiltrados.map((producto) => (
-                      <div key={producto._id} className="group">
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white border border-gray-200 rounded-lg hover:border-gray-300 hover:bg-gray-50 transition-colors">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start gap-3">
-                              <div className="p-2 bg-gray-100 rounded-lg mt-1">
-                                <Package className="h-4 w-4 text-gray-600" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <h4 className="text-sm font-semibold text-gray-900 truncate">
-                                    {producto.nombre}
-                                  </h4>
-                                </div>
-                                <div className="flex items-center flex-wrap gap-3 text-xs text-gray-500">
-                                  <span>Categoría: {producto.categoria || "Sin categoría"}</span>
-                                  <span>•</span>
-                                  <span>Mínimo: {producto.stock_minimo}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col sm:items-end gap-3 mt-4 sm:mt-0">
-                            <div className="flex items-center gap-4">
-                              {productoEditando === producto._id ? (
-                                <div className="flex items-center gap-2">
-                                  <Input
-                                    type="number"
-                                    min="0"
-                                    value={stockTemporal}
-                                    onChange={(e) => setStockTemporal(parseInt(e.target.value) || 0)}
-                                    className="w-24 text-center text-lg font-bold"
-                                    disabled={guardandoStock === producto._id}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        guardarStock(producto)
-                                      } else if (e.key === "Escape") {
-                                        cancelarEdicionStock()
-                                      }
-                                    }}
-                                  />
-                                  <Button
-                                    size="sm"
-                                    onClick={() => guardarStock(producto)}
-                                    disabled={guardandoStock === producto._id}
-                                    className="bg-gray-400 hover:bg-gray-500
-                                    disabled:bg-gray-300
-                                    disabled:cursor-not-allowed"
-                                  >
-                                    {guardandoStock === producto._id ? (
-                                      <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                      <Save className="h-4 w-4" />
-                                    )}
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={cancelarEdicionStock}
-                                    disabled={guardandoStock === producto._id}
-                                  >
-                                    <X className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              ) : (
-                                <div className="text-right">
-                                  <div className="flex items-center gap-2">
-                                    <p className="text-lg font-bold text-gray-900">{producto.stock_actual}</p>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => iniciarEdicionStock(producto)}
-                                      className="h-6 w-6 p-0"
-                                      title="Editar stock"
-                                    >
-                                      <Edit2 className="h-3 w-3 text-gray-500 hover:text-gray-700" />
-                                    </Button>
-                                  </div>
-                                  <p className="text-xs text-gray-500">Stock actual</p>
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="flex flex-col items-end gap-2">
-                              <div className="flex items-center gap-2">
-                                <Badge className={`${getStockColor(producto.stock_actual, producto.stock_minimo)} text-xs font-medium px-2 py-1`}>
-                                  {producto.stock_actual === 0
-                                    ? "Sin Stock"
-                                    : producto.stock_actual <= producto.stock_minimo
-                                      ? "Bajo Stock"
-                                      : "Disponible"}
-                                </Badge>
-                              </div>
-                                <span className="text-xs text-gray-500">
-                                  Actualizado:{" "}
-                                  {producto.fecha_ultima_actualizacion
-                                    ? formatDateDMY(producto.fecha_ultima_actualizacion)
-                                    : "—"}
-
-                                </span>
-                              {mensajeExito && productoEditando === null && (
-                                <span className="text-xs text-green-600 font-medium">
-                                  {mensajeExito}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <Separator className="mt-4 last:hidden" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Resumen */}
-          {!isLoading && !error && productosFiltrados.length > 0 && (
-            <div className="mt-6 p-4 bg-white border border-gray-200 rounded-lg">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="text-sm text-gray-600">
-                  <p>
-                    <strong className="font-medium text-gray-900">Resumen del inventario:</strong>{" "}
-                    {stats.productosBajoStock > 0 && (
-                      <span className="text-amber-600">{stats.productosBajoStock} productos con stock bajo</span>
-                    )}
-                    {stats.productosBajoStock > 0 && stats.productosSinStock > 0 && ", "}
-                    {stats.productosSinStock > 0 && (
-                      <span className="text-red-600">{stats.productosSinStock} productos sin stock</span>
-                    )}
-                    {(stats.productosBajoStock === 0 && stats.productosSinStock === 0) &&
-                      <span className="text-emerald-600">Todo el inventario en niveles óptimos</span>
-                    }
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <span>Total de productos:</span>
-                  <span className="font-medium text-gray-900">{stats.totalProductos}</span>
-                  <span className="mx-2">•</span>
-                  <span>Stock total:</span>
-                  <span className="font-medium text-gray-900">{stats.totalStock}</span>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
-    </div>
+    </>
   )
 }

@@ -207,7 +207,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
             estilista.comision_productos !== null && estilista.comision_productos !== undefined
               ? estilista.comision_productos.toString()
               : "",
-          especialidades: estilista.especialidades || [],
+          especialidades: Array.isArray(estilista.especialidades) ? estilista.especialidades : [],
           password: "",
           activo: estilista.activo !== undefined ? estilista.activo : true
         })
@@ -387,6 +387,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
       password?: string; 
       horario?: HorarioData;
       horarioId?: string; // Incluir ID del horario para actualización
+      especialidades: string[];
     } = {
       nombre: formData.nombre.trim(),
       email: formData.email.trim(),

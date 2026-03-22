@@ -12,7 +12,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { useNavigate } from "react-router-dom";
 import StylistBottomNav from "../../../components/Layout/StylistBottomNav";
 import { useAuth } from "../../../components/Auth/AuthContext";
-import { formatDateDMY, toLocalYMD } from "../../../lib/dateFormat";
+import { formatDateDMY, formatLongDateEs, parseDateToDate, toLocalYMD } from "../../../lib/dateFormat";
 import { formatCurrencyNoDecimals, getStoredCurrency, resolveCurrencyLocale } from "../../../lib/currency";
 import { cn } from "../../../lib/utils";
 import { estilistaApi } from "../Appoinment/api";
@@ -32,21 +32,6 @@ type CommissionRow = {
   moneda: string;
 };
 
-const MONTH_NAMES = [
-  "enero",
-  "febrero",
-  "marzo",
-  "abril",
-  "mayo",
-  "junio",
-  "julio",
-  "agosto",
-  "septiembre",
-  "octubre",
-  "noviembre",
-  "diciembre",
-];
-
 const getDefaultRange = (): DateRange => {
   const end = new Date();
   const start = new Date(end);
@@ -55,17 +40,34 @@ const getDefaultRange = (): DateRange => {
 };
 
 const formatRangeLabel = (range: DateRange) => {
-  const formatSpanish = (iso: string) => {
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) return iso;
-    return `${date.getDate()} ${MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
-  };
-  return `${formatSpanish(range.start)} - ${formatSpanish(range.end)}`;
+  return `${formatLongDateEs(range.start, range.start)} - ${formatLongDateEs(range.end, range.end)}`;
 };
+
+const getInvoiceEffectiveDate = (invoice: FacturaConverted) =>
+  String(invoice.fecha_comprobante || invoice.fecha_pago || "").trim();
 
 const isServiceItem = (item: ItemFactura) => {
   const tipo = String(item.tipo || "").toLowerCase();
   return tipo.includes("servicio") || tipo.includes("service") || Boolean(item.servicio_id);
+};
+
+// Compara solo por la fecha (YYYY-MM-DD) para evitar desfases por zona horaria.
+// Si el backend envía timestamps en UTC (ej. "2026-03-19T00:00:00Z"), el filtro
+// seguirá considerándolos dentro del día 19 en la zona horaria local.
+const isWithinRange = (iso: string | undefined, range: DateRange) => {
+  if (!iso) return false;
+
+  const targetDate = parseDateToDate(iso);
+  const startDate = parseDateToDate(range.start);
+  const endDate = parseDateToDate(range.end);
+
+  if (!targetDate || !startDate || !endDate) return false;
+
+  const target = toLocalYMD(targetDate);
+  const start = toLocalYMD(startDate);
+  const end = toLocalYMD(endDate);
+
+  return target >= start && target <= end;
 };
 
 const getItemSubtotal = (item: ItemFactura): number => {
@@ -266,11 +268,21 @@ export default function StylistReportsPage() {
     loadInvoices();
   }, [activeSedeId, professionalId, range.end, range.start, user?.sede_id, user?.sede_id_principal]);
 
+  const filteredInvoices = useMemo(
+    () =>
+      invoices.filter((invoice) =>
+        isWithinRange(getInvoiceEffectiveDate(invoice), range)
+      ),
+    [invoices, range]
+  );
+
   const filteredItems = useMemo(() => {
-    if (manualRows) return manualRows;
+    if (manualRows) {
+      return manualRows.filter((row) => isWithinRange(row.fecha, range));
+    }
     if (!professionalId) return [];
 
-    return invoices.flatMap((invoice) => {
+    return filteredInvoices.flatMap((invoice) => {
       const belongsToPro =
         invoice.profesional_id &&
         String(invoice.profesional_id).trim().toLowerCase() ===
@@ -282,7 +294,7 @@ export default function StylistReportsPage() {
           {
             id: invoice.identificador,
             cliente: invoice.nombre_cliente || "Cliente",
-            fecha: invoice.fecha_pago || invoice.fecha_comprobante || invoice.fecha_pago,
+            fecha: getInvoiceEffectiveDate(invoice),
             servicio: "Venta",
             valor: invoice.total || 0,
             comision: null,
@@ -305,7 +317,7 @@ export default function StylistReportsPage() {
           (item): CommissionRow => ({
             id: `${invoice.identificador}-${item.servicio_id || item.producto_id || item.nombre}`,
             cliente: invoice.nombre_cliente || "Cliente",
-            fecha: invoice.fecha_comprobante || invoice.fecha_pago || "",
+            fecha: getInvoiceEffectiveDate(invoice),
             servicio: item.nombre || "Servicio",
             valor: getItemSubtotal(item),
             comision: getCommissionValue(item),
@@ -313,7 +325,7 @@ export default function StylistReportsPage() {
           })
         );
     });
-  }, [invoices, professionalId, resolvedCurrency]);
+  }, [filteredInvoices, manualRows, professionalId, range, resolvedCurrency]);
 
   const summary = useMemo(() => {
     const totalVentas = filteredItems.reduce((sum, row) => sum + (row.valor || 0), 0);
@@ -334,7 +346,7 @@ export default function StylistReportsPage() {
         serviciosMap.set(name, prev + (row.valor || 0));
       });
     } else {
-      invoices.forEach((invoice) => {
+      filteredInvoices.forEach((invoice) => {
         const items = Array.isArray(invoice.items) ? invoice.items : [];
         const belongsToPro =
           invoice.profesional_id &&
@@ -371,7 +383,7 @@ export default function StylistReportsPage() {
       services,
       hasCommissionValues,
     };
-  }, [filteredItems, invoices, manualRows, professionalId]);
+  }, [filteredItems, filteredInvoices, manualRows, professionalId]);
 
   const formatMoney = (value: number) =>
     formatCurrencyNoDecimals(value || 0, resolvedCurrency, resolvedLocale);
@@ -425,7 +437,16 @@ export default function StylistReportsPage() {
             <div className="relative mt-3">
               <button
                 type="button"
-                onClick={() => setRangeOpen((prev) => !prev)}
+                onClick={() =>
+                  setRangeOpen((prev) => {
+                    const next = !prev;
+                    if (!prev) {
+                      // Al abrir el selector sincronizamos los inputs con el rango actual mostrado
+                      setPendingRange(range);
+                    }
+                    return next;
+                  })
+                }
                 className="flex w-full items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800"
               >
                 <span className="inline-flex items-center gap-2">

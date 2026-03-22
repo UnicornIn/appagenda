@@ -152,7 +152,12 @@ const obtenerNombresServicios = (cita: any): string => {
 export default function VistaEstilistaPage() {
   const { user, activeSedeId, setActiveSedeId } = useAuth();
   // const { citas, loading, error, refetchCitas } = useEstilistaData();
-  const { citas, refetchCitas } = useEstilistaData();
+  const {
+    citas,
+    refetchCitas,
+    comisionServiciosPct,
+    comisionProductosPct,
+  } = useEstilistaData();
 
   const [citaSeleccionada, setCitaSeleccionada] = useState<any>(null);
   const [bloqueos, setBloqueos] = useState<Bloqueo[]>([]);
@@ -573,6 +578,8 @@ export default function VistaEstilistaPage() {
               citasHoy={citasHoy.length}
               serviciosCompletadosHoy={citasHoy.filter((cita) => estaCompletada(cita)).length}
               totalVentasHoy={ingresosHoy}
+              comisionServiciosPct={comisionServiciosPct}
+              comisionProductosPct={comisionProductosPct}
               bloqueosHoy={bloqueos.filter((bloqueo) => normalizeFecha(bloqueo.fecha) === todayIso).length}
             />
           </section>
