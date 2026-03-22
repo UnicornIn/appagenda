@@ -201,25 +201,26 @@ export function ProductsList() {
   }
 
   return (
-    <div className="flex min-h-screen bg-white">
-      <Sidebar />
-      <div className="flex-1">
-        <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-          <ProductsHeaderFilters
-            title="Dashboard de Productos"
-            subtitle="Resumen de ventas e inventario de los productos"
-            sedes={sedeId ? [{ sede_id: sedeId, nombre: nombreLocal || "Sede actual" }] : []}
-            selectedSedeId={sedeId || ""}
-            onSedeChange={() => {}}
-            disableSedeSelect
-            period={period}
-            onPeriodChange={setPeriod}
-            dateRange={dateRange}
-            onDateRangeChange={setDateRange}
-            onOpenConfig={() =>
-              document.getElementById("inventario-detalle")?.scrollIntoView({ behavior: "smooth" })
-            }
-          />
+    <>
+      <div className="flex min-h-screen bg-white">
+        <Sidebar />
+        <div className="flex-1">
+          <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+            <ProductsHeaderFilters
+              title="Dashboard de Productos"
+              subtitle="Resumen de ventas e inventario de los productos"
+              sedes={sedeId ? [{ sede_id: sedeId, nombre: nombreLocal || "Sede actual" }] : []}
+              selectedSedeId={sedeId || ""}
+              onSedeChange={() => {}}
+              disableSedeSelect
+              period={period}
+              onPeriodChange={setPeriod}
+              dateRange={dateRange}
+              onDateRangeChange={setDateRange}
+              onOpenConfig={() =>
+                document.getElementById("inventario-detalle")?.scrollIntoView({ behavior: "smooth" })
+              }
+            />
 
           {error && (
             <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -274,8 +275,9 @@ export function ProductsList() {
               {/* Sección de inventario detallado deshabilitada temporalmente */}
             </div>
           )}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }

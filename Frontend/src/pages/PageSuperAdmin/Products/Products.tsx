@@ -22,6 +22,7 @@ import {
   ProductsSalesCard,
   InventorySummaryCard,
   type ProductSalesRow,
+  ProductCardsGrid,
 } from "../../../features/products-dashboard/components"
 
 type CatalogoProducto = {
@@ -48,6 +49,25 @@ export function ProductsList() {
   const [countrySales, setCountrySales] = useState<Record<string, ProductSalesRow[]>>({})
   const [countryCurrency, setCountryCurrency] = useState<Record<string, string>>({})
   const [missingCountrySedes, setMissingCountrySedes] = useState<string[]>([])
+  const [editingProductId, setEditingProductId] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState<string>("")
+  const [editingPrice, setEditingPrice] = useState<string>("")
+  const [editingLoading, setEditingLoading] = useState<boolean>(false)
+  const [productPrices, setProductPrices] = useState<Record<string, { price: number; currency: string }>>({})
+  const [isCreateProductModalOpen, setIsCreateProductModalOpen] = useState(false)
+  const [newProductName, setNewProductName] = useState("")
+  const [newProductCategory, setNewProductCategory] = useState("")
+  const [newProductCode, setNewProductCode] = useState("")
+  const [newProductDescription, setNewProductDescription] = useState("")
+  const [newProductPriceCOP, setNewProductPriceCOP] = useState("")
+  const [newProductPriceUSD, setNewProductPriceUSD] = useState("")
+  const [newProductPriceMXN, setNewProductPriceMXN] = useState("")
+  const [newProductCommission, setNewProductCommission] = useState("")
+  const [newProductStock, setNewProductStock] = useState("0")
+  const [newProductStockMin, setNewProductStockMin] = useState("5")
+  const [isCreatingProduct, setIsCreatingProduct] = useState(false)
+  const [createProductError, setCreateProductError] = useState<string | null>(null)
+  const [createProductSuccess, setCreateProductSuccess] = useState<string | null>(null)
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isCreatingInventario, setIsCreatingInventario] = useState(false)
@@ -223,9 +243,12 @@ export function ProductsList() {
         const sedes = await sedeService.getSedes(token)
         setSedesDisponibles(sedes)
         if (!selectedDashboardSede) {
-          const resolved = "all"
-          setSelectedDashboardSede(resolved)
-          if (sedes[0]?.sede_id) {
+          const resolvedPreferida = resolveSedeId() || sedes[0]?.sede_id || ""
+          const next = resolvedPreferida || "all"
+          setSelectedDashboardSede(next)
+          if (next !== "all" && next.trim()) {
+            setNuevoSedeId(next)
+          } else if (sedes[0]?.sede_id) {
             setNuevoSedeId(sedes[0].sede_id)
           }
         }
@@ -374,6 +397,122 @@ export function ProductsList() {
       return fallback
     } catch {
       return fallback
+    }
+  }
+
+  const handleCreateProduct = async () => {
+    setCreateProductError(null)
+    setCreateProductSuccess(null)
+
+    const nombre = newProductName.trim()
+    if (!nombre) {
+      setCreateProductError("El nombre es obligatorio")
+      return
+    }
+
+    const parseNumber = (value: string) => {
+      const num = Number(value)
+      return Number.isFinite(num) ? num : NaN
+    }
+
+    const precios: Record<string, number> = {}
+    const cop = parseNumber(newProductPriceCOP)
+    const usd = parseNumber(newProductPriceUSD)
+    const mxn = parseNumber(newProductPriceMXN)
+
+    if (Number.isFinite(cop) && cop > 0) precios.COP = cop
+    if (Number.isFinite(usd) && usd > 0) precios.USD = usd
+    if (Number.isFinite(mxn) && mxn > 0) precios.MXN = mxn
+
+    if (Object.keys(precios).length === 0) {
+      setCreateProductError("Debes ingresar al menos un precio (COP, USD o MXN)")
+      return
+    }
+
+    const stockActual = parseNumber(newProductStock)
+    const stockMinimo = parseNumber(newProductStockMin)
+    if (!Number.isFinite(stockActual) || stockActual < 0) {
+      setCreateProductError("Stock actual debe ser un número mayor o igual a 0")
+      return
+    }
+    if (!Number.isFinite(stockMinimo) || stockMinimo < 0) {
+      setCreateProductError("Stock mínimo debe ser un número mayor o igual a 0")
+      return
+    }
+
+    const comision = newProductCommission.trim()
+    let comisionNum: number | undefined
+    if (comision) {
+      comisionNum = Number(comision)
+      if (!Number.isFinite(comisionNum) || comisionNum < 0 || comisionNum > 100) {
+        setCreateProductError("La comisión debe estar entre 0 y 100")
+        return
+      }
+    }
+
+    const token = resolveToken()
+    if (!token) {
+      setCreateProductError("No hay token de autenticación disponible")
+      return
+    }
+
+    const payload = {
+      nombre,
+      codigo: newProductCode.trim() || undefined,
+      descripcion: newProductDescription.trim() || undefined,
+      categoria: newProductCategory.trim() || undefined,
+      comision: comision ? comisionNum : undefined,
+      precios,
+      stock_actual: stockActual || 0,
+      stock_minimo: stockMinimo || 0,
+    }
+
+    setIsCreatingProduct(true)
+    try {
+      const response = await fetch(`${API_BASE_URL}inventary/product/productos/`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response, "No se pudo crear el producto"))
+      }
+
+      const data = await response.json() as { msg?: string; producto?: { id?: string; _id?: string } }
+      setCreateProductSuccess(data.msg || "Producto creado correctamente")
+
+      const createdId = data.producto?.id || data.producto?._id
+      if (createdId) {
+        setNuevoProductoId(String(createdId))
+      }
+
+      // Refrescar catálogo y limpiar formulario
+      try {
+        const catalogoActualizado = await cargarCatalogoProductos(token)
+        setProductosCatalogo(catalogoActualizado)
+      } catch {
+        // si falla, no interrumpe la UX principal
+      }
+
+      setNewProductName("")
+      setNewProductCategory("")
+      setNewProductCode("")
+      setNewProductDescription("")
+      setNewProductPriceCOP("")
+      setNewProductPriceUSD("")
+      setNewProductPriceMXN("")
+      setNewProductCommission("")
+      setNewProductStock("0")
+      setNewProductStockMin("5")
+    } catch (err) {
+      setCreateProductError(err instanceof Error ? err.message : "Error desconocido al crear el producto")
+    } finally {
+      setIsCreatingProduct(false)
     }
   }
 
@@ -569,6 +708,117 @@ export function ProductsList() {
 
   const countryKeys = Object.keys(countrySales)
   const showCountryView = selectedDashboardSede === "all" && countryKeys.length > 0
+  const productCards = useMemo(
+    () =>
+      productos.map((p) => ({
+        id: p.producto_id || p._id,
+        nombre: p.nombre || p.producto_nombre || "Producto",
+        categoria: p.categoria,
+        codigo: p.producto_codigo,
+        stock: p.stock_actual,
+        stockMinimo: p.stock_minimo,
+        updatedAt: p.fecha_ultima_actualizacion,
+        price: productPrices[p.producto_id || p._id]?.price,
+        priceCurrency: productPrices[p.producto_id || p._id]?.currency || ventasCurrency,
+      })),
+    [productos, productPrices, ventasCurrency]
+  )
+
+  useEffect(() => {
+    const fetchPrices = async () => {
+      const token = resolveToken()
+      const moneda = ventasCurrency || user?.moneda || "COP"
+      const ids = productos.map((p) => p.producto_id || p._id).filter(Boolean)
+      if (!token || ids.length === 0) return
+      try {
+        const results = await Promise.all(
+          ids.map(async (id) => {
+            const resp = await fetch(
+              `${API_BASE_URL}inventary/product/productos/${encodeURIComponent(id)}?moneda=${encodeURIComponent(moneda)}`,
+              {
+                headers: {
+                  Accept: "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+              }
+            )
+            if (!resp.ok) return null
+            const data = await resp.json() as any
+            const price =
+              data?.precio_local ??
+              data?.precio ??
+              (data?.precios && (data.precios[moneda] ?? data.precios.USD))
+            if (price === undefined || price === null) return null
+            return { id, price: Number(price), currency: moneda }
+          })
+        )
+        const map: Record<string, { price: number; currency: string }> = {}
+        results.forEach((r) => {
+          if (r) map[r.id] = { price: r.price, currency: r.currency }
+        })
+        if (Object.keys(map).length > 0) {
+          setProductPrices((prev) => ({ ...prev, ...map }))
+        }
+      } catch (err) {
+        console.warn("No se pudieron obtener precios de productos", err)
+      }
+    }
+    fetchPrices().catch(() => {})
+  }, [productos, ventasCurrency, user])
+
+  const openEditModal = async (productId: string) => {
+    const product = productCards.find((p) => p.id === productId)
+    if (!product) return
+    setEditingProductId(productId)
+    setEditingName(product.nombre)
+    const cachedPrice = productPrices[productId]?.price
+    setEditingPrice(cachedPrice !== undefined ? String(cachedPrice) : "")
+    setEditingLoading(true)
+    try {
+      const token = resolveToken()
+      const moneda = ventasCurrency || "COP"
+      const resp = await fetch(
+        `${API_BASE_URL}inventary/product/productos/${encodeURIComponent(productId)}?moneda=${encodeURIComponent(moneda)}`,
+        {
+          headers: {
+            Accept: "application/json",
+            Authorization: token ? `Bearer ${token}` : "",
+          },
+        }
+      )
+      if (resp.ok) {
+        const data = await resp.json() as any
+        const precio =
+          data?.precio_local ??
+          data?.precio ??
+          (data?.precios && (data.precios[moneda] ?? data.precios.USD)) ??
+          ""
+        setEditingPrice(
+          precio !== null && precio !== undefined
+            ? String(precio)
+            : cachedPrice !== undefined
+              ? String(cachedPrice)
+              : ""
+        )
+      }
+    } catch (err) {
+      console.warn("No se pudo obtener precio del producto", err)
+    } finally {
+      setEditingLoading(false)
+    }
+  }
+
+  const handleSaveEdit = () => {
+    if (!editingProductId) return
+    setProductos((prev) =>
+      prev.map((p) =>
+        (p.producto_id || p._id) === editingProductId
+          ? { ...p, nombre: editingName || p.nombre }
+          : p
+      )
+    )
+    setEditingProductId(null)
+  }
 
   return (
     <div className="flex min-h-screen bg-white">
@@ -842,8 +1092,152 @@ export function ProductsList() {
                     disabled={isCreatingInventario}
                     className="bg-white"
                   />
+          </div>
+
+          {selectedDashboardSede !== "all" && (
+            <div className="mt-10">
+              <div className="flex items-center justify-between mb-3">
+                <div />
+                <Button
+                  variant="default"
+                  className="bg-gray-900 text-white hover:bg-gray-800"
+                  onClick={() => {
+                    setCreateProductError(null)
+                    setCreateProductSuccess(null)
+                    setIsCreateProductModalOpen(true)
+                  }}
+                >
+                  Crear producto
+                </Button>
+              </div>
+              <ProductCardsGrid
+                title=""
+                products={productCards}
+                loading={isLoading}
+                onEditProduct={(id) => openEditModal(id)}
+              />
+            </div>
+          )}
+        </div>
+
+        <Dialog open={Boolean(editingProductId)} onOpenChange={(open) => !open && setEditingProductId(null)}>
+          <DialogContent className="sm:max-w-md bg-white border-gray-200">
+            <DialogHeader>
+              <DialogTitle>Editar producto</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm text-gray-700">Nombre</label>
+                <Input
+                  value={editingName}
+                  onChange={(e) => setEditingName(e.target.value)}
+                  disabled={editingLoading}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-700">Precio</label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={editingPrice}
+                  onChange={(e) => setEditingPrice(e.target.value)}
+                  disabled={editingLoading}
+                  className="mt-1"
+                />
+                <p className="text-xs text-gray-500 mt-1">Edición local en UI; no guarda en backend.</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditingProductId(null)} disabled={editingLoading}>
+                Cancelar
+              </Button>
+              <Button onClick={handleSaveEdit} disabled={editingLoading}>
+                Guardar cambios
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isCreateProductModalOpen} onOpenChange={(open) => !open && setIsCreateProductModalOpen(false)}>
+          <DialogContent className="sm:max-w-lg bg-white border-gray-200">
+            <DialogHeader>
+              <DialogTitle>Crear producto (catálogo)</DialogTitle>
+              <DialogDescription>Se crea en el catálogo global. Luego podrás asignarlo al inventario de una sede.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              {createProductError && (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {createProductError}
+                </div>
+              )}
+              {createProductSuccess && (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                  {createProductSuccess}
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-sm text-gray-700">Nombre *</label>
+                  <Input value={newProductName} onChange={(e) => setNewProductName(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm text-gray-700">Código</label>
+                  <Input value={newProductCode} onChange={(e) => setNewProductCode(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm text-gray-700">Categoría</label>
+                  <Input value={newProductCategory} onChange={(e) => setNewProductCategory(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm text-gray-700">Descripción</label>
+                  <Input value={newProductDescription} onChange={(e) => setNewProductDescription(e.target.value)} />
                 </div>
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-sm text-gray-700">Precio COP</label>
+                  <Input type="number" min="0" value={newProductPriceCOP} onChange={(e) => setNewProductPriceCOP(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm text-gray-700">Precio USD</label>
+                  <Input type="number" min="0" value={newProductPriceUSD} onChange={(e) => setNewProductPriceUSD(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm text-gray-700">Precio MXN</label>
+                  <Input type="number" min="0" value={newProductPriceMXN} onChange={(e) => setNewProductPriceMXN(e.target.value)} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-sm text-gray-700">Comisión (%)</label>
+                  <Input type="number" min="0" max="100" value={newProductCommission} onChange={(e) => setNewProductCommission(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm text-gray-700">Stock actual</label>
+                  <Input type="number" min="0" value={newProductStock} onChange={(e) => setNewProductStock(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm text-gray-700">Stock mínimo</label>
+                  <Input type="number" min="0" value={newProductStockMin} onChange={(e) => setNewProductStockMin(e.target.value)} />
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500">El producto se guarda en backend y quedará disponible para crear inventario por sede.</p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsCreateProductModalOpen(false)} disabled={isCreatingProduct}>
+                Cancelar
+              </Button>
+              <Button onClick={handleCreateProduct} disabled={isCreatingProduct} className="gap-2 bg-gray-900 text-white hover:bg-gray-800">
+                {isCreatingProduct && <Loader2 className="h-4 w-4 animate-spin" />}
+                Crear
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
               {createError && (
                 <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

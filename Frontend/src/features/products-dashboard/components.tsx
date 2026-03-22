@@ -4,6 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../..
 import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
+import { Badge } from "../../components/ui/badge";
+import { Separator } from "../../components/ui/separator";
+import { Button as UiButton } from "../../components/ui/button";
+import { Pencil } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -184,6 +188,18 @@ export interface ProductSalesRow {
   participacion?: number;
 }
 
+export interface ProductCardItem {
+  id: string;
+  nombre: string;
+  categoria?: string;
+  codigo?: string;
+  stock?: number;
+  stockMinimo?: number;
+  updatedAt?: string;
+  price?: number;
+  priceCurrency?: string;
+}
+
 interface ProductsSalesCardProps {
   title: string;
   rows: ProductSalesRow[];
@@ -275,6 +291,110 @@ export function ProductsSalesCard({
     </Card>
   );
 }
+
+interface ProductCardsGridProps {
+  title?: string;
+  products: ProductCardItem[];
+  loading?: boolean;
+  onEditProduct?: (productId: string) => void;
+}
+
+export const ProductCardsGrid: React.FC<ProductCardsGridProps> = ({
+  title = "Productos",
+  products,
+  loading = false,
+  onEditProduct,
+}) => {
+  if (loading) {
+    return (
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, idx) => (
+          <Card key={idx} className="border-gray-200 p-4">
+            <Skeleton className="h-5 w-2/3 mb-2" />
+            <Skeleton className="h-4 w-1/2 mb-2" />
+            <Skeleton className="h-4 w-full mb-3" />
+            <Skeleton className="h-4 w-3/4" />
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  if (!products || products.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-8 text-center text-gray-600">
+        No hay productos registrados.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-gray-500 uppercase tracking-wide">{title}</p>
+          <p className="text-lg font-semibold text-gray-900">{products.length} productos</p>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {products.map((prod) => (
+          <Card key={prod.id} className="border-gray-200 p-4 bg-white hover:shadow-sm transition-shadow">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900 truncate">{prod.nombre}</p>
+                {prod.categoria && (
+                  <p className="text-xs text-gray-600 truncate">{prod.categoria}</p>
+                )}
+              </div>
+              {prod.stock !== undefined && (
+                <Badge variant="outline" className="text-xs">
+                  Stock: {prod.stock}
+                </Badge>
+              )}
+            </div>
+
+            <div className="mt-3 space-y-1 text-xs text-gray-700">
+              {prod.stockMinimo !== undefined && (
+                <p className="text-gray-600">Mínimo: {prod.stockMinimo}</p>
+              )}
+              {prod.price !== undefined && (
+                <p className="text-gray-800 font-medium">
+                  {formatCurrencyNoDecimals(
+                    prod.price,
+                    resolveCurrencyLocale(prod.priceCurrency || "COP", "es-CO")
+                  )}{" "}
+                  {prod.priceCurrency || ""}
+                </p>
+              )}
+            </div>
+
+            <Separator className="my-3" />
+
+            <div className="flex items-center justify-between text-xs text-gray-600">
+              <span className="font-medium text-gray-800">
+                {prod.stock !== undefined && prod.stockMinimo !== undefined && prod.stock <= prod.stockMinimo
+                  ? "Bajo stock"
+                  : "Activo"}
+              </span>
+              {onEditProduct && (
+                <UiButton
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-gray-700 hover:text-gray-900"
+                  onClick={() => onEditProduct(prod.id)}
+                >
+                  <Pencil className="h-4 w-4" />
+                  <span className="sr-only">Editar</span>
+                </UiButton>
+              )}
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 interface InventorySummaryCardProps {
   totalProductos: number;
