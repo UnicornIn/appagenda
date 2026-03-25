@@ -17,6 +17,7 @@ from app.analytics.routes_analytics import router as analytics_router
 from app.analytics.routes_dashboard import router as dashboard_router
 from app.inventary.routes import app_router as inventary_router
 from app.bills.routes import router as billing_router
+from app.analytics.projection_analytics import router as analytics_projection
 from app.commissions.routes import router as commissions_router
 from app.analytics.sales_dashboard import router as sales_dashboard_router
 from app.clients_service.generate_pdf import router as generate_pdf_router
@@ -82,9 +83,10 @@ app.include_router(admin_system_users_router)
 app.include_router(inventary_router, prefix="/inventary")
 app.include_router(routes_clientes.router, prefix="/clientes", tags=["Clientes"])
 app.include_router(churn_router)
-app.include_router(analytics_router)
+app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
 app.include_router(dashboard_router)
 app.include_router(billing_router, prefix="/api/billing", tags=["Facturación"])
+app.include_router(analytics_projection, prefix="/analytics", tags=["Analytics"])
 app.include_router(commissions_router, prefix="/api/commissions", tags=["Comisiones"])
 app.include_router(sales_dashboard_router, prefix="/api/sales-dashboard")
 app.include_router(generate_pdf_router, prefix="/api/pdf", tags=["Generación de PDF"])

@@ -4,7 +4,7 @@
 
 from pydantic import BaseModel, Field, validator
 from typing import Optional, List, Dict
-from datetime import datetime
+from datetime import datetime, date
 from enum import Enum
 
 # ============================================================
@@ -54,12 +54,20 @@ class AperturaCajaRequest(BaseModel):
     observaciones: Optional[str] = None
     
     @validator('fecha')
-    def validar_fecha(cls, v):
-        try:
-            datetime.strptime(v, "%Y-%m-%d")
-            return v
-        except ValueError:
-            raise ValueError("Formato de fecha inválido. Use YYYY-MM-DD")
+    def transformar_fecha(cls, v):
+        # Definimos los formatos que queremos soportar
+        formatos = ["%d-%m-%Y", "%Y-%m-%d"]
+    
+        for formato in formatos:
+            try:
+                # Si logra parsearlo con el formato actual, lo devuelve como YYYY-MM-DD
+                return datetime.strptime(v, formato).strftime("%Y-%m-%d")
+            except ValueError:
+                # Si falla, salta al siguiente formato de la lista
+                continue
+            
+        # Si llega aquí es porque no cumplió con ninguno de los dos
+        raise ValueError("Formato de fecha inválido. Use DD-MM-YYYY o YYYY-MM-DD")
 
 class RegistroEgresoRequest(BaseModel):
     sede_id: str = Field(..., description="ID de la sede")
@@ -84,14 +92,14 @@ class RegistroIngresoRequest(BaseModel):
     registrado_por: Optional[str] = Field(None, description="Usuario que registra (opcional)")
 
     @validator('fecha')
-    def validar_fecha_ingreso(cls, v):
-        if v is None:
-            return v
+    def validar_y_formatear(cls, v):
+        if not v:
+            return date.today().strftime("%Y-%m-%d") # Default hoy si no viene
         try:
-            datetime.strptime(v, "%d-%m-%Y")
-            return v
+            # Convierte de DD-MM-YYYY a objeto fecha y luego a string ISO
+            return datetime.strptime(v, "%d-%m-%Y").date().isoformat()
         except ValueError:
-            raise ValueError("Formato de fecha inválido. Use DD-MM-YYYY")
+            raise ValueError("Formato inválido. Usa DD-MM-YYYY")
 
 class DesgloseFisicoItem(BaseModel):
     denominacion: str = Field(..., description="Ej: 'billete_100', 'moneda_0.25'")
@@ -221,3 +229,28 @@ class TransaccionVenta(BaseModel):
     monto: float
     metodo_pago: str
     fecha: datetime
+
+# ============================================================
+# EDITION MODELS
+# ============================================================
+
+class EditarEgresoRequest(BaseModel):
+    concepto:           Optional[str]   = None
+    descripcion:        Optional[str]   = None
+    monto:              Optional[float] = None
+    tipo:               Optional[str]   = None
+    categoria:          Optional[str]   = None
+    metodo_pago:        Optional[str]   = None
+    comprobante_numero: Optional[str]   = None
+    comprobante_tipo:   Optional[str]   = None
+    motivo_edicion:     Optional[str]   = None          # explica por qué se edita
+
+
+class EditarIngresoRequest(BaseModel):
+    monto:          Optional[float] = None
+    metodo_pago:    Optional[str]   = None
+    motivo:         Optional[str]   = None  # campo del ingreso
+    moneda:         Optional[str]   = None
+    motivo_edicion: Optional[str]   = None                   # auditoría, siempre requerido
+
+
