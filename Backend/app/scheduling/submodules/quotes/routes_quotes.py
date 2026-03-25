@@ -1218,10 +1218,20 @@ async def editar_cita(
             subtotal = float(p.get("subtotal", precio_unitario * cantidad) or 0)
             total += subtotal
         return round(total, 2)
+    
+    # ====================================
+    # ⭐ NOTAS (se permite editar en cualquier estado)
+    # ====================================
+    notas_a_guardar = None
+    if "notas" in cambios:
+        notas_valor = cambios.pop("notas")  # Sacar de cambios temporalmente
+        if notas_valor is not None and not isinstance(notas_valor, str):
+            raise HTTPException(status_code=400, detail="El campo 'notas' debe ser texto")
+        notas_a_guardar = notas_valor.strip() if isinstance(notas_valor, str) else ""
 
     estado_actual = str(cita_actual.get("estado", "")).strip().lower()
-    estados_no_editables = {"cancelada", "completada", "finalizada", "no asistio", "no_asistio"}
-    campos_edicion_cita = {"servicios", "productos", "fecha", "hora_inicio", "hora_fin", "profesional_id"}
+    estados_no_editables = {"completada"}
+    campos_edicion_cita = {"servicios", "productos", "fecha", "hora_inicio", "hora_fin", "profesional_id", "notas"}
     solicita_edicion = any(campo in cambios for campo in campos_edicion_cita)
 
     if solicita_edicion and estado_actual in estados_no_editables:
@@ -1536,6 +1546,9 @@ async def editar_cita(
         cambios["estado_pago"] = "abonado"
     else:
         cambios["estado_pago"] = "pendiente"
+
+    if notas_a_guardar is not None:
+        cambios["notas"] = notas_a_guardar
 
     # ====================================
     # ⭐ Actualizar timestamp
@@ -2111,7 +2124,7 @@ async def get_citas_estilista(
             "hora_fin":                   c.get("hora_fin"),
             "estado":                     c.get("estado"),
             "estado_pago":                c.get("estado_pago"),
-            "comentario":                 c.get("comentario", None),
+            "notas":                      c.get("notas", None),
             "precio_total":               precio_total,
             "cantidad_servicios":         len(servicios_data),
             "tiene_precio_personalizado": any(s["precio_personalizado"] for s in servicios_data)

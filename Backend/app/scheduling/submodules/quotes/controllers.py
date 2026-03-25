@@ -38,6 +38,16 @@ GRIS_FONDO  = "#F5F5F5"
 # ─────────────────────────────────────────────────────────────────────────────
 # DESCARGA ASÍNCRONA + PARALELO
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ✅ Registrar soporte HEIC al inicio del archivo
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    print("✅ Soporte HEIC activado")
+except ImportError:
+    print("⚠️ pillow-heif no instalado, fotos HEIC no serán soportadas")
+
+
 async def descargar_imagen(url: str) -> BytesIO | None:
     try:
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
@@ -121,28 +131,29 @@ def _tabla_kv(filas, col1=4*cm, col2=11*cm):
 
 from PIL import Image as PILImage
 
-def comprimir_imagen_para_pdf(buf: BytesIO, max_px: int = 1200, quality: int = 75) -> BytesIO:
+def comprimir_imagen_para_pdf(buf: BytesIO, max_px: int = 1200, quality: int = 75) -> BytesIO | None:
     try:
         buf.seek(0)
         img = PILImage.open(buf)
+        img.load()  # ✅ CRÍTICO: fuerza decodificación completa (sin esto HEIC falla silenciosamente)
 
-        """
-        Redimensiona y recomprime una imagen para que no reviente la RAM de ReportLab.
-        Convierte siempre a RGB (elimina canal alpha que también causa problemas).
-        """
+        # ✅ Corrige rotación de fotos iPhone (metadatos EXIF)
+        try:
+            from PIL import ImageOps
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            pass
 
-        # ✅ Si tiene canal alpha, componer sobre fondo BLANCO antes de convertir a RGB
+        # ✅ Componer sobre fondo blanco si tiene transparencia
         if img.mode in ("RGBA", "LA", "P"):
             fondo = PILImage.new("RGB", img.size, (255, 255, 255))
             if img.mode == "P":
                 img = img.convert("RGBA")
-            # Pegar usando el canal alpha como máscara
             fondo.paste(img, mask=img.split()[-1] if img.mode == "RGBA" else None)
             img = fondo
         else:
             img = img.convert("RGB")
 
-        # Redimensionar si es demasiado grande
         w, h = img.size
         if max(w, h) > max_px:
             ratio = max_px / max(w, h)
@@ -152,10 +163,10 @@ def comprimir_imagen_para_pdf(buf: BytesIO, max_px: int = 1200, quality: int = 7
         img.save(out, format="JPEG", quality=quality, optimize=True)
         out.seek(0)
         return out
+
     except Exception as e:
         print(f"⚠️ Error comprimiendo imagen: {e}")
-        buf.seek(0)
-        return buf
+        return None  # ✅ None en vez del buf HEIC crudo que rompe ReportLab
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GENERADOR PRINCIPAL
@@ -435,23 +446,24 @@ async def generar_pdf_ficha(ficha_data: dict, cita_data: dict) -> bytes:
                         b = imgs.get(f"{prefix}_{j}")
                         if b:
                             b = comprimir_imagen_para_pdf(b, max_px=1200, quality=75)
-                            img_el = Image(b, width=8*cm, height=8*cm, kind="proportional")
-                            img_el.hAlign = "CENTER"
-                            inner = Table(
-                                [[img_el],
-                                 [Paragraph(f"Foto {j+1}", st["img_cap"])]],
-                                colWidths=[8*cm]
-                            )
-                            inner.setStyle(TableStyle([
-                                ("ALIGN",         (0,0), (-1,-1), "CENTER"),
-                                ("TOPPADDING",    (0,0), (-1,-1), 2),
-                                ("BOTTOMPADDING", (0,0), (-1,-1), 2),
-                            ]))
-                            celdas.append(inner)
+                            if b:
+                                img_el = Image(b, width=8*cm, height=8*cm, kind="proportional")
+                                img_el.hAlign = "CENTER"
+                                inner = Table(
+                                    [[img_el],
+                                    [Paragraph(f"Foto {j+1}", st["img_cap"])]],
+                                    colWidths=[8*cm]
+                                )
+                                inner.setStyle(TableStyle([
+                                    ("ALIGN",         (0,0), (-1,-1), "CENTER"),
+                                    ("TOPPADDING",    (0,0), (-1,-1), 2),
+                                    ("BOTTOMPADDING", (0,0), (-1,-1), 2),
+                                ]))
+                                celdas.append(inner)
+                            else:
+                                celdas.append(Paragraph("(imagen no disponible)", st["body"]))
                         else:
-                            celdas.append(Paragraph("(imagen no disponible)", st["body"]))
-                    else:
-                        celdas.append(Paragraph("", st["body"]))
+                            celdas.append(Paragraph("", st["body"]))
 
                 row = Table([celdas], colWidths=[8.25*cm, 8.25*cm])
                 row.setStyle(TableStyle([

@@ -37,28 +37,42 @@ export function useEstilistaData() {
       const data = await response.json();
       
       if (Array.isArray(data)) {
-        const citasFormateadas = data.map((cita: any) => ({
-          cita_id: cita.cita_id || cita._id || "",
-          cliente: {
-            cliente_id: cita.cliente?.cliente_id || cita.cliente_id || "",
-            nombre: cita.cliente?.nombre || cita.cliente_nombre || "",
-            apellido: cita.cliente?.apellido || cita.cliente_apellido || "",
-            telefono: cita.cliente?.telefono || cita.cliente_telefono || "",
-            email: cita.cliente?.email || cita.cliente_email || "",
-          },
-          servicios: cita.servicios || [], // ✅ Array directo del backend
-          precio_total: cita.precio_total || 0,
-          cantidad_servicios: cita.cantidad_servicios || 0,
-          tiene_precio_personalizado: cita.tiene_precio_personalizado || false,
-          sede: cita.sede || { sede_id: cita.sede_id || "", nombre: cita.sede_nombre || "" },
-          estilista_id: cita.estilista_id || cita.profesional_id || "",
-          profesional_id: cita.profesional_id || cita.estilista_id || "",
-          fecha: cita.fecha || "",
-          hora_inicio: cita.hora_inicio || "",
-          hora_fin: cita.hora_fin || "",
-          estado: cita.estado || "",
-          comentario: cita.comentario || cita.notas || "",
-        }));
+        const citasFormateadas = data.map((cita: any) => {
+          const notasCallCenter =
+            cita.notas_call_center ??
+            cita.nota_call_center ??
+            cita.notasCallCenter ??
+            cita.notas ??
+            cita.comentario ??
+            cita.comentarios ??
+            cita.observaciones ??
+            "";
+
+          return {
+            cita_id: cita.cita_id || cita._id || "",
+            cliente: {
+              cliente_id: cita.cliente?.cliente_id || cita.cliente_id || "",
+              nombre: cita.cliente?.nombre || cita.cliente_nombre || "",
+              apellido: cita.cliente?.apellido || cita.cliente_apellido || "",
+              telefono: cita.cliente?.telefono || cita.cliente_telefono || "",
+              email: cita.cliente?.email || cita.cliente_email || "",
+            },
+            servicios: cita.servicios || [], // ✅ Array directo del backend
+            precio_total: cita.precio_total || 0,
+            cantidad_servicios: cita.cantidad_servicios || 0,
+            tiene_precio_personalizado: cita.tiene_precio_personalizado || false,
+            sede: cita.sede || { sede_id: cita.sede_id || "", nombre: cita.sede_nombre || "" },
+            estilista_id: cita.estilista_id || cita.profesional_id || "",
+            profesional_id: cita.profesional_id || cita.estilista_id || "",
+            fecha: cita.fecha || "",
+            hora_inicio: cita.hora_inicio || "",
+            hora_fin: cita.hora_fin || "",
+            estado: cita.estado || "",
+            comentario: notasCallCenter,
+            notas: cita.notas ?? cita.comentarios ?? cita.observaciones ?? "",
+            notas_call_center: cita.notas_call_center ?? cita.nota_call_center ?? cita.notasCallCenter ?? "",
+          };
+        });
         
         const requierePrecioReal = citasFormateadas.some(
           (c) => (c.precio_total ?? 0) <= 1 && (c.servicios?.length ?? 0) > 0

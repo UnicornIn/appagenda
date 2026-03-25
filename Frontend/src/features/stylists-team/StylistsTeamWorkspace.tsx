@@ -27,6 +27,7 @@ import type { Estilista, CreateEstilistaData } from "../../types/estilista";
 import type { SystemUser } from "../../types/system-user";
 import { formatSedeNombre } from "../../lib/sede";
 import { formatCurrencyNoDecimals, getStoredCurrency } from "../../lib/currency";
+import { parseDateToDate, toLocalYMD } from "../../lib/dateFormat";
 import {
   buildCategoryCommissionPayload,
   resolveCategoryCommissionEntries,
@@ -35,6 +36,11 @@ import {
 } from "../../lib/serviceCommissions";
 import { getCitas } from "../../components/Quotes/citasApi";
 import { getHorariosEstilista } from "../../components/Quotes/horariosApi";
+import {
+  fetchPerformanceAnalytics,
+  type PerformancePeriod,
+  type PerformanceProfessional,
+} from "./performanceApi";
 import {
   buildStylistDashboardRows,
   buildVendorRows,
@@ -50,6 +56,15 @@ import {
 } from "./stylists-team.utils";
 
 type DashboardRowWithProducts = StylistDashboardRow & { cantidadProductos: number };
+
+type MonthlyProjectionRow = {
+  profesionalId: string;
+  nombre: string;
+  citasActivas: number | null;
+  ingresosGenerados: number | null;
+  comisionProyectada: number | null;
+  ocupacionPct: number | null;
+};
 
 const DEFAULT_STYLIST_PASSWORD = "Temporal123!";
 
@@ -256,6 +271,138 @@ function EmptyPanel({
   );
 }
 
+function MonthlyProjectionSection({
+  rows,
+  loading,
+  error,
+  periodLabel,
+  onRetry,
+  currency,
+}: {
+  rows: MonthlyProjectionRow[];
+  loading: boolean;
+  error: string | null;
+  periodLabel: string;
+  onRetry: () => void;
+  currency: string;
+}) {
+  const hasOcupacion = rows.some((row) => row.ocupacionPct !== null);
+  const countFormatter = useMemo(() => new Intl.NumberFormat("es-CO"), []);
+
+  return (
+    <section className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_10px_35px_rgba(15,23,42,0.04)]">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-950">Proyección del mes</h2>
+          <p className="text-sm text-slate-500">
+            Resumen de ingresos y proyección mensual por estilista.
+          </p>
+          <p className="text-xs text-slate-500">Período: {periodLabel || "Mes en curso"}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {loading ? (
+            <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Cargando proyección
+            </div>
+          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            className="border-slate-200 bg-white"
+            onClick={onRetry}
+            disabled={loading}
+          >
+            Actualizar
+          </Button>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="mb-4 flex items-start justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <span>{error}</span>
+          <Button size="sm" variant="outline" onClick={onRetry} className="border-rose-200 bg-white">
+            Reintentar
+          </Button>
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div className="space-y-3">
+          {[0, 1, 2].map((index) => (
+            <div
+              key={index}
+              className="h-14 animate-pulse rounded-2xl bg-slate-100/80"
+            />
+          ))}
+        </div>
+      ) : rows.length === 0 ? (
+        <EmptyPanel
+          title="No hay datos para este período"
+          description="No se encontraron métricas de performance mensual para los filtros actuales."
+        />
+      ) : (
+        <div className="overflow-hidden rounded-3xl border border-slate-200">
+          <div className="overflow-x-auto">
+            <table className="min-w-[820px] w-full text-sm">
+              <thead className="bg-slate-50/90">
+                <tr>
+                  <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    Estilista
+                  </th>
+                  <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <HeaderLabel lines={["# Citas", "del mes"]} />
+                  </th>
+                  <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <HeaderLabel lines={["Ganado", "del mes"]} />
+                  </th>
+                  <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <HeaderLabel lines={["Proyección", "del mes"]} />
+                  </th>
+                  {hasOcupacion ? (
+                    <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      <HeaderLabel lines={["Ocupación", "del mes"]} />
+                    </th>
+                  ) : null}
+                </tr>
+              </thead>
+              <tbody className="bg-white">
+                {rows.map((row) => (
+                  <tr key={row.profesionalId} className="border-t border-slate-100 hover:bg-slate-50/60">
+                    <td className="px-4 py-4 font-medium text-slate-900">{row.nombre}</td>
+                    <td className="px-4 py-4 font-medium text-slate-900">
+                      {row.citasActivas === null
+                        ? "--"
+                        : countFormatter.format(row.citasActivas)}
+                    </td>
+                    <td className="px-4 py-4 font-semibold text-slate-950">
+                      {row.ingresosGenerados === null
+                        ? "--"
+                        : formatCurrencyNoDecimals(row.ingresosGenerados, currency)}
+                    </td>
+                    <td className="px-4 py-4 font-semibold text-slate-950">
+                      {row.comisionProyectada === null
+                        ? "--"
+                        : formatCurrencyNoDecimals(row.comisionProyectada, currency)}
+                    </td>
+                    {hasOcupacion ? (
+                      <td className="px-4 py-4 font-medium text-slate-900">
+                        {row.ocupacionPct === null || Number.isNaN(row.ocupacionPct)
+                          ? "--"
+                          : `${row.ocupacionPct.toFixed(1)}%`}
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function StylistsTeamWorkspace({
   servicesApi,
   stylistApi,
@@ -276,6 +423,7 @@ export function StylistsTeamWorkspace({
   const [metricsWarning, setMetricsWarning] = useState<string | null>(null);
   const [isBootLoading, setIsBootLoading] = useState(true);
   const [isMetricsLoading, setIsMetricsLoading] = useState(false);
+  const [isPerformanceLoading, setIsPerformanceLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLegacyCreateOpen, setIsLegacyCreateOpen] = useState(false);
   const [isLegacyCreateSaving, setIsLegacyCreateSaving] = useState(false);
@@ -284,11 +432,24 @@ export function StylistsTeamWorkspace({
   const [invoices, setInvoices] = useState<FacturaConverted[]>([]);
   const [appointments, setAppointments] = useState<TeamAppointmentRecord[]>([]);
   const [schedulesByStylist, setSchedulesByStylist] = useState<Record<string, TeamScheduleRecord[]>>({});
+  const [performanceRows, setPerformanceRows] = useState<PerformanceProfessional[]>([]);
+  const [performanceError, setPerformanceError] = useState<string | null>(null);
+  const [performancePeriod, setPerformancePeriod] = useState<PerformancePeriod | null>(null);
   const commissionsSectionRef = useRef<HTMLDivElement | null>(null);
 
   const invoicesCacheRef = useRef<Map<string, FacturaConverted[]>>(new Map());
   const appointmentsCacheRef = useRef<Map<string, TeamAppointmentRecord[]>>(new Map());
   const schedulesCacheRef = useRef<Map<string, TeamScheduleRecord[]>>(new Map());
+  const performanceCacheRef = useRef<
+    Map<
+      string,
+      {
+        rows: PerformanceProfessional[];
+        period: PerformancePeriod | null;
+      }
+    >
+  >(new Map());
+  const performanceRequestKeyRef = useRef<string>("");
 
   const token =
     user?.access_token ||
@@ -335,6 +496,35 @@ export function StylistsTeamWorkspace({
   }, [isAllSedesSelected, selectedSedeId, visibleSedes]);
 
   const primarySelectedSedeId = selectedSedeIds[0] ?? "";
+
+  const monthlyRange = useMemo(() => {
+    const target =
+      parseDateToDate(dateRange.end) ||
+      parseDateToDate(dateRange.start) ||
+      new Date();
+
+    const monthStart = new Date(target.getFullYear(), target.getMonth(), 1);
+    const monthEnd = new Date(target);
+    const today = new Date();
+
+    const isCurrentMonth =
+      monthStart.getFullYear() === today.getFullYear() &&
+      monthStart.getMonth() === today.getMonth();
+
+    const effectiveEnd =
+      isCurrentMonth && monthEnd > today ? today : monthEnd;
+
+    return {
+      start: toLocalYMD(monthStart),
+      end: toLocalYMD(effectiveEnd),
+    };
+  }, [dateRange.end, dateRange.start]);
+
+  const performanceCacheKey = useMemo(
+    () =>
+      `${isAllSedesSelected ? "ALL" : selectedSedeIds[0] ?? "NONE"}:${monthlyRange.start}:${monthlyRange.end}`,
+    [isAllSedesSelected, monthlyRange.end, monthlyRange.start, selectedSedeIds],
+  );
 
   const selectedSede = useMemo(
     () => visibleSedes.find((sede) => sede.sede_id === selectedSedeId) ?? null,
@@ -508,6 +698,45 @@ export function StylistsTeamWorkspace({
     () => buildVendorRows(systemUsers, selectedSedeIds, filteredStylists, invoices),
     [filteredStylists, invoices, selectedSedeIds, systemUsers],
   );
+
+  const monthlyProjectionRows = useMemo<MonthlyProjectionRow[]>(() => {
+    if (!performanceRows || performanceRows.length === 0) return [];
+
+    return performanceRows
+      .map((prof) => {
+        const citasActivas =
+          typeof prof.citas?.activas === "number"
+            ? prof.citas.activas
+            : typeof prof.citas?.total === "number"
+              ? prof.citas.total
+              : null;
+
+        return {
+          profesionalId: prof.profesional_id,
+          nombre: prof.nombre || "Sin nombre",
+          citasActivas,
+          ingresosGenerados: prof.kpis?.ingresos_generados ?? null,
+          comisionProyectada: prof.kpis?.comision_proyectada ?? null,
+          ocupacionPct:
+            prof.kpis?.tasa_ocupacion_pct === undefined
+              ? null
+              : prof.kpis?.tasa_ocupacion_pct ?? null,
+        };
+      })
+      .sort((a, b) => {
+        const diff = (b.ingresosGenerados ?? 0) - (a.ingresosGenerados ?? 0);
+        if (diff !== 0) return diff;
+        return a.nombre.localeCompare(b.nombre);
+      });
+  }, [performanceRows]);
+
+  const performancePeriodLabel = useMemo(() => {
+    if (performancePeriod?.desde && performancePeriod?.hasta) {
+      return `${formatDateRangeSelectValue(performancePeriod.desde)} - ${formatDateRangeSelectValue(performancePeriod.hasta)}`;
+    }
+
+    return `${formatDateRangeSelectValue(monthlyRange.start)} - ${formatDateRangeSelectValue(monthlyRange.end)}`;
+  }, [monthlyRange.end, monthlyRange.start, performancePeriod?.desde, performancePeriod?.hasta]);
 
   const initializeEditorState = useCallback(
     (stylist: Estilista | null, mode: "create" | "edit" = "edit") => {
@@ -709,6 +938,73 @@ export function StylistsTeamWorkspace({
     [token],
   );
 
+  const loadPerformance = useCallback(async () => {
+    if (!token || selectedSedeIds.length === 0) {
+      setPerformanceRows([]);
+      setPerformancePeriod(null);
+      setPerformanceError(null);
+      setIsPerformanceLoading(false);
+      return;
+    }
+
+    const sedeForRequest = isAllSedesSelected ? undefined : selectedSedeIds[0];
+    const requestKey = performanceCacheKey;
+    performanceRequestKeyRef.current = requestKey;
+    const cached = performanceCacheRef.current.get(performanceCacheKey);
+
+    if (cached) {
+      setPerformanceRows(cached.rows);
+      setPerformancePeriod(cached.period);
+      setPerformanceError(null);
+      setIsPerformanceLoading(false);
+      return;
+    }
+
+    setIsPerformanceLoading(true);
+    setPerformanceError(null);
+
+    try {
+      const response = await fetchPerformanceAnalytics({
+        token,
+        sedeId: sedeForRequest,
+        fechaDesde: monthlyRange.start,
+        fechaHasta: monthlyRange.end,
+      });
+
+      const rows = Array.isArray(response.profesionales) ? response.profesionales : [];
+      const period = response.periodo ?? null;
+
+      performanceCacheRef.current.set(requestKey, { rows, period });
+
+      if (performanceRequestKeyRef.current !== requestKey) {
+        return;
+      }
+
+      setPerformanceRows(rows);
+      setPerformancePeriod(period);
+    } catch (error) {
+      console.error("Error cargando performance mensual:", error);
+      if (performanceRequestKeyRef.current === requestKey) {
+        setPerformanceRows([]);
+        setPerformancePeriod(null);
+        setPerformanceError(
+          error instanceof Error ? error.message : "No se pudo cargar la proyección mensual.",
+        );
+      }
+    } finally {
+      if (performanceRequestKeyRef.current === requestKey) {
+        setIsPerformanceLoading(false);
+      }
+    }
+  }, [
+    isAllSedesSelected,
+    monthlyRange.end,
+    monthlyRange.start,
+    performanceCacheKey,
+    selectedSedeIds,
+    token,
+  ]);
+
   useEffect(() => {
     if (!authLoading && token) {
       void loadBaseData();
@@ -771,6 +1067,10 @@ export function StylistsTeamWorkspace({
 
     initializeEditorState(selectedStylist, "edit");
   }, [initializeEditorState, selectedStylist]);
+
+  useEffect(() => {
+    void loadPerformance();
+  }, [loadPerformance]);
 
   useEffect(() => {
     if (!token || selectedSedeIds.length === 0 || filteredStylists.length === 0) {
@@ -1255,6 +1555,11 @@ export function StylistsTeamWorkspace({
     }
   };
 
+  const handleReloadPerformance = useCallback(() => {
+    performanceCacheRef.current.delete(performanceCacheKey);
+    void loadPerformance();
+  }, [loadPerformance, performanceCacheKey]);
+
   const handleOpenCreate = () => {
     if (LegacyCreateModal) {
       setIsLegacyCreateOpen(true);
@@ -1509,6 +1814,15 @@ export function StylistsTeamWorkspace({
                   </div>
                 )}
               </section>
+
+              <MonthlyProjectionSection
+                rows={monthlyProjectionRows}
+                loading={isPerformanceLoading}
+                error={performanceError}
+                periodLabel={performancePeriodLabel}
+                onRetry={handleReloadPerformance}
+                currency={currency}
+              />
 
               <section className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_10px_35px_rgba(15,23,42,0.04)]">
                 <div className="mb-4">

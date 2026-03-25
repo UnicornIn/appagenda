@@ -6,7 +6,7 @@ import {
   CreditCard,
   CreditCard as CardIcon, Wallet, CalendarDays,
   Tag, Users, X, Bug, Landmark, Wand2,
-  Phone, Mail, DollarSign, AlertCircle,
+  Phone, Mail, DollarSign, AlertCircle, Save,
   ShoppingBag, Trash2, Gift
 } from 'lucide-react';
 import Modal from '../../../components/ui/modal';
@@ -325,6 +325,8 @@ const normalizarComparacionProductos = (productos: ProductoSeleccionado[]) => {
     .sort((a, b) => a.producto_id.localeCompare(b.producto_id));
 };
 
+const normalizeNote = (value: string | null | undefined): string => String(value ?? '').trim();
+
 const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   open,
   onClose,
@@ -371,6 +373,10 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   const [loadingServiciosDisponibles, setLoadingServiciosDisponibles] = useState(false);
   const [savingServicios, setSavingServicios] = useState(false);
   const [serviceError, setServiceError] = useState<string | null>(null);
+  const [notasEditadas, setNotasEditadas] = useState('');
+  const [notasOriginales, setNotasOriginales] = useState('');
+  const [savingNotas, setSavingNotas] = useState(false);
+  const [notasError, setNotasError] = useState<string | null>(null);
 
   const sessionCurrency = typeof window !== 'undefined' ? sessionStorage.getItem("beaux-moneda") : null;
   const userCurrency = String(user?.moneda || sessionCurrency || appointmentDetails?.rawData?.moneda || "USD").toUpperCase();
@@ -415,6 +421,10 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         hora_fin: horaFinInicial,
         profesional_id: profesionalInicial
       });
+
+      const notasIniciales = normalizeNote(extractAgendaAdditionalNotes(appointment));
+      setNotasEditadas(notasIniciales);
+      setNotasOriginales(notasIniciales);
 
       // Extraer productos de la cita
       const serviciosIniciales = normalizarServiciosCita(
@@ -461,6 +471,11 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
               ...detalle
             }
           }));
+
+          const notasDetalle = normalizeNote(extractAgendaAdditionalNotes(detalle));
+          setNotasEditadas(notasDetalle);
+          setNotasOriginales(notasDetalle);
+
           return;
         } catch {
           // Continuar con el siguiente endpoint de detalle disponible.
@@ -685,19 +700,22 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     !== JSON.stringify(normalizarComparacionServiciosHorario(serviciosOriginales));
   const hasUnsavedProductChanges = JSON.stringify(normalizarComparacionProductos(productos))
     !== JSON.stringify(normalizarComparacionProductos(productosOriginales));
+  const hasUnsavedNotes = normalizeNote(notasEditadas) !== normalizeNote(notasOriginales);
   const hasUnsavedScheduleChanges = (
     fechaEditada !== horarioOriginal.fecha ||
     horaInicioEditada !== horarioOriginal.hora_inicio ||
     horaFinEditada !== horarioOriginal.hora_fin ||
     profesionalEditadoId !== horarioOriginal.profesional_id
   );
-  const hasUnsavedChanges = hasUnsavedServiceChanges || hasUnsavedProductChanges || hasUnsavedScheduleChanges;
+  const hasUnsavedChanges =
+    hasUnsavedServiceChanges ||
+    hasUnsavedProductChanges ||
+    hasUnsavedScheduleChanges ||
+    hasUnsavedNotes;
   const tieneOpcionesSinHorario = profesionalesDisponibles.some((profesional) => profesional.hasSchedule === false);
   const tieneOpcionesSinIdAgenda = profesionalesDisponibles.some((profesional) => profesional.invalidAgendaId);
 
   const isServiceActionsDisabled = updating || savingServicios || isEstadoNoEditableServicios;
-  const notasAdicionales = extractAgendaAdditionalNotes(appointmentDetails);
-  const tieneNotasAdicionales = notasAdicionales.length > 0;
 
   useEffect(() => {
     if (!open || !user?.access_token || isServiceActionsDisabled) return;
@@ -874,6 +892,48 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       alert(`❌ Error: ${extraerMensajeError(error, 'No se pudo actualizar el estado')}`);
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleGuardarNotas = async () => {
+    if (!appointmentDetails?.id || !user?.access_token) {
+      alert('No se puede actualizar: falta información de autenticación');
+      return;
+    }
+
+    const notasFinales = normalizeNote(notasEditadas);
+    setSavingNotas(true);
+    setNotasError(null);
+
+    try {
+      await updateQuote(
+        appointmentDetails.id,
+        { notas: notasFinales },
+        user.access_token
+      );
+
+      setNotasOriginales(notasFinales);
+      setNotasEditadas(notasFinales);
+      setAppointmentDetails((prev: any) => ({
+        ...prev,
+        notas: notasFinales,
+        rawData: {
+          ...(prev?.rawData || {}),
+          notas: notasFinales,
+          notas_adicionales: notasFinales
+        }
+      }));
+
+      alert('Notas actualizadas correctamente.');
+      if (onRefresh) {
+        setTimeout(() => onRefresh(), 200);
+      }
+    } catch (error: any) {
+      const mensaje = extraerMensajeError(error, 'No se pudieron actualizar las notas.');
+      setNotasError(mensaje);
+      alert(`Error: ${mensaje}`);
+    } finally {
+      setSavingNotas(false);
     }
   };
 
@@ -1182,7 +1242,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         precio: producto.precio_unitario,
         cantidad: producto.cantidad
       }));
-      const notasActuales = extractAgendaAdditionalNotes(appointmentDetails);
+      const notasFinales = normalizeNote(notasEditadas);
 
       const response = await updateQuote(
         appointmentDetails.id,
@@ -1193,7 +1253,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           profesional_id: profesionalEditadoId,
           servicios: serviciosPayload,
           productos: productosPayload,
-          notas: notasActuales
+          notas: notasFinales
         },
         user.access_token
       );
@@ -1231,6 +1291,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         servicio_nombre: citaActualizada.servicio_nombre || prev?.servicio_nombre,
         estilista_nombre: citaActualizada.profesional_nombre || prev?.estilista_nombre,
         profesional_id: citaActualizada.profesional_id || prev?.profesional_id,
+        notas: notasFinales,
         rawData: {
           ...prev?.rawData,
           ...citaActualizada,
@@ -1243,9 +1304,14 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           profesional_nombre: citaActualizada.profesional_nombre || prev?.rawData?.profesional_nombre,
           valor_total: citaActualizada.valor_total ?? prev?.rawData?.valor_total,
           saldo_pendiente: citaActualizada.saldo_pendiente ?? prev?.rawData?.saldo_pendiente,
-          estado_pago: citaActualizada.estado_pago ?? prev?.rawData?.estado_pago
+          estado_pago: citaActualizada.estado_pago ?? prev?.rawData?.estado_pago,
+          notas: notasFinales,
+          notas_adicionales: notasFinales
         }
       }));
+
+      setNotasOriginales(notasFinales);
+      setNotasEditadas(notasFinales);
 
       alert('Cita actualizada correctamente.');
       onClose();
@@ -2241,23 +2307,59 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                   </div>
                 </div>
 
-                {/* Notas Adicionales */}
+                {/* Notas Adicionales (editable) */}
                 <div className="bg-white border border-gray-200 rounded p-2">
-                  <div className="flex items-center gap-1.5 mb-2 pb-1.5 border-b border-gray-200">
-                    <AlertCircle className="w-3 h-3 text-gray-700 flex-shrink-0" />
-                    <h3 className="text-sm font-bold text-gray-900 truncate">Notas adicionales</h3>
+                  <div className="flex items-center justify-between gap-1.5 mb-2 pb-1.5 border-b border-gray-200">
+                    <div className="flex items-center gap-1.5">
+                      <AlertCircle className="w-3 h-3 text-gray-700 flex-shrink-0" />
+                      <h3 className="text-sm font-bold text-gray-900 truncate">Notas adicionales</h3>
+                    </div>
+                    {hasUnsavedNotes ? (
+                      <span className="text-[11px] font-medium text-amber-600">Cambios sin guardar</span>
+                    ) : null}
                   </div>
 
-                  {tieneNotasAdicionales ? (
-                    <div className="py-1 px-0.5 text-xs text-gray-700 whitespace-pre-wrap break-words">
-                      {notasAdicionales}
+                  <div className="space-y-2">
+                    <textarea
+                      value={notasEditadas}
+                      onChange={(event) => setNotasEditadas(event.target.value)}
+                      rows={3}
+                      className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-800 shadow-inner outline-none focus:border-gray-300 focus:ring-0"
+                      placeholder="Agregar notas de la cita, pagos, detalles de cliente..."
+                      disabled={savingNotas || updating}
+                    />
+                    {notasError ? (
+                      <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700">
+                        {notasError}
+                      </div>
+                    ) : null}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleGuardarNotas}
+                        disabled={savingNotas || updating || (!hasUnsavedNotes && !notasEditadas && !notasOriginales)}
+                        className="inline-flex items-center gap-1 rounded-md bg-black px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm transition hover:bg-gray-900 disabled:opacity-60"
+                      >
+                        {savingNotas ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                        Guardar notas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNotasEditadas(notasOriginales);
+                          setNotasError(null);
+                        }}
+                        disabled={savingNotas || (!hasUnsavedNotes && notasEditadas === notasOriginales)}
+                        className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-[11px] font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+                      >
+                        <X className="w-3 h-3" />
+                        Restaurar
+                      </button>
                     </div>
-                  ) : (
-                    <div className="text-center py-2 text-gray-400 text-xs">
-                      <AlertCircle className="w-4 h-4 mx-auto mb-1 text-gray-300" />
-                      <p>No hay notas adicionales</p>
-                    </div>
-                  )}
+                    <p className="text-[11px] text-gray-500">
+                      Se guarda directamente en la cita. Visible para el equipo con acceso a la agenda.
+                    </p>
+                  </div>
                 </div>
               </div>
 

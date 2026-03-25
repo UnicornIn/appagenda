@@ -82,7 +82,7 @@ const parseErrorMessage = async (response: Response, fallback: string) => {
 };
 
 const request = async <T>(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "DELETE" | "PATCH",
   path: string,
   params?: Record<string, any>,
   body?: Record<string, any>,
@@ -205,8 +205,17 @@ export const cashService = {
   createIngreso: (body: Record<string, any>) =>
     request<any>("POST", "/ingreso", undefined, body),
 
+  updateIngreso: (ingresoId: string, body: Record<string, any>) =>
+    request<any>("PATCH", `/ingresos/${ingresoId}`, undefined, body),
+
+  deleteIngreso: (ingresoId: string, params?: Record<string, any>) =>
+    request<any>("DELETE", `/ingresos/${ingresoId}`, params),
+
   createEgreso: (body: Record<string, any>) =>
     request<any>("POST", "/egreso", undefined, body),
+
+  updateEgreso: (egresoId: string, body: Record<string, any>) =>
+    request<any>("PATCH", `/egresos/${egresoId}`, undefined, body),
 
   deleteEgreso: (egresoId: string, params?: Record<string, any>) =>
     request<any>("DELETE", `/egresos/${egresoId}`, params),

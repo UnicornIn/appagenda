@@ -14,9 +14,11 @@ interface FichaValoracionPruebaColorProps {
   onGuardar?: (datos: any) => void;
   onSubmit: (data: any) => void;
   onCancelar?: () => void;
+  fichaId?: string;
+  modoEdicion?: boolean;
 }
 
-export function FichaValoracionPruebaColor({ cita, datosIniciales, onGuardar, onSubmit, onCancelar }: FichaValoracionPruebaColorProps) {
+export function FichaValoracionPruebaColor({ cita, datosIniciales, onGuardar, onSubmit, onCancelar, fichaId, modoEdicion }: FichaValoracionPruebaColorProps) {
   const [formData, setFormData] = useState({
     autorizacion_publicacion: false,
     firma_profesional: false,
@@ -279,8 +281,14 @@ export function FichaValoracionPruebaColor({ cita, datosIniciales, onGuardar, on
       formDataToSend.append('data', JSON.stringify(fichaData));
 
       // 6. Enviar petición
-      const response = await fetch(`${API_BASE_URL}scheduling/quotes/create-ficha`, {
-        method: 'POST',
+      const isEdit = Boolean(fichaId || modoEdicion);
+      const endpoint = isEdit
+        ? `${API_BASE_URL}scheduling/quotes/fichas/${fichaId}`
+        : `${API_BASE_URL}scheduling/quotes/create-ficha`;
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const response = await fetch(endpoint, {
+        method,
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -320,14 +328,18 @@ export function FichaValoracionPruebaColor({ cita, datosIniciales, onGuardar, on
         localStorage.removeItem(`ficha_valoracion_prueba_color_${cita.cita_id}`);
 
         // Notificar éxito
-        alert(`✅ Ficha de Valoración y Prueba de Color creada exitosamente por ${estilistaData.nombre}`);
+        alert(
+          isEdit
+            ? `✅ Ficha de Valoración y Prueba de Color actualizada por ${estilistaData.nombre}`
+            : `✅ Ficha de Valoración y Prueba de Color creada exitosamente por ${estilistaData.nombre}`
+        );
         onSubmit(data);
       } else {
-        throw new Error(data.message || 'Error al crear la ficha');
+        throw new Error(data.message || (isEdit ? 'Error al actualizar la ficha' : 'Error al crear la ficha'));
       }
 
     } catch (error) {
-      console.error('❌ Error al crear ficha:', error);
+      console.error('❌ Error al guardar ficha:', error);
       alert(error instanceof Error ? error.message : 'Error al guardar la ficha');
     } finally {
       setLoading(false);

@@ -15,6 +15,7 @@ export type CashEgreso = {
   metodo_pago?: string;
   tipo?: string;
   concepto?: string;
+   motivo_edicion?: string;
 };
 
 export type CashIngreso = {
@@ -26,6 +27,7 @@ export type CashIngreso = {
   metodo_pago?: string;
   fecha: string;
   creado_en?: string;
+  motivo_edicion?: string;
 };
 
 export type CashCierre = {
