@@ -212,7 +212,8 @@ async def _tiene_data_migrada(sede_id: str, fecha: str) -> bool:
 async def _ingresos_manuales_docs(sede_id: str, fecha: str) -> List[Dict]:
     return await cash_incomes.find({
         "sede_id": sede_id,
-        "fecha": _fecha_query(fecha)
+        "fecha": _fecha_query(fecha),
+        "eliminado": {"$ne": True}  
     }).sort("creado_en", 1).to_list(None)
 
 
@@ -719,7 +720,8 @@ async def calcular_egresos_efectivo(
     for egreso in await cash_expenses.find({
     "sede_id": sede_id,
     "fecha"  : _fecha_query(fecha),
-    "origen" : {"$ne": "migracion"}
+    "origen" : {"$ne": "migracion"},
+    "eliminado": {"$ne": True}
     }).to_list(None):
         tipo  = egreso.get("tipo", "otro")
         monto = egreso.get("monto", 0)
@@ -881,7 +883,8 @@ async def _obtener_egresos_dia_sistema(
     for e in await cash_expenses.find({
         "sede_id": sede_id,
         "fecha"  : _fecha_query(fecha),
-        "origen" : {"$ne": "migracion"}
+        "origen" : {"$ne": "migracion"},
+        "eliminado": {"$ne": True}
     }).sort("creado_en", 1).to_list(None):
         egresos_formateados.append({
             "fecha"          : e.get("creado_en", ""),
@@ -1033,7 +1036,8 @@ async def _obtener_movimientos_efectivo_dia_sistema(
     for e in await cash_expenses.find({
         "sede_id": sede_id,
         "fecha"  : _fecha_query(fecha),
-        "origen" : {"$ne": "migracion"}
+        "origen" : {"$ne": "migracion"},
+        "eliminado": {"$ne": True}
     }).sort("creado_en", 1).to_list(None):
         metodo = _normalizar_metodo(e.get("metodo_pago", "efectivo"))
         if metodo != "efectivo":

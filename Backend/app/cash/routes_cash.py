@@ -23,7 +23,7 @@ from .excel_generator import generar_reporte_excel_caja_completo, generar_nombre
 # Importar modelos y utilidades
 from .models_cash import (
     AperturaCajaRequest, RegistroEgresoRequest, RegistroIngresoRequest, CierreCajaRequest,
-    EgresoResponse, IngresoResponse, CierreResponse
+    EgresoResponse, IngresoResponse, CierreResponse, EditarEgresoRequest, EditarIngresoRequest
 )
 from .utils_cash import (
     generar_cierre_id, generar_egreso_id, generar_ingreso_id, generar_apertura_id,
@@ -47,6 +47,44 @@ logger = logging.getLogger(__name__)
 cash_expenses = db["cash_expenses"]
 cash_closures = db["cash_closures"]
 cash_incomes = db["cash_ingresos"]
+
+# ============================================================
+# HELPERS COMPARTIDOS PARA EDICIÓN/ELIMINACIÓN
+# ============================================================
+
+async def _validar_dia_no_cerrado(sede_id: str, fecha: str) -> None:
+    """Lanza 409 si el día ya tiene cierre registrado."""
+    cierre = await cash_closures.find_one({
+        "sede_id": sede_id,
+        "fecha": fecha,
+        "tipo": "cierre"
+    })
+    if cierre:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"La caja del {fecha} ya está cerrada. No se pueden modificar registros de un día cerrado."
+        )
+
+
+def _validar_rol_admin(current_user: dict) -> None:
+    """Solo admin_sede y super_admin pueden editar registros de caja."""
+    if current_user.get("rol") not in ["admin_sede", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores pueden editar o eliminar registros de caja."
+        )
+
+
+def _campos_auditoria(current_user: dict, motivo: Optional[str] = None) -> dict:
+    """Genera el bloque de auditoría estándar para ediciones."""
+    return {
+        "editado_por": current_user.get("email"),
+        "editado_por_nombre": current_user.get("nombre"),
+        "editado_por_rol": current_user.get("rol"),
+        "editado_en": datetime.now(),
+        **({"motivo_edicion": motivo} if motivo else {})
+    }
+
 
 # ============================================================
 # 1. CALCULAR EFECTIVO DEL DÍA (REFACTORIZADO ✅)
@@ -209,6 +247,81 @@ async def registrar_egreso(
     )
 
 # ============================================================
+# EDITAR EGRESO
+# ============================================================
+
+@router.patch("/egresos/{egreso_id}", response_model=dict)
+async def editar_egreso(
+    egreso_id: str,
+    cambios: EditarEgresoRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Edita un egreso existente.
+
+    ✅ Restricciones:
+    - Solo admin_sede y super_admin
+    - No permitido si el día ya tiene cierre registrado
+    - Requiere motivo_edicion obligatorio (auditoría)
+    - Guarda snapshot del valor anterior en historial_ediciones
+    """
+    _validar_rol_admin(current_user)
+
+    egreso = await cash_expenses.find_one({"egreso_id": egreso_id})
+    if not egreso:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Egreso {egreso_id} no encontrado.")
+
+    await _validar_dia_no_cerrado(egreso["sede_id"], egreso["fecha"])
+
+    # Snapshot del estado anterior para historial
+    snapshot_anterior = {
+        "monto":              egreso.get("monto"),
+        "concepto":           egreso.get("concepto"),
+        "descripcion":        egreso.get("descripcion"),
+        "tipo":               egreso.get("tipo"),
+        "metodo_pago":        egreso.get("metodo_pago"),
+        "comprobante_numero": egreso.get("comprobante_numero"),
+        "editado_en":         datetime.now().isoformat(),
+        "revertido_por":      current_user.get("email"),
+        "motivo":             cambios.motivo_edicion,
+    }
+
+    # Construir $set solo con los campos enviados
+    campos_a_actualizar = {
+        k: v for k, v in cambios.dict(exclude={"motivo_edicion"}).items()
+        if v is not None
+    }
+
+    if not campos_a_actualizar:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se enviaron campos para actualizar."
+        )
+
+    campos_a_actualizar.update(_campos_auditoria(current_user, cambios.motivo_edicion))
+    campos_a_actualizar["actualizado_en"] = datetime.now()
+
+    await cash_expenses.update_one(
+        {"egreso_id": egreso_id},
+        {
+            "$set": campos_a_actualizar,
+            "$push": {"historial_ediciones": snapshot_anterior}  # audit trail
+        }
+    )
+
+    egreso_actualizado = await cash_expenses.find_one({"egreso_id": egreso_id})
+
+    return {
+        "ok": True,
+        "mensaje": "Egreso actualizado correctamente.",
+        "egreso_id": egreso_id,
+        "campos_modificados": list(campos_a_actualizar.keys()),
+        "monto_anterior": snapshot_anterior["monto"],
+        "monto_nuevo": egreso_actualizado.get("monto"),
+    }
+
+# ============================================================
 # 3. REGISTRAR INGRESO MANUAL (NUEVO)
 # ============================================================
 
@@ -264,6 +377,68 @@ async def registrar_ingreso(
         creado_en=ingreso_doc["creado_en"],
     )
 
+
+@router.patch("/ingresos/{ingreso_id}", response_model=dict)
+async def editar_ingreso(
+    ingreso_id: str,
+    cambios: EditarIngresoRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Edita un ingreso manual.
+
+    ✅ Restricciones idénticas a editar egreso.
+    """
+    _validar_rol_admin(current_user)
+
+    ingreso = await cash_incomes.find_one({"ingreso_id": ingreso_id})
+    if not ingreso:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Ingreso {ingreso_id} no encontrado.")
+
+    if ingreso.get("eliminado"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Este ingreso fue eliminado y no puede editarse.")
+
+    await _validar_dia_no_cerrado(ingreso["sede_id"], ingreso["fecha"])
+
+    snapshot_anterior = {
+        "monto":       ingreso.get("monto"),
+        "metodo_pago": ingreso.get("metodo_pago"),
+        "motivo":      ingreso.get("motivo"),
+        "editado_en":  datetime.now().isoformat(),
+        "editado_por": current_user.get("email"),
+        "motivo_edicion": cambios.motivo_edicion,
+    }
+
+    campos_a_actualizar = {
+        k: v for k, v in cambios.dict(exclude={"motivo_edicion"}).items()
+        if v is not None
+    }
+
+    if not campos_a_actualizar:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="No se enviaron campos para actualizar.")
+
+    campos_a_actualizar.update(_campos_auditoria(current_user, cambios.motivo_edicion))
+    campos_a_actualizar["actualizado_en"] = datetime.now()
+
+    await cash_incomes.update_one(
+        {"ingreso_id": ingreso_id},
+        {
+            "$set": campos_a_actualizar,
+            "$push": {"historial_ediciones": snapshot_anterior}
+        }
+    )
+
+    return {
+        "ok": True,
+        "mensaje": "Ingreso actualizado correctamente.",
+        "ingreso_id": ingreso_id,
+        "monto_anterior": snapshot_anterior["monto"],
+        "monto_nuevo": campos_a_actualizar.get("monto", ingreso.get("monto")),
+    }
+
 # ============================================================
 # 4. LISTAR INGRESOS MANUALES (NUEVO)
 # ============================================================
@@ -280,7 +455,8 @@ async def listar_ingresos(
         inicio, fin = _normalize_range(fecha_inicio, fecha_fin)
         filtro = {
             "sede_id": sede_id,
-            "fecha": {"$gte": inicio, "$lte": fin}
+            "fecha": {"$gte": inicio, "$lte": fin},
+            "eliminado": {"$ne": True},
         }
         ingresos_list = await cash_incomes.find(filtro).sort("creado_en", -1).to_list(None)
 
@@ -316,6 +492,49 @@ async def listar_ingresos(
         ) from exc
 
 # ============================================================
+# DELETE /cash/ingresos/{ingreso_id}  — Eliminar ingreso manual
+# ============================================================
+
+@router.delete("/ingresos/{ingreso_id}", status_code=status.HTTP_200_OK)
+async def eliminar_ingreso(
+    ingreso_id: str,
+    motivo: str = Query(..., description="Motivo obligatorio de eliminación"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Soft delete de un ingreso manual con las mismas reglas que egresos."""
+    _validar_rol_admin(current_user)
+
+    ingreso = await cash_incomes.find_one({"ingreso_id": ingreso_id})
+    if not ingreso:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Ingreso {ingreso_id} no encontrado.")
+
+    if ingreso.get("eliminado"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Este ingreso ya fue eliminado.")
+
+    await _validar_dia_no_cerrado(ingreso["sede_id"], ingreso["fecha"])
+
+    await cash_incomes.update_one(
+        {"ingreso_id": ingreso_id},
+        {"$set": {
+            "eliminado": True,
+            "eliminado_por": current_user.get("email"),
+            "eliminado_por_nombre": current_user.get("nombre"),
+            "eliminado_en": datetime.now(),
+            "motivo_eliminacion": motivo,
+            "actualizado_en": datetime.now(),
+        }}
+    )
+
+    return {
+        "ok": True,
+        "mensaje": f"Ingreso {ingreso_id} eliminado correctamente.",
+        "ingreso_id": ingreso_id,
+        "motivo": motivo,
+    }
+
+# ============================================================
 # 5. LISTAR EGRESOS
 # ============================================================
 
@@ -333,6 +552,7 @@ async def listar_egresos(
         filtro: Dict[str, Any] = {
             "sede_id": sede_id,
             "fecha": {"$gte": inicio, "$lte": fin},
+            "eliminado": {"$ne": True},
             # Excluir documentos de ingreso y flujo migrado de efectivo.
             "$or": [
                 {"categoria": {"$exists": False}},
@@ -607,39 +827,57 @@ async def obtener_cierre(
     return cierre
 
 # ============================================================
-# 8. ELIMINAR EGRESO (SIN CAMBIOS)
+# DELETE /cash/egresos/{egreso_id}  — Eliminar egreso (reforzado)
+# REEMPLAZA el endpoint existente en la sección 8
 # ============================================================
 
-@router.delete("/egresos/{egreso_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/egresos/{egreso_id}", status_code=status.HTTP_200_OK)
 async def eliminar_egreso(
     egreso_id: str,
+    motivo: str = Query(..., description="Motivo obligatorio de eliminación"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Elimina un egreso."""
-    
-    if current_user["rol"] not in ["admin_sede", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="No tienes permisos para eliminar egresos"
-        )
-    
+    """
+    Elimina (soft delete) un egreso.
+
+    ✅ Diferencias respecto al endpoint anterior:
+    - Requiere motivo obligatorio
+    - Bloquea si el día ya tiene cierre
+    - Soft delete: marca como eliminado en lugar de borrar físicamente
+    - Solo admin_sede y super_admin
+    """
+    _validar_rol_admin(current_user)
+
     egreso = await cash_expenses.find_one({"egreso_id": egreso_id})
-    
     if not egreso:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Egreso {egreso_id} no encontrado"
-        )
-    
-    resultado = await cash_expenses.delete_one({"egreso_id": egreso_id})
-    
-    if resultado.deleted_count == 0:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error al eliminar el egreso"
-        )
-    
-    return None
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Egreso {egreso_id} no encontrado.")
+
+    if egreso.get("eliminado"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Este egreso ya fue eliminado.")
+
+    await _validar_dia_no_cerrado(egreso["sede_id"], egreso["fecha"])
+
+    await cash_expenses.update_one(
+        {"egreso_id": egreso_id},
+        {"$set": {
+            "eliminado": True,
+            "eliminado_por": current_user.get("email"),
+            "eliminado_por_nombre": current_user.get("nombre"),
+            "eliminado_en": datetime.now(),
+            "motivo_eliminacion": motivo,
+            "actualizado_en": datetime.now(),
+        }}
+    )
+
+    return {
+        "ok": True,
+        "mensaje": f"Egreso {egreso_id} eliminado correctamente.",
+        "egreso_id": egreso_id,
+        "eliminado_por": current_user.get("email"),
+        "motivo": motivo,
+    }
 
 # ============================================================
 # 9. REPORTE DE PERIODO (CORREGIDO)
