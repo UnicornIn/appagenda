@@ -114,7 +114,7 @@ const pickArray = (...candidates: any[]): any[] => {
   return [];
 };
 
-const formatDate = (dateString?: string) => formatDateDMY(dateString);
+  const formatDate = (dateString?: string) => formatDateDMY(dateString);
 const hasClockTime = (value?: string) => {
   if (!value) return false;
   return /\d{2}:\d{2}/.test(value);
@@ -156,13 +156,14 @@ const formatTimeLabel = (value?: string) => {
     .toUpperCase();
 };
 
-const formatTableTime = (value?: string) => {
+const formatTableDate = (value?: string) => {
   const parsed = parseBackendDateTime(value);
   if (!parsed) return "--";
 
-  const hours = String(parsed.getHours()).padStart(2, "0");
-  const minutes = String(parsed.getMinutes()).padStart(2, "0");
-  return `${hours}.${minutes}`;
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const year = parsed.getFullYear();
+  return `${day}/${month}/${year}`;
 };
 
 const formatHeaderDate = (value?: string) => {
@@ -301,12 +302,15 @@ export default function CierreCajaPage() {
   const [ingresoTipo, setIngresoTipo] = useState<string>(DEFAULT_CASH_INCOME_TYPE);
   const [ingresoMotivo, setIngresoMotivo] = useState("");
   const [ingresoFecha, setIngresoFecha] = useState(getToday());
+  const [editingIngresoId, setEditingIngresoId] = useState<string | null>(null);
 
   const [egresoMonto, setEgresoMonto] = useState("");
   const [egresoMotivo, setEgresoMotivo] = useState("");
   const [egresoFecha, setEgresoFecha] = useState(getToday());
   const [egresoMetodoPago, setEgresoMetodoPago] = useState<string>(DEFAULT_CASH_PAYMENT_METHOD);
   const [egresoTipo, setEgresoTipo] = useState<string>(DEFAULT_CASH_EXPENSE_TYPE);
+  const [editingEgresoId, setEditingEgresoId] = useState<string | null>(null);
+  const isEditingEgreso = Boolean(editingEgresoId);
 
   const [efectivoEnCaja, setEfectivoEnCaja] = useState<number | null>(null);
   const [loadingEfectivoEnCaja, setLoadingEfectivoEnCaja] = useState(false);
@@ -318,6 +322,12 @@ export default function CierreCajaPage() {
   const [cierreNota, setCierreNota] = useState("");
   const [cierreFecha, setCierreFecha] = useState(getToday());
   const [cierreEfectivoContado, setCierreEfectivoContado] = useState("");
+
+  const normalizedRole = useMemo(() => String(user?.role || "").toLowerCase(), [user?.role]);
+  const canEditMovimientos = useMemo(
+    () => ["admin_sede", "adminsede", "admin", "super_admin", "superadmin"].includes(normalizedRole),
+    [normalizedRole]
+  );
 
   useEffect(() => {
     const resolvedSedeId = String(
@@ -821,6 +831,7 @@ export default function CierreCajaPage() {
     if (!sedeId) return;
 
     const montoValue = toNumber(ingresoMonto);
+    const isEditing = Boolean(editingIngresoId);
     if (!montoValue || montoValue <= 0) {
       setError("El monto del ingreso debe ser mayor a 0");
       return;
@@ -837,32 +848,96 @@ export default function CierreCajaPage() {
     setSuccess(null);
 
     try {
+      if (isEditing && editingIngresoId) {
+        try {
+          await cashService.deleteIngreso(editingIngresoId, { sede_id: sedeId });
+        } catch (deleteErr: any) {
+          console.warn("No se pudo eliminar ingreso previo, se continuará con la creación:", deleteErr);
+        }
+      }
+
+      const fechaIngresoDMY = formatDateDMY(ingresoFecha);
+
       await cashService.createIngreso({
         sede_id: sedeId,
         monto: montoValue,
         tipo: ingresoTipo,
         metodo_pago: ingresoMetodoPago,
         motivo: ingresoMotivo.trim(),
-        fecha: toBackendDate(ingresoFecha),
+        fecha: fechaIngresoDMY,
         moneda: monedaSede,
       });
 
-      setIngresoMonto("");
-      setIngresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
-      setIngresoTipo(DEFAULT_CASH_INCOME_TYPE);
-      setIngresoMotivo("");
-      setIngresoFecha(getToday());
-      setSuccess("Ingreso registrado correctamente");
+      const ingresoRegistradoId = String(editingIngresoId || `tmp-ingreso-${Date.now()}`);
+      setIngresos((prev) => {
+        const nuevoIngreso: CashIngreso = {
+          id: ingresoRegistradoId,
+          sede_id: sedeId,
+          monto: montoValue,
+          motivo: ingresoMotivo.trim(),
+          concepto: ingresoMotivo.trim(),
+          tipo: ingresoTipo,
+          metodo_pago: ingresoMetodoPago,
+          fecha: ingresoFecha,
+          creado_en: new Date().toISOString(),
+        };
+        const filtered = isEditing
+          ? prev.filter((item) => String(item.id) !== String(editingIngresoId))
+          : prev;
+        return [nuevoIngreso, ...filtered];
+      });
+
+      resetIngresoForm();
+      setEditingIngresoId(null);
+      setSuccess(isEditing ? "Ingreso actualizado correctamente" : "Ingreso registrado correctamente");
       toast({
-        title: "Ingreso registrado",
+        title: isEditing ? "Ingreso actualizado" : "Ingreso registrado",
         description: "El ingreso manual se guardó correctamente.",
       });
-      await loadAll();
+      await loadResumen();
+      await loadEfectivoEnCaja();
     } catch (err: any) {
-      setError(err?.message || "No se pudo registrar el ingreso");
+      setError(
+        err?.message ||
+          (isEditing ? "No se pudo actualizar el ingreso" : "No se pudo registrar el ingreso")
+      );
     } finally {
       setLoadingAction(false);
       setActiveAction(null);
+    }
+  };
+
+  const startEditEgreso = (egresoId: string) => {
+    const target = egresos.find((item) => String(item.id) === egresoId);
+    if (!target) return;
+
+    setEditingEgresoId(String(target.id));
+    setEgresoMonto(String(Math.abs(target.monto || 0)));
+    setEgresoMotivo(target.concepto || target.motivo || "");
+    setEgresoMetodoPago(target.metodo_pago || DEFAULT_CASH_PAYMENT_METHOD);
+    setEgresoTipo(target.tipo || DEFAULT_CASH_EXPENSE_TYPE);
+    setEgresoFecha(toBackendDate(target.fecha || target.creado_en || getToday()));
+    setError(null);
+    setSuccess(null);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const startEditIngreso = (ingresoId: string) => {
+    const target = ingresos.find((item) => String(item.id) === ingresoId);
+    if (!target) return;
+
+    setEditingIngresoId(String(target.id));
+    setIngresoMonto(String(Math.abs(target.monto || 0)));
+    setIngresoMotivo(target.concepto || target.motivo || "");
+    setIngresoMetodoPago(target.metodo_pago || DEFAULT_CASH_PAYMENT_METHOD);
+    setIngresoTipo(target.tipo || DEFAULT_CASH_INCOME_TYPE);
+    setIngresoFecha(toBackendDate(target.fecha || target.creado_en || getToday()));
+    setError(null);
+    setSuccess(null);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
@@ -871,6 +946,8 @@ export default function CierreCajaPage() {
 
     const montoValue = toNumber(egresoMonto);
     const motivo = egresoMotivo.trim();
+    const isEditing = Boolean(editingEgresoId);
+
     if (!montoValue || montoValue <= 0) {
       setError("El monto del egreso debe ser mayor a 0");
       return;
@@ -887,6 +964,12 @@ export default function CierreCajaPage() {
     setSuccess(null);
 
     try {
+      if (isEditing && editingEgresoId) {
+        await cashService.deleteEgreso(editingEgresoId, { sede_id: sedeId });
+      }
+
+      const fechaEgresoDMY = formatDateDMY(egresoFecha);
+
       const response = await cashService.createEgreso({
         sede_id: sedeId,
         monto: montoValue,
@@ -898,12 +981,12 @@ export default function CierreCajaPage() {
         nota: motivo,
         tipo: egresoTipo,
         concepto: motivo,
-        fecha: toBackendDate(egresoFecha),
+        fecha: fechaEgresoDMY,
         moneda: monedaSede,
       });
 
       const egresoRegistradoId = String(
-        response?.egreso_id || response?.id || `tmp-egreso-${Date.now()}`
+        response?.egreso_id || response?.id || editingEgresoId || `tmp-egreso-${Date.now()}`
       );
 
       setEgresos((prev) => {
@@ -919,17 +1002,22 @@ export default function CierreCajaPage() {
           creado_en: response?.creado_en || new Date().toISOString(),
         };
 
-        return [nuevoEgreso, ...prev.filter((item) => String(item.id) !== egresoRegistradoId)];
+        const filtered = isEditing
+          ? prev.filter((item) => String(item.id) !== String(editingEgresoId))
+          : prev.filter((item) => String(item.id) !== egresoRegistradoId);
+        return [nuevoEgreso, ...filtered];
       });
 
-      setEgresoMonto("");
-      setEgresoMotivo("");
-      setEgresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
-      setEgresoTipo(DEFAULT_CASH_EXPENSE_TYPE);
-      setSuccess("Egreso registrado correctamente");
-      await loadAll();
+      resetEgresoForm();
+      setEditingEgresoId(null);
+      setSuccess(isEditing ? "Egreso actualizado correctamente" : "Egreso registrado correctamente");
+      await loadResumen();
+      await loadEfectivoEnCaja();
     } catch (err: any) {
-      setError(err?.message || "No se pudo registrar el egreso");
+      setError(
+        err?.message ||
+          (isEditing ? "No se pudo actualizar el egreso" : "No se pudo registrar el egreso")
+      );
     } finally {
       setLoadingAction(false);
       setActiveAction(null);
@@ -1109,7 +1197,7 @@ export default function CierreCajaPage() {
     detalle: string;
     medio: string;
     monto: number;
-    hora: string;
+    fecha: string;
     timestamp: number;
     orden: number;
   };
@@ -1129,7 +1217,7 @@ export default function CierreCajaPage() {
         detalle: ingreso.motivo || "Ingreso manual",
         medio: normalizePaymentMethod(ingreso.metodo_pago),
         monto: ingreso.monto || 0,
-        hora: formatTableTime(fechaMovimiento),
+        fecha: formatTableDate(fechaMovimiento),
         timestamp: toTimestamp(fechaMovimiento),
         orden: index,
       };
@@ -1144,7 +1232,7 @@ export default function CierreCajaPage() {
         detalle: egreso.concepto || egreso.motivo || "Egreso",
         medio: normalizePaymentMethod(egreso.metodo_pago),
         monto: -Math.abs(egreso.monto || 0),
-        hora: formatTableTime(fechaMovimiento),
+        fecha: formatTableDate(fechaMovimiento),
         timestamp: toTimestamp(fechaMovimiento),
         orden: index,
       };
@@ -1337,6 +1425,7 @@ export default function CierreCajaPage() {
   }, [cierres, movimientosDia]);
 
   const resetIngresoForm = () => {
+    setEditingIngresoId(null);
     setIngresoMonto("");
     setIngresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
     setIngresoTipo(DEFAULT_CASH_INCOME_TYPE);
@@ -1346,6 +1435,7 @@ export default function CierreCajaPage() {
   };
 
   const resetEgresoForm = () => {
+    setEditingEgresoId(null);
     setEgresoMonto("");
     setEgresoMotivo("");
     setEgresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
@@ -1743,14 +1833,19 @@ export default function CierreCajaPage() {
 
               {showManualCashForms ? (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                  <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                    <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Registrar egreso</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4 pt-4">
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div>
+              <Card className="border-[#d7d4df] bg-white/80 shadow-none">
+                <CardHeader className="border-b border-[#e3e0ea] pb-2">
+                  <CardTitle className="text-2xl font-semibold text-[#2e2d35]">
+                    {isEditingEgreso ? "Editar egreso" : "Registrar egreso"}
+                  </CardTitle>
+                  {isEditingEgreso ? (
+                    <p className="text-sm text-[#6b6878]">Estás editando un egreso existente.</p>
+                  ) : null}
+                </CardHeader>
+                <CardContent className="space-y-4 pt-4">
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
                           <label className="text-base text-[#666370]">Concepto</label>
                           <Input
                             value={egresoMotivo}
@@ -1816,7 +1911,16 @@ export default function CierreCajaPage() {
                         disabled={loadingAction || !egresoMotivo.trim()}
                         className="min-w-24 bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
                       >
-                        Guardar
+                        {loadingAction && activeAction === "egreso" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            {isEditingEgreso ? "Actualizando..." : "Guardando..."}
+                          </>
+                        ) : isEditingEgreso ? (
+                          "Actualizar"
+                        ) : (
+                          "Guardar"
+                        )}
                       </Button>
                     </div>
                   </CardContent>
@@ -1824,7 +1928,12 @@ export default function CierreCajaPage() {
 
                 <Card className="border-[#d7d4df] bg-white/80 shadow-none">
                   <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                    <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Registrar ingreso manual</CardTitle>
+                    <CardTitle className="text-2xl font-semibold text-[#2e2d35]">
+                      {editingIngresoId ? "Editar ingreso manual" : "Registrar ingreso manual"}
+                    </CardTitle>
+                    {editingIngresoId ? (
+                      <p className="text-sm text-[#6b6878]">Estás editando un ingreso existente.</p>
+                    ) : null}
                   </CardHeader>
                   <CardContent className="space-y-4 pt-4">
                     <div className="space-y-3">
@@ -1886,18 +1995,27 @@ export default function CierreCajaPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-end gap-2 border-t border-[#e4e1eb] pt-3">
-                      <Button variant="outline" onClick={resetIngresoForm} className="min-w-24">
-                        Cancelar
-                      </Button>
-                      <Button
-                        onClick={handleCreateIngreso}
-                        disabled={loadingAction}
-                        className="min-w-24 bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
-                      >
-                        Guardar
-                      </Button>
-                    </div>
+                      <div className="flex items-center justify-end gap-2 border-t border-[#e4e1eb] pt-3">
+                        <Button variant="outline" onClick={resetIngresoForm} className="min-w-24">
+                          Cancelar
+                        </Button>
+                        <Button
+                          onClick={handleCreateIngreso}
+                          disabled={loadingAction}
+                          className="min-w-24 bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
+                        >
+                          {loadingAction && activeAction === "ingreso" ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              {editingIngresoId ? "Actualizando..." : "Guardando..."}
+                            </>
+                          ) : editingIngresoId ? (
+                            "Actualizar"
+                          ) : (
+                            "Guardar"
+                          )}
+                        </Button>
+                      </div>
                   </CardContent>
                 </Card>
               </div>
@@ -1912,41 +2030,53 @@ export default function CierreCajaPage() {
                     <table className="min-w-full text-sm">
                       <thead className="bg-[#eeebf4] text-left text-sm font-medium text-[#5f5c69]">
                         <tr>
-                          <th className="px-3 py-2">Hora</th>
+                          <th className="px-3 py-2">Fecha</th>
                           <th className="px-3 py-2">Tipo</th>
                           <th className="px-3 py-2">Concepto</th>
                           <th className="px-3 py-2">Medio</th>
                           <th className="px-3 py-2 text-right">Monto</th>
                           <th className="px-3 py-2 text-right">Efectivo esperado</th>
+                          <th className="px-3 py-2 text-right">Acciones</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#ece9f2] text-[#3d3a46]">
                         {loadingIngresos || loadingEgresos ? (
                           <tr>
-                            <td colSpan={6} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={7} className="px-3 py-6 text-center text-sm text-[#6b6878]">
                               Cargando movimientos...
                             </td>
                           </tr>
                         ) : movimientosConSaldo.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={7} className="px-3 py-6 text-center text-sm text-[#6b6878]">
                               No hay movimientos registrados para el día.
                             </td>
                           </tr>
                         ) : (
                           movimientosConSaldo.map((movimiento) => (
                             <tr key={movimiento.id}>
-                              <td className="px-3 py-2 font-medium text-[#2e2d35]">{movimiento.hora}</td>
+                              <td className="px-3 py-2 font-medium text-[#2e2d35]">{movimiento.fecha}</td>
                               <td className="px-3 py-2">
-                                <span
-                                  className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${
-                                    movimiento.tipo === "egreso"
-                                      ? "bg-[#e9e6f0] text-[#4c4958]"
-                                      : "bg-[#efedf5] text-[#4f4b5d]"
-                                  }`}
-                                >
-                                  {movimiento.etiquetaTipo}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`inline-flex rounded-md px-2 py-0.5 text-xs font-semibold ${
+                                      movimiento.tipo === "egreso"
+                                        ? "bg-rose-100 text-rose-700"
+                                        : "bg-emerald-100 text-emerald-700"
+                                    }`}
+                                  >
+                                    {movimiento.tipo === "egreso" ? "Egreso" : "Ingreso"}
+                                  </span>
+                                  <span
+                                    className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${
+                                      movimiento.tipo === "egreso"
+                                        ? "bg-[#e9e6f0] text-[#4c4958]"
+                                        : "bg-[#efedf5] text-[#4f4b5d]"
+                                    }`}
+                                  >
+                                    {movimiento.etiquetaTipo}
+                                  </span>
+                                </div>
                               </td>
                               <td className="px-3 py-2">{movimiento.detalle}</td>
                               <td className="px-3 py-2">{movimiento.medio}</td>
@@ -1955,6 +2085,21 @@ export default function CierreCajaPage() {
                               </td>
                               <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
                                 {formatMoney(movimiento.saldo_esperado)}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                {canEditMovimientos ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      movimiento.tipo === "egreso"
+                                        ? startEditEgreso(movimiento.id.replace(/^egreso-/, ""))
+                                        : startEditIngreso(movimiento.id.replace(/^ingreso-/, ""))
+                                    }
+                                    className="text-xs font-semibold text-[#6b6878] hover:text-[#2e2d35]"
+                                  >
+                                    Editar
+                                  </button>
+                                ) : null}
                               </td>
                             </tr>
                           ))

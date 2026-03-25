@@ -154,7 +154,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
           estilista.comision_productos !== null && estilista.comision_productos !== undefined
             ? estilista.comision_productos.toString()
             : "",
-        especialidades: estilista.especialidades || [],
+        especialidades: Array.isArray(estilista.especialidades) ? estilista.especialidades : [],
         password: "", // No mostrar password en edición
         activo: estilista.activo !== undefined ? estilista.activo : true
       })
@@ -231,7 +231,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
     console.log('🎯 Especialidades válidas a guardar:', especialidadesValidas);
 
     // ✅ PREPARAR DATOS CON VALIDACIÓN EXTRA - Asegurar que especialidades siempre esté definido
-    const saveData: Partial<Estilista> & { password?: string } = {
+    const saveData: Partial<Estilista> & { password?: string; especialidades: string[] } = {
       nombre: formData.nombre.trim(),
       email: formData.email.trim(),
       sede_id: formData.sede_id,
@@ -267,7 +267,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
     console.log('📤 saveData:', saveData);
     console.log('🎯 Especialidades:', saveData.especialidades);
     console.log('📋 Tipo de especialidades:', typeof saveData.especialidades);
-    console.log('🔢 Cantidad de especialidades:', (saveData.especialidades || []).length); // ✅ Ahora es seguro porque siempre está definido
+    console.log('🔢 Cantidad de especialidades:', saveData.especialidades.length);
 
     // Solo incluir password si es un nuevo estilista y tiene valor
     if (!estilista && formData.password.trim()) {

@@ -51,6 +51,8 @@ import {
 
 type DashboardRowWithProducts = StylistDashboardRow & { cantidadProductos: number };
 
+const DEFAULT_STYLIST_PASSWORD = "Temporal123!";
+
 type StylistsTeamWorkspaceProps = {
   servicesApi: {
     getServicios: (
@@ -1026,7 +1028,7 @@ export function StylistsTeamWorkspace({
           nombre: editorState.nombre.trim(),
           email: editorState.email.trim(),
           sede_id: targetSedeId,
-          especialidades: editorState.serviceIds,
+          especialidades: true,
           comision: commission,
           comision_productos: productCommission,
           password: editorState.password.trim(),
@@ -1099,10 +1101,11 @@ export function StylistsTeamWorkspace({
             nombre: editorState.nombre.trim(),
             email: editorState.email.trim(),
             sede_id: targetSedeId,
-            especialidades: nextServiceIds,
+            especialidades: true,
             activo: editorState.activo,
             comision: commission,
             comision_productos: productCommission,
+            password: editorState.password.trim() || DEFAULT_STYLIST_PASSWORD,
           };
 
           await stylistApi.updateEstilista(token, selectedStylist.profesional_id, payload);
@@ -1181,10 +1184,12 @@ export function StylistsTeamWorkspace({
           nombre: String(payload.nombre ?? legacyEditStylist.nombre ?? "").trim(),
           email: String(payload.email ?? legacyEditStylist.email ?? "").trim(),
           sede_id: targetSedeId,
+          especialidades: true,
           comision: normalizeCommission(payload.comision),
           comision_productos: normalizeCommission((payload as any).comision_productos),
           activo: payload.activo ?? legacyEditStylist.activo ?? true,
           telefono: typeof payload.telefono === "string" ? payload.telefono.trim() : undefined,
+          password: String(payload.password ?? "").trim() || DEFAULT_STYLIST_PASSWORD,
         };
 
         await stylistApi.updateEstilista(token, legacyEditStylist.profesional_id, updatePayload);
@@ -1211,12 +1216,10 @@ export function StylistsTeamWorkspace({
           nombre: String(payload.nombre ?? "").trim(),
           email: String(payload.email ?? "").trim(),
           sede_id: targetSedeId,
-          especialidades: Array.isArray(payload.especialidades)
-            ? payload.especialidades.filter(Boolean)
-            : [],
+          especialidades: true,
           comision: normalizeCommission(payload.comision),
           telefono: typeof payload.telefono === "string" ? payload.telefono.trim() : undefined,
-          password: String(payload.password ?? "").trim() || "Unicornio123",
+          password: String(payload.password ?? "").trim() || DEFAULT_STYLIST_PASSWORD,
           activo: payload.activo ?? true,
         };
 

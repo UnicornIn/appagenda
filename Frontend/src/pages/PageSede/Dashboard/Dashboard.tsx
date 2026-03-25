@@ -286,10 +286,7 @@ export default function DashboardPage() {
     }
 
     if (selectedPeriod === "today") {
-      const todayLocal = toLocalYMD(new Date());
-      params.period = "custom";
-      params.start_date = todayLocal;
-      params.end_date = todayLocal;
+      params.period = "today";
       return params;
     }
 

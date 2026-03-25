@@ -2,7 +2,7 @@ export interface Estilista {
   _id: string;
   nombre: string;
   email: string;
-  especialidades: string[]; // nombres de especialidades
+  especialidades: string[] | boolean; // puede venir como lista o boolean desde el backend
   especialidades_detalle: Array<{ id: string; nombre: string }>;
   servicios_no_presta?: string[]; // IDs de servicios que NO presta
   servicios_presta?: Array<{ id: string; nombre: string }>; // Servicios que sí presta
@@ -28,7 +28,7 @@ export type CreateEstilistaData = {
   nombre: string;
   email: string;
   sede_id: string;
-  especialidades: string[];
+  especialidades: string[] | boolean;
   comision: number | null;
   comision_productos?: number | null;
   telefono?: string;
@@ -40,7 +40,7 @@ export type UpdateEstilistaData = {
   nombre?: string;
   email?: string;
   sede_id?: string;
-  especialidades?: string[];
+  especialidades?: string[] | boolean;
   comision?: number | null;
   comision_productos?: number | null;
   comisiones_por_categoria?: Record<string, number>;

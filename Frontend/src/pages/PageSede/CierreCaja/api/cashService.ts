@@ -205,6 +205,9 @@ export const cashService = {
   createIngreso: (body: Record<string, any>) =>
     request<any>("POST", "/ingreso", undefined, body),
 
+  deleteIngreso: (ingresoId: string, params?: Record<string, any>) =>
+    request<any>("DELETE", `/ingresos/${ingresoId}`, params),
+
   createEgreso: (body: Record<string, any>) =>
     request<any>("POST", "/egreso", undefined, body),
 

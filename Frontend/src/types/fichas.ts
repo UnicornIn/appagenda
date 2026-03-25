@@ -39,6 +39,10 @@ export interface Cita {
   estado: string;
   estado_pago?: string;
   comentario?: string;
+  // Notas adicionales (ej: call center)
+  notas?: string;
+  notas_call_center?: string;
+  nota_call_center?: string;
   
   // 🆕 NUEVO: Campos adicionales de pago
   metodo_pago_inicial?: string;

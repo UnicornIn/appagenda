@@ -8,6 +8,10 @@ export function useEstilistaData() {
   const [citas, setCitas] = useState<Cita[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [comisionServiciosPct, setComisionServiciosPct] = useState<number | null>(null);
+  const [comisionProductosPct, setComisionProductosPct] = useState<number | null>(null);
+  const [comisionesPorCategoria, setComisionesPorCategoria] = useState<Record<string, number> | null>(null);
+  const [totalesPorCategoriaHoy, setTotalesPorCategoriaHoy] = useState<Record<string, number>>({});
 
   const fetchCitas = useCallback(async () => {
     try {
@@ -33,28 +37,42 @@ export function useEstilistaData() {
       const data = await response.json();
       
       if (Array.isArray(data)) {
-        const citasFormateadas = data.map((cita: any) => ({
-          cita_id: cita.cita_id || cita._id || "",
-          cliente: {
-            cliente_id: cita.cliente?.cliente_id || cita.cliente_id || "",
-            nombre: cita.cliente?.nombre || cita.cliente_nombre || "",
-            apellido: cita.cliente?.apellido || cita.cliente_apellido || "",
-            telefono: cita.cliente?.telefono || cita.cliente_telefono || "",
-            email: cita.cliente?.email || cita.cliente_email || "",
-          },
-          servicios: cita.servicios || [], // ✅ Array directo del backend
-          precio_total: cita.precio_total || 0,
-          cantidad_servicios: cita.cantidad_servicios || 0,
-          tiene_precio_personalizado: cita.tiene_precio_personalizado || false,
-          sede: cita.sede || { sede_id: cita.sede_id || "", nombre: cita.sede_nombre || "" },
-          estilista_id: cita.estilista_id || cita.profesional_id || "",
-          profesional_id: cita.profesional_id || cita.estilista_id || "",
-          fecha: cita.fecha || "",
-          hora_inicio: cita.hora_inicio || "",
-          hora_fin: cita.hora_fin || "",
-          estado: cita.estado || "",
-          comentario: cita.comentario || cita.notas || "",
-        }));
+        const citasFormateadas = data.map((cita: any) => {
+          const notasCallCenter =
+            cita.notas_call_center ??
+            cita.nota_call_center ??
+            cita.notasCallCenter ??
+            cita.notas ??
+            cita.comentario ??
+            cita.comentarios ??
+            cita.observaciones ??
+            "";
+
+          return {
+            cita_id: cita.cita_id || cita._id || "",
+            cliente: {
+              cliente_id: cita.cliente?.cliente_id || cita.cliente_id || "",
+              nombre: cita.cliente?.nombre || cita.cliente_nombre || "",
+              apellido: cita.cliente?.apellido || cita.cliente_apellido || "",
+              telefono: cita.cliente?.telefono || cita.cliente_telefono || "",
+              email: cita.cliente?.email || cita.cliente_email || "",
+            },
+            servicios: cita.servicios || [], // ✅ Array directo del backend
+            precio_total: cita.precio_total || 0,
+            cantidad_servicios: cita.cantidad_servicios || 0,
+            tiene_precio_personalizado: cita.tiene_precio_personalizado || false,
+            sede: cita.sede || { sede_id: cita.sede_id || "", nombre: cita.sede_nombre || "" },
+            estilista_id: cita.estilista_id || cita.profesional_id || "",
+            profesional_id: cita.profesional_id || cita.estilista_id || "",
+            fecha: cita.fecha || "",
+            hora_inicio: cita.hora_inicio || "",
+            hora_fin: cita.hora_fin || "",
+            estado: cita.estado || "",
+            comentario: notasCallCenter,
+            notas: cita.notas ?? cita.comentarios ?? cita.observaciones ?? "",
+            notas_call_center: cita.notas_call_center ?? cita.nota_call_center ?? cita.notasCallCenter ?? "",
+          };
+        });
         
         const requierePrecioReal = citasFormateadas.some(
           (c) => (c.precio_total ?? 0) <= 1 && (c.servicios?.length ?? 0) > 0
@@ -67,6 +85,67 @@ export function useEstilistaData() {
         console.log('✅ Citas cargadas:', citasConPrecio);
         setCitas(citasConPrecio);
         setError(null);
+
+        // Calcular totales por categoría de servicios (solo citas de hoy y completadas)
+        const hoyStr = new Date().toDateString();
+        const categorias: Record<string, number> = {};
+        citasConPrecio.forEach((cita: any) => {
+          try {
+            const fechaCita = new Date(cita.fecha).toDateString();
+            const estado = (cita.estado || '').toLowerCase();
+            const esHoy = fechaCita === hoyStr;
+            const esCompletada = ['completado', 'completada', 'finalizado', 'finalizada', 'terminado', 'terminada', 'realizado', 'realizada'].some((flag) =>
+              estado.includes(flag),
+            );
+            if (!esHoy || !esCompletada) return;
+
+            if (Array.isArray(cita.servicios)) {
+              cita.servicios.forEach((srv: any) => {
+                const categoria = srv.categoria || srv.categoria_servicio || "Servicios";
+                const subtotal = srv.subtotal ?? srv.precio ?? srv.precio_local ?? 0;
+                categorias[categoria] = (categorias[categoria] || 0) + Number(subtotal || 0);
+              });
+            }
+          } catch {
+            /* ignore */
+          }
+        });
+        setTotalesPorCategoriaHoy(categorias);
+
+        // Intentar obtener la comisión configurada del estilista
+        const profesionalIdFromData =
+          citasFormateadas[0]?.profesional_id || citasFormateadas[0]?.estilista_id || "";
+        const profesionalIdFromStorage =
+          localStorage.getItem("beaux-profesional_id") ||
+          sessionStorage.getItem("beaux-profesional_id") ||
+          "";
+        const profesionalId = profesionalIdFromData || profesionalIdFromStorage;
+
+        if (profesionalId) {
+          try {
+            const profResp = await fetch(`${API_BASE_URL}admin/profesionales/${profesionalId}`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/json",
+              },
+            });
+
+            if (profResp.ok) {
+              const profData = await profResp.json();
+              const normalize = (value: unknown): number | null => {
+                const num = typeof value === "number" ? value : Number(value);
+                return Number.isFinite(num) ? num : null;
+              };
+              setComisionServiciosPct(normalize(profData?.comision));
+              setComisionProductosPct(normalize(profData?.comision_productos));
+              if (profData?.comisiones_por_categoria && typeof profData.comisiones_por_categoria === "object") {
+                setComisionesPorCategoria(profData.comisiones_por_categoria as Record<string, number>);
+              }
+            }
+          } catch (profError) {
+            console.error("❌ Error obteniendo comisiones del estilista:", profError);
+          }
+        }
       }
     } catch (err) {
       console.error('❌ Error:', err);
@@ -175,6 +254,10 @@ export function useEstilistaData() {
     citasHoy,
     serviciosCompletadosHoy,
     totalVentasHoy,
+    comisionServiciosPct,
+    comisionProductosPct,
+    comisionesPorCategoria,
+    totalesPorCategoriaHoy,
     loading,
     error,
     refetchCitas: fetchCitas,

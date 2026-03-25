@@ -300,14 +300,17 @@ export function AppointmentsList({
           const emailCliente =
             appointment.cliente?.email ||
             ((appointment as any).cliente_email ?? "");
-          const baseNota = (
+          const baseNotaRaw =
+            (appointment as any).notas_call_center ||
+            (appointment as any).nota_call_center ||
+            (appointment as any).notasCallCenter ||
             appointment.comentario ||
             (appointment as any).comentarios ||
             (appointment as any).notas ||
             (appointment as any).nota ||
             (appointment as any).observaciones ||
-            ""
-          ).toString().trim();
+            "";
+          const baseNota = baseNotaRaw?.toString().trim();
           const notaCita = baseNota || notaCache[appointment.cita_id || "" ] || "";
           
           // 🔥 CAMBIO CRÍTICO: Usar helper para obtener TODOS los servicios
@@ -382,7 +385,7 @@ export function AppointmentsList({
                       <div className="flex min-w-0 flex-1 items-center gap-2">
                         <FileText className="mt-[1px] h-3.5 w-3.5 text-gray-500 shrink-0" />
                         <div className="min-w-0 truncate">
-                          <span className="font-semibold text-gray-800">Notas: </span>
+                          <span className="font-semibold text-gray-800">Nota call center: </span>
                           <span className="truncate align-middle">{notaCita}</span>
                         </div>
                       </div>
