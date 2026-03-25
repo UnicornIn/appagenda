@@ -2124,7 +2124,7 @@ async def get_citas_estilista(
             "hora_fin":                   c.get("hora_fin"),
             "estado":                     c.get("estado"),
             "estado_pago":                c.get("estado_pago"),
-            "comentario":                 c.get("comentario", None),
+            "notas":                      c.get("notas", None),
             "precio_total":               precio_total,
             "cantidad_servicios":         len(servicios_data),
             "tiene_precio_personalizado": any(s["precio_personalizado"] for s in servicios_data)
