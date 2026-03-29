@@ -374,11 +374,12 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
 
     historial_pagos = []
     if abono_real > 0:
+        tipo_pago_inicial = "pago_completo" if saldo_pendiente <= 0 else "abono_inicial"
         historial_pagos.append({
             "fecha": today(sede).replace(tzinfo=None),
             "monto": num(abono_real),
             "metodo": venta.metodo_pago,
-            "tipo": "pago_inicial",
+            "tipo": tipo_pago_inicial,
             "registrado_por": email_usuario,
             "saldo_despues": num(saldo_pendiente),
             **({"codigo_giftcard": codigo_giftcard_guardado} if codigo_giftcard_guardado else {})
@@ -622,11 +623,12 @@ async def registrar_pago_venta(
     nuevo_estado = "pagado" if nuevo_saldo <= 0 else "abonado"
 
     historial_actual = venta.get("historial_pagos", [])
+    tipo_pago = "pago_completo" if nuevo_saldo <= 0 else "pago_adicional"
     historial_actual.append({
         "fecha": today(sede).replace(tzinfo=None),
         "monto": num(monto_real),
         "metodo": data.metodo_pago,
-        "tipo": "pago_adicional",
+        "tipo": tipo_pago,
         "registrado_por": current_user.get("email"),
         "saldo_despues": num(nuevo_saldo),
         "notas": data.notas,

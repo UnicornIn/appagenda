@@ -134,17 +134,41 @@ from PIL import Image as PILImage
 def comprimir_imagen_para_pdf(buf: BytesIO, max_px: int = 1200, quality: int = 75) -> BytesIO | None:
     try:
         buf.seek(0)
-        img = PILImage.open(buf)
-        img.load()  # ✅ CRÍTICO: fuerza decodificación completa (sin esto HEIC falla silenciosamente)
+        
+        # ✅ Detectar formato real ANTES de abrir
+        header = buf.read(24)
+        buf.seek(0)
+        
+        formato_detectado = "desconocido"
+        if header[4:8] == b"ftyp":
+            subtipo = header[8:12]
+            if subtipo in (b"heic", b"heis"):
+                formato_detectado = "HEIC (iPhone)"
+            elif subtipo in (b"mif1", b"msf1"):
+                formato_detectado = "HEIF (Samsung)"
+            elif subtipo in (b"hevc", b"hevx"):
+                formato_detectado = "HEIF (Samsung video-still)"
+            else:
+                formato_detectado = f"HEIF/HEIC variante: {subtipo}"
+        elif header[:2] == b"\xff\xd8":
+            formato_detectado = "JPEG"
+        elif header[:8] == b"\x89PNG\r\n\x1a\n":
+            formato_detectado = "PNG"
+        
+        print(f"    📷 Formato detectado: {formato_detectado}")
 
-        # ✅ Corrige rotación de fotos iPhone (metadatos EXIF)
+        img = PILImage.open(buf)
+        print(f"    📐 Modo PIL: {img.mode}, Tamaño: {img.size}, Formato PIL: {img.format}")
+        img.load()
+
+        # Corregir rotación EXIF (iPhone Y Samsung la necesitan)
         try:
             from PIL import ImageOps
             img = ImageOps.exif_transpose(img)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"    ⚠️ exif_transpose falló (no crítico): {e}")
 
-        # ✅ Componer sobre fondo blanco si tiene transparencia
+        # Componer sobre fondo blanco si tiene transparencia
         if img.mode in ("RGBA", "LA", "P"):
             fondo = PILImage.new("RGB", img.size, (255, 255, 255))
             if img.mode == "P":
@@ -162,11 +186,13 @@ def comprimir_imagen_para_pdf(buf: BytesIO, max_px: int = 1200, quality: int = 7
         out = BytesIO()
         img.save(out, format="JPEG", quality=quality, optimize=True)
         out.seek(0)
+        print(f"    ✅ Convertida OK → JPEG {img.size}")
         return out
 
     except Exception as e:
-        print(f"⚠️ Error comprimiendo imagen: {e}")
-        return None  # ✅ None en vez del buf HEIC crudo que rompe ReportLab
+        print(f"    ❌ Error comprimiendo imagen: {type(e).__name__}: {e}")
+        import traceback; traceback.print_exc()
+        return None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GENERADOR PRINCIPAL
@@ -445,6 +471,7 @@ async def generar_pdf_ficha(ficha_data: dict, cita_data: dict) -> bytes:
                     if j < len(urls):
                         b = imgs.get(f"{prefix}_{j}")
                         if b:
+                            print(f"    🖼️ Comprimiendo foto {prefix}_{j}...")
                             b = comprimir_imagen_para_pdf(b, max_px=1200, quality=75)
                             if b:
                                 img_el = Image(b, width=8*cm, height=8*cm, kind="proportional")
@@ -461,8 +488,10 @@ async def generar_pdf_ficha(ficha_data: dict, cita_data: dict) -> bytes:
                                 ]))
                                 celdas.append(inner)
                             else:
+                                print(f"    ❌ Foto {prefix}_{j} no se pudo convertir → celda vacía")
                                 celdas.append(Paragraph("(imagen no disponible)", st["body"]))
                         else:
+                            print(f"    ⚠️ Foto {prefix}_{j} no se descargó o era None")
                             celdas.append(Paragraph("", st["body"]))
 
                 row = Table([celdas], colWidths=[8.25*cm, 8.25*cm])
@@ -561,14 +590,14 @@ body{{font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;
 </style>
 </head>
 <body>
-<div class="header"><h2>✅ Servicio Finalizado</h2></div>
+<div class="header"><h2>Servicio Finalizado</h2></div>
 <div class="content">
   <p>Estimado/a <span class="hl">{cliente_nombre}</span>,</p>
   <p>Su servicio de <span class="hl">{servicio_nombre}</span> ha sido finalizado exitosamente.</p>
   <div class="info-box">
     <p><strong>Servicio:</strong> {servicio_nombre}</p>
     <p><strong>Fecha:</strong> {fecha}</p>
-    <p><strong>Estado:</strong> ✅ COMPLETADO</p>
+    <p><strong>Estado:</strong>COMPLETADO</p>
   </div>
   <p>Se adjunta el <strong>Comprobante de Servicio</strong> en PDF.</p>
   <p>¡Gracias por confiar en nosotros!<br><strong>El equipo de Rizos Felices</strong></p>

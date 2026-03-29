@@ -150,9 +150,9 @@ def _crear_hoja_resumen_caja(ws, resumen: Dict, sede_info: Dict):
     fila += 1
     
     ws[f'A{fila}'] = "- Abonos a Reservas"
+    ws[f'A{fila}'].font = Font(name='Arial', size=10, italic=True, color="808080")
     ws[f'D{fila}'] = resumen["ingresos_otros_metodos"]["abonos"]
-    ws[f'D{fila}'].number_format = '#,##0.00'
-    ws[f'D{fila}'].alignment = derecha
+    ws[f'D{fila}'].font = Font(name='Arial', size=10, italic=True, color="808080")
     fila += 1
 
     ws[f'A{fila}'] = "- Tarjeta Crédito"
@@ -203,11 +203,11 @@ def _crear_hoja_resumen_caja(ws, resumen: Dict, sede_info: Dict):
     ws[f'D{fila}'].alignment = derecha
     fila += 1
     
-    """ws[f'A{fila}'] = "- Descuento por Nómina"
-    ws[f'D{fila}'] = resumen["ingresos_otros_metodos"]["descuento_por_nomina"]
+    ws[f'A{fila}'] = "- Descuento por Nómina"
+    ws[f'D{fila}'] = resumen["ingresos_otros_metodos"].get("descuento_por_nomina", 0)
     ws[f'D{fila}'].number_format = '#,##0.00'
     ws[f'D{fila}'].alignment = derecha
-    fila += 1"""
+    fila += 1
 
     ws[f'D{fila}'].border = Border(top=Side(style='thin'))
     fila += 1
@@ -218,6 +218,11 @@ def _crear_hoja_resumen_caja(ws, resumen: Dict, sede_info: Dict):
     ws[f'D{fila}'].number_format = '#,##0.00'
     ws[f'D{fila}'].alignment = derecha
     ws[f'D{fila}'].font = total_font
+    fila += 1
+    
+    ws.merge_cells(f'A{fila}:D{fila}')
+    ws[f'A{fila}'] = "(*) Los abonos a reservas son informativos y ya están incluidos en su método de pago real. No se suman al total."
+    ws[f'A{fila}'].font = Font(name='Arial', size=8, italic=True, color="808080")
     fila += 2
     
     # Egresos
@@ -652,6 +657,7 @@ def _crear_hoja_flujo_por_metodo(ws, resumen: Dict, sede_info: Dict, fecha_inici
         ("link_de_pago",    "Link de Pago",    ingresos_otros.get("link_de_pago", 0)),
         ("giftcard",        "Giftcard",        ingresos_otros.get("giftcard", 0)),
         ("addi",            "Addi",            ingresos_otros.get("addi", 0)),
+        ("descuento_por_nomina", "Descuento por Nómina",  ingresos_otros.get("descuento_por_nomina", 0)),
         ("abonos",          "Abonos",          ingresos_otros.get("abonos", 0)),
         ("otros",           "Otros",           ingresos_otros.get("otros", 0)),
     ]

@@ -10,6 +10,7 @@ from app.database.mongo import collection_giftcards
 from app.giftcards.routes_giftcards import _estado_giftcard
 from app.cash.utils_cash import fecha_a_datetime
 from app.utils.timezone import today_str, today
+from app.bills.alegra_integration import emit_invoice_to_alegra, initialize_manual_electronic_status
 
 from app.database.mongo import (
     collection_citas,
@@ -461,8 +462,15 @@ async def facturar_cita_o_venta(
         "facturado_por": current_user.get("email"),
         "estado": "pagado"
     }
-    await collection_invoices.insert_one(factura)
+    insert_result = await collection_invoices.insert_one(factura)
+    invoice_mongo_id = insert_result.inserted_id
     print("✅ Factura creada")
+
+    # ====================================
+    # 1️⃣0️⃣.1️⃣ INTEGRACIÓN FACTURA ELECTRÓNICA (ALEGRA)
+    # ====================================
+    await initialize_manual_electronic_status(invoice_mongo_id, sede_id)
+    print("🧾 Factura electrónica: marcada como pendiente de emisión manual")
 
     # ====================================
     # 1️⃣1️⃣ MOVIMIENTOS DE INVENTARIO
@@ -863,9 +871,141 @@ async def facturar_cita_o_venta(
             "comision_total": valor_comision_total,
             "total": total_final,
             "moneda": moneda_sede
-        }
+        },
+        "factura_electronica": {
+            "auto_emitida": False,
+            "mensaje": "Pendiente de emisión manual en ventas facturadas",
+            "provider": "alegra"
+        },
+        "invoice_id": str(invoice_mongo_id)
     }
 
+
+@router.post("/invoices/{invoice_id}/electronic/emit")
+async def emitir_factura_electronica(
+    invoice_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Emite manualmente una factura interna como factura electrónica vía Alegra.
+    """
+    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    result = await emit_invoice_to_alegra(invoice_id, requested_by=current_user.get("email", "manual"))
+
+    return {
+        "success": True,
+        "message": "Factura enviada a Alegra",
+        "electronic_invoice": result,
+    }
+
+
+@router.post("/sales/{sale_id}/electronic/emit")
+async def emitir_factura_electronica_desde_venta(
+    sale_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Emite factura electrónica usando el id de venta facturada.
+    """
+    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    try:
+        sale_mongo_id = ObjectId(sale_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="sale_id inválido") from exc
+
+    venta = await collection_sales.find_one({"_id": sale_mongo_id})
+    if not venta:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+
+    numero_comprobante = venta.get("numero_comprobante")
+    sede_id = venta.get("sede_id")
+    if not numero_comprobante:
+        raise HTTPException(status_code=422, detail="La venta no tiene numero_comprobante")
+
+    invoice = await collection_invoices.find_one(
+        {"numero_comprobante": numero_comprobante, "sede_id": sede_id}
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Factura interna asociada no encontrada")
+
+    result = await emit_invoice_to_alegra(str(invoice["_id"]), requested_by=current_user.get("email", "manual"))
+
+    return {
+        "success": True,
+        "message": "Factura enviada a Alegra",
+        "invoice_id": str(invoice["_id"]),
+        "electronic_invoice": result,
+    }
+
+
+@router.get("/invoices/{invoice_id}/electronic/status")
+async def estado_factura_electronica(
+    invoice_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Consulta el estado de integración electrónica guardado en la factura interna.
+    """
+    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    try:
+        mongo_id = ObjectId(invoice_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="invoice_id inválido") from exc
+
+    factura = await collection_invoices.find_one({"_id": mongo_id})
+    if not factura:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    return {
+        "success": True,
+        "invoice_id": invoice_id,
+        "electronic_invoice": factura.get("electronic_invoice", {}),
+    }
+
+
+@router.get("/sales/{sale_id}/electronic/status")
+async def estado_factura_electronica_desde_venta(
+    sale_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Consulta estado electrónico usando el id de venta facturada.
+    """
+    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    try:
+        sale_mongo_id = ObjectId(sale_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="sale_id inválido") from exc
+
+    venta = await collection_sales.find_one({"_id": sale_mongo_id})
+    if not venta:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+
+    numero_comprobante = venta.get("numero_comprobante")
+    sede_id = venta.get("sede_id")
+    if not numero_comprobante:
+        raise HTTPException(status_code=422, detail="La venta no tiene numero_comprobante")
+
+    factura = await collection_invoices.find_one(
+        {"numero_comprobante": numero_comprobante, "sede_id": sede_id}
+    )
+    if not factura:
+        raise HTTPException(status_code=404, detail="Factura interna asociada no encontrada")
+
+    return {
+        "success": True,
+        "sale_id": sale_id,
+        "invoice_id": str(factura["_id"]),
+        "electronic_invoice": factura.get("electronic_invoice", {}),
+    }
 
 # ============================================================
 # 📄 Obtener facturas

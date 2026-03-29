@@ -1012,7 +1012,7 @@ async def _build_period_report_data(
         "pos",
         "transferencia",
         "otros",
-        "decuento_por_nomina"
+        "descuento_por_nomina"
     ]
 
     resumen_total: Dict[str, Any] = {
