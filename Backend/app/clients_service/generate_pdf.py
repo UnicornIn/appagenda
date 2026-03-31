@@ -23,7 +23,7 @@ async def generar_pdf_especifico(
         print(f"🔍 [PDF ENDPOINT] Buscando cliente: {cliente_id}")
         print(f"🔍 [PDF ENDPOINT] Buscando cita: {cita_id}")
 
-        if current_user["rol"] not in ["admin_sede", "estilista", "admin"]:
+        if current_user["rol"] not in ["admin_sede", "estilista", "recepcionista", "super_admin", "call_center"]:
             raise HTTPException(status_code=403, detail="No tienes permisos para generar PDFs")
 
         # Buscar cliente por cliente_id string

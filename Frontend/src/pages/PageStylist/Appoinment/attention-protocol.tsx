@@ -10,7 +10,7 @@ import { FichaAsesoriaCorte } from './fichas/FichaAsesoriaCorte'
 import { FichaCuidadoPostColor } from './fichas/FichaCuidadoPostColor'
 import { FichaValoracionPruebaColor } from './fichas/FichaValoracionPruebaColor'
 import { API_BASE_URL } from '../../../types/config'
-import { getFichaAuthToken } from './fichas/fichaHelpers'
+// import { getFichaAuthToken } from './fichas/fichaHelpers'
 // Añadir al inicio del archivo, junto con los otros imports
 import { Ban } from "lucide-react";  // <-- AÑADIR ESTE
 import BloqueosModal from "../../../components/Quotes/Bloqueos";  // <-- AÑADIR ESTE (ajusta la ruta)
@@ -90,7 +90,8 @@ export function AttentionProtocol({
   const [detalleFicha, setDetalleFicha] = useState<FichaServidor | null>(null)
   const [mostrarModalBloqueos, setMostrarModalBloqueos] = useState(false);
   const [fichaEnEdicion, setFichaEnEdicion] = useState<FichaServidor | null>(null);
-  const [loadingFichaEdicionId, setLoadingFichaEdicionId] = useState<string | null>(null);
+  // Edición de fichas deshabilitada temporalmente
+  // const [loadingFichaEdicionId, setLoadingFichaEdicionId] = useState<string | null>(null);
   const [fechaSeleccionadaParaBloqueo, setFechaSeleccionadaParaBloqueo] = useState<string>("");
   const [totalProductos, setTotalProductos] = useState(0);
   const [, setCitaConProductos] = useState<any>(citaSeleccionada);
@@ -1138,41 +1139,7 @@ export function AttentionProtocol({
     return base;
   };
 
-  const cargarFichaDesdeServidor = async (fichaId: string, clienteId?: string): Promise<FichaServidor | null> => {
-    const token = getFichaAuthToken();
-    if (!token) {
-      alert("No hay token de autenticación para fichas");
-      return null;
-    }
-
-    try {
-      const doFetch = async (url: string) => {
-        const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-        if (!resp.ok) {
-          const text = await resp.text();
-          throw new Error(text || `Error ${resp.status}`);
-        }
-        const data = await resp.json();
-        return data?.data || data?.ficha || data;
-      };
-
-      // intento directo /fichas/{id}
-      try {
-        const ficha = await doFetch(`${API_BASE_URL}scheduling/quotes/fichas/${fichaId}`);
-        return ficha as FichaServidor;
-      } catch (err: any) {
-        // fallback: /fichas?ficha_id=
-        const searchParams = new URLSearchParams({ ficha_id: fichaId });
-        if (clienteId) searchParams.append("cliente_id", clienteId);
-        const ficha = await doFetch(`${API_BASE_URL}scheduling/quotes/fichas?${searchParams.toString()}`);
-        return ficha as FichaServidor;
-      }
-    } catch (err: any) {
-      console.error("Error obteniendo ficha", err);
-      alert(err?.message || "No se pudo obtener la ficha");
-      return null;
-    }
-  };
+  // Edición/carga remota de fichas deshabilitada en esta vista
   // Guardar ficha automáticamente
   const guardarFicha = (tipo: TipoFicha, datos: any) => {
     if (!citaSeleccionada) return;
@@ -1209,13 +1176,6 @@ export function AttentionProtocol({
   // Vista para ver fichas del cliente (detalle de una ficha) - COMPLETA CON IMÁGENES
   const renderDetalleFicha = () => {
     if (!detalleFicha) return null;
-
-    const iniciarEdicionFicha = () => {
-      setFichaEnEdicion(detalleFicha);
-      setTipoFichaSeleccionada(detalleFicha.tipo_ficha);
-      setDetalleFicha(null);
-      setVistaActual("fichas");
-    };
 
     console.log('🔍 DEBUG - Ficha seleccionada:', {
       id: detalleFicha.id,
@@ -1299,34 +1259,7 @@ export function AttentionProtocol({
                 {detalleFicha.servicio_nombre} • {formatFecha(detalleFicha.fecha_ficha)}
               </p>
             </div>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (!detalleFicha) return;
-                  // prellenar inmediato
-                  setFichaEnEdicion(detalleFicha);
-                  setTipoFichaSeleccionada(detalleFicha.tipo_ficha);
-                  setDetalleFicha(null);
-                  setVistaActual("fichas");
-                  // refetch opcional
-                  const run = async () => {
-                    setLoadingFichaEdicionId(detalleFicha.id);
-                    const fullFicha = await cargarFichaDesdeServidor(detalleFicha.id, detalleFicha.cliente_id);
-                    setLoadingFichaEdicionId(null);
-                    if (fullFicha) {
-                      setFichaEnEdicion(fullFicha);
-                    }
-                  };
-                  void run();
-                }}
-                className="text-xs"
-                disabled={loadingFichaEdicionId === detalleFicha.id}
-              >
-                {loadingFichaEdicionId === detalleFicha?.id ? "Cargando..." : "Editar ficha"}
-              </Button>
-            </div>
+            {/* Edición de fichas deshabilitada para auditoría */}
           </div>
 
           {/* Resumen destacado */}
@@ -1848,32 +1781,7 @@ export function AttentionProtocol({
                       <Eye className="h-3 w-3 mr-1" /> {/* REDUCIDO de h-4 w-4 mr-2 */}
                       Ver Detalles
                     </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // prellenar inmediato con datos ya cargados en lista
-                        setFichaEnEdicion(ficha);
-                        setTipoFichaSeleccionada(ficha.tipo_ficha);
-                        setVistaActual("fichas");
-                        setDetalleFicha(null);
-                        // refetch opcional para datos completos
-                        const run = async () => {
-                          setLoadingFichaEdicionId(ficha.id);
-                          const fullFicha = await cargarFichaDesdeServidor(ficha.id, ficha.cliente_id);
-                          setLoadingFichaEdicionId(null);
-                          if (fullFicha) {
-                            setFichaEnEdicion(fullFicha);
-                          }
-                        };
-                        void run();
-                      }}
-                      className="ml-2 text-xs"
-                      disabled={loadingFichaEdicionId === ficha.id}
-                    >
-                      {loadingFichaEdicionId === ficha.id ? "Cargando..." : "Editar"}
-                    </Button>
+                    {/* Botón de edición de fichas deshabilitado */}
                   </div>
                 </div>
               );

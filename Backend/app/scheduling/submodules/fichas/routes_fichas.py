@@ -43,29 +43,115 @@ s3_client = boto3.client(
 
 def upload_to_s3(file: UploadFile, folder_path: str) -> str:
     try:
-        file_extension = file.filename.split('.')[-1]
+        file_content   = file.file.read()
+        file_extension = file.filename.split('.')[-1].lower() if file.filename else "jpg"
 
+        print(f"📷 Subiendo: {file.filename} | {len(file_content)} bytes | {file.content_type}")
+
+        # ── Convertir a JPEG si no lo es ya ──────────────────────────────────
+        if file_extension not in ("jpg", "jpeg"):
+            try:
+                from PIL import Image as PILImage, ImageOps
+                from io import BytesIO as _BytesIO
+
+                # Intento 1: PIL normal (funciona con PNG, WEBP, y HEIC de iPhone)
+                try:
+                    img = PILImage.open(_BytesIO(file_content))
+                    img.load()
+                    print(f"  ✅ PIL abrió OK: modo={img.mode} tamaño={img.size}")
+
+                except Exception as e_pil:
+                    # Intento 2: fallback HEIF manual (Samsung msf1/mif1)
+                    print(f"  ⚠️ PIL falló ({e_pil}), intentando HEIF fallback...")
+                    try:
+                        import pillow_heif
+                        heif_file = pillow_heif.read_heif(file_content)
+                        img = PILImage.frombytes(
+                            heif_file.mode,
+                            heif_file.size,
+                            heif_file.data,
+                            "raw",
+                        )
+                        print(f"  ✅ HEIF fallback OK: modo={img.mode} tamaño={img.size}")
+                    except Exception as e_heif:
+                        print(f"  ❌ HEIF fallback también falló: {e_heif}")
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Formato de imagen no soportado. Usa JPG, PNG o cambia la configuración de cámara del celular."
+                        )
+
+                # Corregir rotación EXIF (iPhone y Samsung)
+                try:
+                    img = ImageOps.exif_transpose(img)
+                except Exception:
+                    pass
+
+                # Fondo blanco si tiene transparencia
+                if img.mode in ("RGBA", "LA", "P"):
+                    fondo = PILImage.new("RGB", img.size, (255, 255, 255))
+                    if img.mode == "P":
+                        img = img.convert("RGBA")
+                    fondo.paste(img, mask=img.split()[-1] if img.mode == "RGBA" else None)
+                    img = fondo
+                else:
+                    img = img.convert("RGB")
+
+                # Redimensionar si es muy grande (fotos iPhone/Samsung son 4000+ px)
+                w, h = img.size
+                if max(w, h) > 2000:
+                    ratio = 2000 / max(w, h)
+                    img   = img.resize((int(w * ratio), int(h * ratio)), PILImage.LANCZOS)
+
+                out = _BytesIO()
+                img.save(out, format="JPEG", quality=85, optimize=True)
+                file_content   = out.getvalue()
+                file_extension = "jpg"
+                print(f"  ✅ Convertido a JPEG exitosamente ({len(file_content)} bytes)")
+
+            except HTTPException:
+                raise  # Re-lanzar el 400 sin envolver
+            except Exception as e:
+                print(f"  ❌ Error inesperado en conversión: {e}")
+                raise HTTPException(status_code=500, detail=f"Error procesando imagen: {str(e)}")
+
+        # ── Subir a S3 ───────────────────────────────────────────────────────
         unique_filename = f"{uuid.uuid4()}.{file_extension}"
-        s3_key = f"{folder_path}/{unique_filename}"
-
+        s3_key          = f"{folder_path}/{unique_filename}"
 
         s3_client.put_object(
             Bucket=os.getenv("AWS_BUCKET_NAME"),
             Key=s3_key,
-            Body=file.file.read(),
-            ContentType=file.content_type or "image/webp"
+            Body=file_content,
+            ContentType="image/jpeg",
         )
 
         base_url = os.getenv("AWS_PUBLIC_BASE_URL")
-        if not base_url:    
+        if not base_url:
             raise RuntimeError("AWS_PUBLIC_BASE_URL no está configurado")
 
-        return f"{base_url}/{s3_key}"
+        url_final = f"{base_url}/{s3_key}"
+        print(f"  ☁️ Subido a S3: {url_final}")
+        return url_final
 
-
-
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+### Resumen de la lógica
+'''
+Foto entra
+    │
+    ├── ¿Ya es JPG/JPEG? → Sube directo ✅
+    │
+    └── ¿Otro formato (HEIC/HEIF/PNG/WEBP)?
+            │
+            ├── Intento 1: PILImage.open() → funciona con iPhone, PNG, WEBP
+            │
+            ├── Intento 2: pillow_heif.read_heif() → cubre Samsung msf1/mif1
+            │
+            └── ¿Ambos fallan? → HTTP 400 (nunca sube basura a S3)'''
 
 # =============================================================
 # 🔹 OBTENER FICHAS POR CLIENTE (con filtros inteligentes)
@@ -367,7 +453,7 @@ async def crear_ficha(
         "profesional_nombre": data.profesional_nombre or profesional.get("nombre"),
         "sede_nombre": sede.get("nombre"),
 
-        "fecha_ficha": data.fecha_ficha or datetime.now().isoformat(),
+        "fecha_ficha": data.fecha_ficha or datetime.now(),
         "fecha_reserva": data.fecha_reserva,
 
         "correo": data.email or cliente.get("correo"),

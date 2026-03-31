@@ -45,7 +45,7 @@ async def generar_y_enviar_pdf_ficha(ficha: dict, cita_id: str) -> dict:
 
             await enviar_correo_con_pdf(
                 destinatario=cliente_email,
-                asunto="✅ Comprobante de Servicio",
+                asunto="Comprobante de Servicio",
                 mensaje_html=html,
                 pdf_bytes=pdf_bytes,
                 nombre_archivo="comprobante_servicio.pdf"
