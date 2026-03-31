@@ -12,6 +12,8 @@ import type { CashCierre, CashEgreso, CashIngreso, CashResumen, CashReporteRaw }
 import { formatDateDMY, parseDateToDate, toBackendDate } from "../../../lib/dateFormat";
 import { toast } from "../../../hooks/use-toast";
 import { useAuth } from "../../../components/Auth/AuthContext";
+import { giftcardsService } from "../../GiftCards/giftcardsService";
+import type { GiftCard } from "../../GiftCards/types";
 import {
   CASH_EXPENSE_TYPE_OPTIONS,
   CASH_INCOME_TYPE_OPTIONS,
@@ -189,6 +191,18 @@ const normalizePaymentMethodKey = (value?: string) => {
     .replace(/\s+/g, "_");
 };
 
+const parseGiftcardPaymentMethod = (notes?: string) => {
+  if (!notes) return "otros";
+  const match = notes.match(/metodo\s+de\s+pago\s*:\s*([a-zA-Z_]+)/i);
+  return match?.[1]?.toLowerCase() || "otros";
+};
+
+const extractGiftcardCode = (value?: string) => {
+  if (!value) return undefined;
+  const match = value.match(/gift\s*card\s*([a-zA-Z0-9-]+)/i);
+  return match?.[1]?.toUpperCase();
+};
+
 const toTimestamp = (value?: string) => {
   const parsed = parseBackendDateTime(value);
   if (!parsed) return 0;
@@ -257,6 +271,26 @@ const mergeCashRecords = <T extends { id: string; fecha?: string; creado_en?: st
   });
 };
 
+const normalizeGiftcardIngresos = (giftcards: GiftCard[], start: string, end: string): CashIngreso[] => {
+  return giftcards
+    .filter((giftcard) => isWithinDateRange(giftcard.fecha_emision || giftcard.created_at, start, end))
+    .map((giftcard, index) => {
+      const parsedMetodo = parseGiftcardPaymentMethod((giftcard as any)?.notas || "");
+      return {
+        id: `giftcard-${giftcard.codigo || giftcard._id || index}`,
+        sede_id: giftcard.sede_id,
+        monto: toNumber(giftcard.valor ?? (giftcard as any)?.saldo_disponible ?? 0),
+        motivo: giftcard.codigo ? `Venta Gift Card ${giftcard.codigo}` : "Venta Gift Card",
+        concepto: giftcard.codigo ? `Venta Gift Card ${giftcard.codigo}` : "Venta Gift Card",
+        tipo: "giftcard",
+        metodo_pago: parsedMetodo,
+        fecha: giftcard.fecha_emision ?? giftcard.created_at ?? getToday(),
+        creado_en: giftcard.created_at ?? giftcard.fecha_emision,
+      };
+    })
+    .filter((ingreso) => ingreso.monto > 0);
+};
+
 export default function CierreCajaPage() {
   const { user } = useAuth();
   const [moneda, setMoneda] = useState("COP");
@@ -283,11 +317,14 @@ export default function CierreCajaPage() {
   const [ingresos, setIngresos] = useState<CashIngreso[]>([]);
   const [egresos, setEgresos] = useState<CashEgreso[]>([]);
   const [cierres, setCierres] = useState<CashCierre[]>([]);
+  const [giftcardIngresos, setGiftcardIngresos] = useState<CashIngreso[]>([]);
 
-  const [loadingResumen, setLoadingResumen] = useState(false);
+  // Valor del loading no se usa en UI; se mantiene el setter para conservar la lógica existente.
+  const [, setLoadingResumen] = useState(false);
   const [loadingIngresos, setLoadingIngresos] = useState(false);
   const [loadingEgresos, setLoadingEgresos] = useState(false);
   const [loadingCierres, setLoadingCierres] = useState(false);
+  const [loadingGiftcards, setLoadingGiftcards] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
   const [activeAction, setActiveAction] = useState<"ingreso" | "egreso" | "apertura" | "cierre" | null>(null);
 
@@ -791,6 +828,39 @@ export default function CierreCajaPage() {
     }
   };
 
+  const loadGiftcardVentas = async () => {
+    if (!sedeId) return;
+    const { start, end } = normalizeDateRange(fechaDesde, fechaHasta);
+    if (!start || !end) return;
+
+    const token = String(
+      user?.access_token ||
+        user?.token ||
+        sessionStorage.getItem("access_token") ||
+        localStorage.getItem("access_token") ||
+        ""
+    ).trim();
+    if (!token) {
+      setGiftcardIngresos([]);
+      return;
+    }
+
+    setLoadingGiftcards(true);
+    try {
+      const response = await giftcardsService.getGiftCardsBySede(token, sedeId, {
+        page: 1,
+        limit: 400,
+      });
+      const lista = Array.isArray(response.giftcards) ? response.giftcards : [];
+      const normalizados = normalizeGiftcardIngresos(lista, start, end);
+      setGiftcardIngresos(normalizados);
+    } catch (err) {
+      setGiftcardIngresos([]);
+    } finally {
+      setLoadingGiftcards(false);
+    }
+  };
+
   const loadCierres = async () => {
     if (!sedeId) return;
     setLoadingCierres(true);
@@ -814,6 +884,7 @@ export default function CierreCajaPage() {
       loadEgresos(),
       loadCierres(),
       loadEfectivoEnCaja(),
+      loadGiftcardVentas(),
     ]);
   };
 
@@ -1205,43 +1276,87 @@ export default function CierreCajaPage() {
   //   }
   // };
 
+  const giftcardVentasUnicas = useMemo(() => {
+    if (!giftcardIngresos.length) return [];
+
+    const existingCodes = new Set(
+      ingresos
+        .map((ingreso) =>
+          extractGiftcardCode(
+            `${ingreso.motivo ?? ""} ${ingreso.concepto ?? ""} ${ingreso.id ?? ""}`
+          )
+        )
+        .filter((code): code is string => Boolean(code))
+        .map((code) => code.toUpperCase())
+    );
+
+    return giftcardIngresos.filter((ingreso) => {
+      const code = extractGiftcardCode(
+        `${ingreso.motivo ?? ""} ${ingreso.concepto ?? ""} ${ingreso.id ?? ""}`
+      );
+      if (code && existingCodes.has(code.toUpperCase())) {
+        return false;
+      }
+      return true;
+    });
+  }, [giftcardIngresos, ingresos]);
+
+  const ingresosConGiftcards = useMemo(() => {
+    if (!giftcardVentasUnicas.length) return ingresos;
+    return mergeCashRecords([...ingresos, ...giftcardVentasUnicas]);
+  }, [giftcardVentasUnicas, ingresos]);
+
+  const ingresosConGiftcardsTotal = useMemo(() => {
+    return ingresosConGiftcards.reduce((sum, ingreso) => sum + (ingreso.monto || 0), 0);
+  }, [ingresosConGiftcards]);
+
   const abonosTotal = useMemo(() => {
-    return ingresos.reduce((sum, ingreso) => {
+    return ingresosConGiftcards.reduce((sum, ingreso) => {
       const metodo = String(ingreso.metodo_pago || "").toLowerCase();
       return metodo === "abonos" ? sum + (ingreso.monto || 0) : sum;
     }, 0);
-  }, [ingresos]);
+  }, [ingresosConGiftcards]);
 
   type MovimientoDia = {
     id: string;
     tipo: "ingreso" | "egreso";
     etiquetaTipo: string;
     detalle: string;
+    motivoEdicion?: string;
     medio: string;
     monto: number;
     fecha: string;
     timestamp: number;
     orden: number;
+    editable?: boolean;
   };
 
   const movimientosDia = useMemo<MovimientoDia[]>(() => {
-    const ingresosNormalizados: MovimientoDia[] = ingresos.map((ingreso, index) => {
+    const ingresosNormalizados: MovimientoDia[] = ingresosConGiftcards.map((ingreso, index) => {
       const fechaMovimiento = ingreso.creado_en || ingreso.fecha;
       const metodo = String(ingreso.metodo_pago || "").toLowerCase();
+      const isGiftcard = ingreso.tipo === "giftcard" || String(ingreso.id).startsWith("giftcard-");
 
       return {
         id: `ingreso-${ingreso.id}`,
         tipo: "ingreso",
         etiquetaTipo:
-          metodo === "abonos"
-            ? "Abono"
-            : getCashMovementTypeLabel("ingreso", ingreso.tipo, "Ingreso manual"),
-        detalle: ingreso.motivo || "Ingreso manual",
+          isGiftcard
+            ? "Venta Gift Card"
+            : metodo === "abonos"
+              ? "Abono"
+              : getCashMovementTypeLabel("ingreso", ingreso.tipo, "Ingreso manual"),
+        detalle:
+          ingreso.motivo ||
+          ingreso.concepto ||
+          (isGiftcard ? "Venta Gift Card" : "Ingreso manual"),
+        motivoEdicion: ingreso.motivo_edicion,
         medio: normalizePaymentMethod(ingreso.metodo_pago),
         monto: ingreso.monto || 0,
         fecha: formatTableDate(fechaMovimiento),
         timestamp: toTimestamp(fechaMovimiento),
         orden: index,
+        editable: !isGiftcard,
       };
     });
 
@@ -1252,6 +1367,7 @@ export default function CierreCajaPage() {
         tipo: "egreso",
         etiquetaTipo: getCashMovementTypeLabel("egreso", egreso.tipo, "Egreso"),
         detalle: egreso.concepto || egreso.motivo || "Egreso",
+        motivoEdicion: egreso.motivo_edicion,
         medio: normalizePaymentMethod(egreso.metodo_pago),
         monto: -Math.abs(egreso.monto || 0),
         fecha: formatTableDate(fechaMovimiento),
@@ -1275,7 +1391,7 @@ export default function CierreCajaPage() {
       }
       return a.id.localeCompare(b.id);
     });
-  }, [egresos, ingresos]);
+  }, [egresos, ingresosConGiftcards]);
 
   const movimientosConSaldo = useMemo(() => {
     let saldoAcumulado = 0;
@@ -1318,9 +1434,10 @@ export default function CierreCajaPage() {
         "decuento_por_nomina",
       ]);
       const addi = fromReport(["addi"]);
+      const giftcardsMetodo = fromReport(["giftcard"]);
       const total =
         pickNumber(reportSummary, ["total_vendido", "ventas_totales", "total_ingresos"]) ??
-        (efectivo + tarjetas + transferencias + creditoEmpleados + addi);
+        (efectivo + tarjetas + transferencias + creditoEmpleados + addi + giftcardsMetodo);
 
       return {
         izquierda: [
@@ -1333,6 +1450,7 @@ export default function CierreCajaPage() {
           { label: "Tarjeta", value: tarjetas, trend: true },
           { label: "Transferencias", value: transferencias, trend: true },
           { label: "Crédito empleados", value: creditoEmpleados, trend: false },
+          { label: "Gift Cards", value: giftcardsMetodo, trend: false },
           { label: "Addi", value: addi, trend: false },
         ],
       };
@@ -1344,7 +1462,7 @@ export default function CierreCajaPage() {
       totales[key] = Number(((totales[key] || 0) + amount).toFixed(2));
     };
 
-    for (const ingreso of ingresos) {
+    for (const ingreso of ingresosConGiftcards) {
       accumulate(ingreso.metodo_pago, ingreso.monto || 0);
     }
 
@@ -1360,8 +1478,9 @@ export default function CierreCajaPage() {
     const tarjetas = sumMethods(["tarjeta_credito", "tarjeta_debito", "tarjeta", "pos"]);
     const transferencias = sumMethods(["transferencia", "link_de_pago"]);
     const creditoEmpleados = sumMethods(["credito_empleados", "abonos"]);
+    const giftcardsMetodo = sumMethods(["giftcard"]);
     const addi = sumMethods(["addi"]);
-    const total = efectivo + tarjetas + transferencias + creditoEmpleados + addi;
+    const total = efectivo + tarjetas + transferencias + creditoEmpleados + addi + giftcardsMetodo;
 
     return {
       izquierda: [
@@ -1374,10 +1493,11 @@ export default function CierreCajaPage() {
         { label: "Tarjeta", value: tarjetas, trend: true },
         { label: "Transferencias", value: transferencias, trend: true },
         { label: "Crédito empleados", value: creditoEmpleados, trend: false },
+        { label: "Gift Cards", value: giftcardsMetodo, trend: false },
         { label: "Addi", value: addi, trend: false },
       ],
     };
-  }, [egresos, ingresos, reportePeriodo]);
+  }, [egresos, ingresosConGiftcards, reportePeriodo]);
 
   const reporteResumen = useMemo(() => {
     if (!reportePeriodo) return null;
@@ -1626,7 +1746,9 @@ export default function CierreCajaPage() {
                   <CardContent className="space-y-2 p-4">
                     <p className="text-sm text-[#656271]">Dinero recibido hoy</p>
                     <p className="text-4xl font-semibold text-[#2e2d35]">
-                      {loadingResumen ? "..." : formatMoney(resumen.ingresos || 0)}
+                      {loadingIngresos || loadingGiftcards
+                        ? "..."
+                        : formatMoney(ingresosConGiftcardsTotal)}
                     </p>
                   </CardContent>
                 </Card>
@@ -2097,6 +2219,7 @@ export default function CierreCajaPage() {
                           <th className="px-3 py-2">Fecha</th>
                           <th className="px-3 py-2">Tipo</th>
                           <th className="px-3 py-2">Concepto</th>
+                          <th className="px-3 py-2">Motivo edición</th>
                           <th className="px-3 py-2">Medio</th>
                           <th className="px-3 py-2 text-right">Monto</th>
                           <th className="px-3 py-2 text-right">Efectivo esperado</th>
@@ -2104,15 +2227,15 @@ export default function CierreCajaPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#ece9f2] text-[#3d3a46]">
-                        {loadingIngresos || loadingEgresos ? (
+                        {loadingIngresos || loadingEgresos || loadingGiftcards ? (
                           <tr>
-                            <td colSpan={7} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={8} className="px-3 py-6 text-center text-sm text-[#6b6878]">
                               Cargando movimientos...
                             </td>
                           </tr>
                         ) : movimientosConSaldo.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={8} className="px-3 py-6 text-center text-sm text-[#6b6878]">
                               No hay movimientos registrados para el día.
                             </td>
                           </tr>
@@ -2143,6 +2266,15 @@ export default function CierreCajaPage() {
                                 </div>
                               </td>
                               <td className="px-3 py-2">{movimiento.detalle}</td>
+                              <td className="px-3 py-2 text-xs text-[#555261]">
+                                {movimiento.motivoEdicion ? (
+                                  <span className="inline-flex max-w-[220px] items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800">
+                                    {movimiento.motivoEdicion}
+                                  </span>
+                                ) : (
+                                  <span className="text-[#9c98aa]">—</span>
+                                )}
+                              </td>
                               <td className="px-3 py-2">{movimiento.medio}</td>
                               <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
                                 {formatSignedMoney(movimiento.monto)}
@@ -2151,7 +2283,7 @@ export default function CierreCajaPage() {
                                 {formatMoney(movimiento.saldo_esperado)}
                               </td>
                               <td className="px-3 py-2 text-right">
-                                {canEditMovimientos ? (
+                                {canEditMovimientos && movimiento.editable !== false ? (
                                   <button
                                     type="button"
                                     onClick={() =>

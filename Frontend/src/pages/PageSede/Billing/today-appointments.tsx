@@ -112,23 +112,50 @@ const getAppointmentTimestamp = (appointment: Appointment): number => {
 }
 
 const getEstadoColor = (estado: string) => {
-  const estadoLower = estado.toLowerCase()
+  const estadoLower = (estado || "").toLowerCase()
 
-  if (estadoLower === "finalizado" || estadoLower === "finalizada") {
+  if (estadoLower.includes("cancel")) {
     return {
-      bg: "bg-green-100",
-      text: "text-green-800",
-      border: "border-green-200",
-      label: "Finalizado",
+      bg: "bg-red-100",
+      text: "text-red-700",
+      border: "border-red-200",
+      label: "Cancelado",
     }
   }
 
-  if (estadoLower === "completado" || estadoLower === "completada") {
+  if (estadoLower.includes("factur")) {
     return {
       bg: "bg-gray-100",
       text: "text-gray-800",
       border: "border-gray-300",
-      label: "Completada",
+      label: "Facturado",
+    }
+  }
+
+  if (["finalizado", "finalizada", "completado", "completada", "terminado", "terminada", "realizado", "realizada"].some(flag => estadoLower.includes(flag))) {
+    return {
+      bg: "bg-orange-100",
+      text: "text-orange-800",
+      border: "border-orange-200",
+      label: "Finalizado",
+    }
+  }
+
+  if (estadoLower.includes("no asist")) {
+    return {
+      bg: "bg-yellow-100",
+      text: "text-yellow-800",
+      border: "border-yellow-200",
+      label: "No asistió",
+    }
+  }
+
+  if (["confirmada", "confirmado", "agendada", "agendado", "reservada", "reservado", "pendiente", "en proceso", "en_proceso", "proceso"].some(flag => estadoLower.includes(flag))) {
+    return {
+      bg: "bg-green-100",
+      text: "text-green-700",
+      border: "border-green-200",
+      label: "Agendada / Confirmada",
     }
   }
 
@@ -136,7 +163,7 @@ const getEstadoColor = (estado: string) => {
     bg: "bg-gray-100",
     text: "text-gray-800",
     border: "border-gray-200",
-    label: estado,
+    label: estado || "Estado",
   }
 }
 

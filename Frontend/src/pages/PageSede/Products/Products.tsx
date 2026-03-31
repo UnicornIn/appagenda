@@ -589,12 +589,12 @@ export function ProductsList() {
                                     {canAdjustStock && (
                                       <Button
                                         variant="outline"
-                                        size="sm"
+                                        size="icon"
                                         onClick={() => iniciarEdicionStock(producto)}
-                                        className="gap-2"
+                                        className="h-9 w-9"
+                                        title="Editar inventario"
                                       >
                                         <Edit2 className="h-4 w-4" />
-                                        Actualizar inventario
                                       </Button>
                                     )}
                                   </div>

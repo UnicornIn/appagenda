@@ -344,12 +344,15 @@ export function SuperAdminGlobalDashboard({
     ];
   }, [activeCurrency, summaryMetrics]);
 
-  const multiCurrencyNote = useMemo(() => {
-    if (summaryMetrics.availableCurrencies.length <= 1) return null;
-    // TODO: Para consolidado real entre sedes multi-moneda, backend debe entregar montos
-    // normalizados a una moneda base o un agregado convertido por tipo de cambio.
-    return `Vista principal en ${activeCurrency}. Para consolidar múltiples monedas en una sola escala, frontend necesita montos normalizados desde backend.`;
-  }, [activeCurrency, summaryMetrics.availableCurrencies.length]);
+  const filteredNotices = useMemo(() => {
+    return (rawData?.notices || []).filter(
+      (notice) =>
+        !/moneda/i.test(notice) &&
+        !/monedas/i.test(notice) &&
+        !/escala/i.test(notice) &&
+        !/normaliz/i.test(notice)
+    );
+  }, [rawData?.notices]);
 
   if (coreLoading && !requestedOnceRef.current) {
     return (
@@ -396,21 +399,15 @@ export function SuperAdminGlobalDashboard({
         </Badge>
       </div>
 
-      {rawData?.notices?.length ? (
+      {filteredNotices.length ? (
         <Card className="border border-amber-200 bg-amber-50/50">
           <CardContent className="space-y-2 py-4">
-            {rawData.notices.map((notice) => (
+            {filteredNotices.map((notice) => (
               <p key={notice} className="text-sm text-amber-900">
                 {notice}
               </p>
             ))}
           </CardContent>
-        </Card>
-      ) : null}
-
-      {multiCurrencyNote ? (
-        <Card className="border border-gray-200 bg-gray-50">
-          <CardContent className="py-4 text-sm text-gray-600">{multiCurrencyNote}</CardContent>
         </Card>
       ) : null}
 

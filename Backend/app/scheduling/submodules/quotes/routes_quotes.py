@@ -978,13 +978,6 @@ async def crear_cita(
                 <div class="footer-links">
                     <a href="#">Políticas de privacidad</a>
                     <a href="#">Términos de servicio</a>
-                    <a href="#">Contacto</a>
-                </div>
-                <div class="social-icons">
-                    <a href="#" class="social-icon">FB</a>
-                    <a href="#" class="social-icon">IG</a>
-                    <a href="#" class="social-icon">TW</a>
-                    <a href="#" class="social-icon">WA</a>
                 </div>
                 <p style="margin-top: 20px; font-size: 12px; opacity: 0.7;">
                     Este es un correo automático, por favor no responder.
@@ -994,6 +987,22 @@ async def crear_cita(
     </body>
     </html>
     """
+    # 1. Formatear la fecha a "Día Mes" (ej: 24 Marzo)
+    meses_es = [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    ]
+
+    fecha_dt = datetime.strptime(fecha_str, "%Y-%m-%d")
+    fecha_limpia = f"{fecha_dt.day} {meses_es[fecha_dt.month - 1]}"
+
+    # 2. Formatear la hora a "12h Am/Pm" (ej: 11 Am o 3 Pm)
+    hora_dt = datetime.strptime(cita.hora_inicio, "%H:%M")
+    # %I es hora 12h, %p es AM/PM. Usamos replace para que quede como "Am/Pm"
+    hora_limpia = hora_dt.strftime("%I %p").lstrip("0").replace("AM", "Am").replace("PM", "Pm")
+
+    # 3. Crear el nuevo asunto con el "chulito verde"
+    asunto_limpio = f"Confirmamos tu cita. Para el {fecha_limpia} {hora_limpia}"
 
     # === enviar emails ===
     cliente_email = cliente.get("email") or cliente.get("correo")
@@ -1001,7 +1010,7 @@ async def crear_cita(
         try:
             enviar_correo(
                 cliente_email, 
-                f"✅ Confirmación de cita - {fecha_str} {cita.hora_inicio}", 
+                asunto_limpio,
                 mensaje_html
             )
             print(f"📧 Email enviado a cliente: {cliente_email}")

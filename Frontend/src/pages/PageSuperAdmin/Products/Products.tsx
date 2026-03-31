@@ -43,7 +43,8 @@ export function ProductsList() {
   const [ventasError, setVentasError] = useState<string | null>(null)
   const [productSalesRows, setProductSalesRows] = useState<ProductSalesRow[]>([])
   const [ventasCurrency, setVentasCurrency] = useState<string>("COP")
-  const [selectedDashboardSede, setSelectedDashboardSede] = useState<string>("")
+  // Default a "all" para que el filtro inicial muestre todas las sedes
+  const [selectedDashboardSede, setSelectedDashboardSede] = useState<string>("all")
   const [multiSedeSales, setMultiSedeSales] = useState<Record<string, ProductSalesRow[]>>({})
   const [multiSedeCurrency, setMultiSedeCurrency] = useState<Record<string, string>>({})
   const [countrySales, setCountrySales] = useState<Record<string, ProductSalesRow[]>>({})
@@ -83,6 +84,7 @@ export function ProductsList() {
 
   // Usar el AuthContext en lugar de sessionStorage
   const { user, isAuthenticated, isLoading: authLoading, activeSedeId } = useAuth()
+  const isSuperAdmin = (user?.role || "").toString().toLowerCase().includes("super")
 
   // Obtener datos de la sede desde el AuthContext
   // También mantenemos compatibilidad con sessionStorage como fallback
@@ -710,21 +712,46 @@ export function ProductsList() {
   const showCountryView = selectedDashboardSede === "all" && countryKeys.length > 0
   const productCards = useMemo(
     () =>
-      productos.map((p) => ({
-        id: p.producto_id || p._id,
-        nombre: p.nombre || p.producto_nombre || "Producto",
-        categoria: p.categoria,
-        codigo: p.producto_codigo,
-        stock: p.stock_actual,
-        stockMinimo: p.stock_minimo,
-        updatedAt: p.fecha_ultima_actualizacion,
-        price: productPrices[p.producto_id || p._id]?.price,
-        priceCurrency: productPrices[p.producto_id || p._id]?.currency || ventasCurrency,
-      })),
-    [productos, productPrices, ventasCurrency]
+      {
+        const base = productos.map((p) => ({
+          id: p.producto_id || p._id,
+          nombre: p.nombre || p.producto_nombre || "Producto",
+          categoria: p.categoria,
+          codigo: p.producto_codigo,
+          stock: p.stock_actual,
+          stockMinimo: p.stock_minimo,
+          updatedAt: p.fecha_ultima_actualizacion,
+          price: productPrices[p.producto_id || p._id]?.price,
+          priceCurrency: productPrices[p.producto_id || p._id]?.currency || ventasCurrency,
+        }))
+
+        if (!isSuperAdmin) return base
+
+        const existingIds = new Set(base.map((p) => p.id))
+        const extras = productosCatalogo
+          .filter((prod) => prod.id && !existingIds.has(prod.id))
+          .map((prod) => ({
+            id: prod.id,
+            nombre: prod.nombre || "Producto",
+            categoria: prod.codigo ? `Código: ${prod.codigo}` : undefined,
+            codigo: prod.codigo,
+            stock: 0,
+            stockMinimo: 0,
+            price: productPrices[prod.id]?.price,
+            priceCurrency: productPrices[prod.id]?.currency || ventasCurrency,
+          }))
+
+        return [...base, ...extras]
+      },
+    [productos, productosCatalogo, productPrices, ventasCurrency, isSuperAdmin]
   )
 
   useEffect(() => {
+    // Evitar llamadas que generan CORS en entornos locales con preview API
+    if (typeof window !== "undefined" && window.location.origin.includes("localhost") && API_BASE_URL.includes("previewapi.rizosfelices.co")) {
+      return
+    }
+
     const fetchPrices = async () => {
       const token = resolveToken()
       const moneda = ventasCurrency || user?.moneda || "COP"
@@ -986,139 +1013,160 @@ export function ProductsList() {
             setIsCreateModalOpen(true)
           }}
         >
-          <DialogContent className="sm:max-w-md bg-white border-gray-200 text-gray-900">
-            <DialogHeader>
-              <DialogTitle>Crear producto en inventario</DialogTitle>
-              <DialogDescription>
-                Registra el inventario inicial de un producto en una sede.
-              </DialogDescription>
-            </DialogHeader>
+          <DialogContent className="w-full max-w-6xl lg:max-w-[1100px] max-h-[90vh] overflow-y-auto bg-white border-gray-200 text-gray-900 px-4 sm:px-6">
+            <div className="grid gap-5 lg:grid-cols-[300px,1fr] xl:grid-cols-[320px,1fr]">
+              <div className="space-y-4">
+                <DialogHeader className="p-0">
+                  <DialogTitle>Configuración de inventario</DialogTitle>
+                  <DialogDescription>
+                    Registra el inventario inicial o ajusta el mínimo de alertas para la sede seleccionada.
+                  </DialogDescription>
+                </DialogHeader>
 
-            <div className="space-y-4">
-              {isLoadingCreateData && (
-                <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Cargando productos y sedes...
+                {isLoadingCreateData && (
+                  <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Cargando productos y sedes...
+                  </div>
+                )}
+
+                {modalDataError && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                    {modalDataError}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700" htmlFor="producto-id">
+                    Producto
+                  </label>
+                  {productosCatalogo.length > 0 ? (
+                    <Select
+                      value={nuevoProductoId}
+                      onValueChange={setNuevoProductoId}
+                      disabled={isCreatingInventario || isLoadingCreateData}
+                    >
+                      <SelectTrigger id="producto-id" className="bg-white border-gray-300 text-gray-900">
+                        <SelectValue placeholder="Selecciona un producto" />
+                      </SelectTrigger>
+                      <SelectContent className="z-[60] bg-white border-gray-200 text-gray-900">
+                        {productosCatalogo.map((producto) => (
+                          <SelectItem className="text-gray-900 focus:bg-gray-100 focus:text-gray-900" key={producto.id} value={producto.id}>
+                            {producto.nombre}{producto.codigo ? ` (${producto.codigo})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      id="producto-id"
+                      placeholder="Ej: P001"
+                      value={nuevoProductoId}
+                      onChange={(e) => setNuevoProductoId(e.target.value)}
+                      disabled={isCreatingInventario || isLoadingCreateData}
+                      className="bg-white"
+                    />
+                  )}
                 </div>
-              )}
 
-              {modalDataError && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                  {modalDataError}
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700" htmlFor="producto-id">
-                  Producto
-                </label>
-                {productosCatalogo.length > 0 ? (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700" htmlFor="sede-id">
+                    Sede
+                  </label>
                   <Select
-                    value={nuevoProductoId}
-                    onValueChange={setNuevoProductoId}
-                    disabled={isCreatingInventario || isLoadingCreateData}
+                    value={nuevoSedeId}
+                    onValueChange={setNuevoSedeId}
+                    disabled={isCreatingInventario || isLoadingCreateData || sedesDisponibles.length === 0}
                   >
-                    <SelectTrigger id="producto-id" className="bg-white border-gray-300 text-gray-900">
-                      <SelectValue placeholder="Selecciona un producto" />
+                    <SelectTrigger id="sede-id" className="bg-white border-gray-300 text-gray-900">
+                      <SelectValue placeholder="Selecciona una sede" />
                     </SelectTrigger>
                     <SelectContent className="z-[60] bg-white border-gray-200 text-gray-900">
-                      {productosCatalogo.map((producto) => (
-                        <SelectItem className="text-gray-900 focus:bg-gray-100 focus:text-gray-900" key={producto.id} value={producto.id}>
-                          {producto.nombre}{producto.codigo ? ` (${producto.codigo})` : ""}
+                      {sedesDisponibles.map((sede) => (
+                        <SelectItem className="text-gray-900 focus:bg-gray-100 focus:text-gray-900" key={sede._id} value={sede.sede_id}>
+                          {sede.nombre}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                ) : (
-                  <Input
-                    id="producto-id"
-                    placeholder="Ej: P001"
-                    value={nuevoProductoId}
-                    onChange={(e) => setNuevoProductoId(e.target.value)}
-                    disabled={isCreatingInventario || isLoadingCreateData}
-                    className="bg-white"
-                  />
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700" htmlFor="sede-id">
-                  Sede
-                </label>
-                <Select
-                  value={nuevoSedeId}
-                  onValueChange={setNuevoSedeId}
-                  disabled={isCreatingInventario || isLoadingCreateData || sedesDisponibles.length === 0}
-                >
-                  <SelectTrigger id="sede-id" className="bg-white border-gray-300 text-gray-900">
-                    <SelectValue placeholder="Selecciona una sede" />
-                  </SelectTrigger>
-                  <SelectContent className="z-[60] bg-white border-gray-200 text-gray-900">
-                    {sedesDisponibles.map((sede) => (
-                      <SelectItem className="text-gray-900 focus:bg-gray-100 focus:text-gray-900" key={sede._id} value={sede.sede_id}>
-                        {sede.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700" htmlFor="stock-inicial">
-                    Stock inicial
-                  </label>
-                  <Input
-                    id="stock-inicial"
-                    type="number"
-                    min="0"
-                    value={nuevoStockInicial}
-                    onChange={(e) => setNuevoStockInicial(e.target.value)}
-                    disabled={isCreatingInventario}
-                    className="bg-white"
-                  />
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700" htmlFor="stock-minimo">
-                    Stock mínimo
-                  </label>
-                  <Input
-                    id="stock-minimo"
-                    type="number"
-                    min="0"
-                    value={nuevoStockMinimo}
-                    onChange={(e) => setNuevoStockMinimo(e.target.value)}
-                    disabled={isCreatingInventario}
-                    className="bg-white"
-                  />
-          </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700" htmlFor="stock-inicial">
+                      Stock inicial
+                    </label>
+                    <Input
+                      id="stock-inicial"
+                      type="number"
+                      min="0"
+                      value={nuevoStockInicial}
+                      onChange={(e) => setNuevoStockInicial(e.target.value)}
+                      disabled={isCreatingInventario}
+                      className="bg-white"
+                    />
+                  </div>
 
-          {selectedDashboardSede !== "all" && (
-            <div className="mt-10">
-              <div className="flex items-center justify-between mb-3">
-                <div />
-                <Button
-                  variant="default"
-                  className="bg-gray-900 text-white hover:bg-gray-800"
-                  onClick={() => {
-                    setCreateProductError(null)
-                    setCreateProductSuccess(null)
-                    setIsCreateProductModalOpen(true)
-                  }}
-                >
-                  Crear producto
-                </Button>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700" htmlFor="stock-minimo">
+                      Stock mínimo
+                    </label>
+                    <Input
+                      id="stock-minimo"
+                      type="number"
+                      min="0"
+                      value={nuevoStockMinimo}
+                      onChange={(e) => setNuevoStockMinimo(e.target.value)}
+                      disabled={isCreatingInventario}
+                      className="bg-white"
+                    />
+                  </div>
+                </div>
+
+                {createError && (
+                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {createError}
+                  </div>
+                )}
+
+                <DialogFooter className="pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={cerrarModalCreacion}
+                    disabled={isCreatingInventario}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={crearInventario}
+                    disabled={isCreatingInventario || isLoadingCreateData || !nuevoProductoId || !nuevoSedeId}
+                    className="gap-2 bg-gray-900 text-white hover:bg-gray-800"
+                  >
+                    {isCreatingInventario && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Guardar
+                  </Button>
+                </DialogFooter>
               </div>
-              <ProductCardsGrid
-                title=""
-                products={productCards}
-                loading={isLoading}
-                onEditProduct={(id) => openEditModal(id)}
-              />
+
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <h3 className="text-base font-semibold text-gray-900">Inventario de la sede</h3>
+                  <p className="text-sm text-gray-600">
+                    Ajusta mínimos y stock existente. Usa el lápiz para editar cada producto.
+                  </p>
+                </div>
+                <ProductCardsGrid
+                  title=""
+                  products={productCards}
+                  loading={isLoading}
+                  onEditProduct={(id) => openEditModal(id)}
+                />
+              </div>
             </div>
-          )}
-        </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={Boolean(editingProductId)} onOpenChange={(open) => !open && setEditingProductId(null)}>
           <DialogContent className="sm:max-w-md bg-white border-gray-200">
@@ -1238,37 +1286,7 @@ export function ProductsList() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-
-              {createError && (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {createError}
-                </div>
-              )}
-            </div>
-
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={cerrarModalCreacion}
-                disabled={isCreatingInventario}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                onClick={crearInventario}
-                disabled={isCreatingInventario || isLoadingCreateData || !nuevoProductoId || !nuevoSedeId}
-                className="gap-2 bg-gray-900 text-white hover:bg-gray-800"
-              >
-                {isCreatingInventario && <Loader2 className="h-4 w-4 animate-spin" />}
-                Guardar
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
     </div>
   )
 }
-

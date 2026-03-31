@@ -41,6 +41,7 @@ MAPEO_METODOS_PAGO = {
     "transferencia_bancaria"                : "transferencia",
     "abonos"                                : "abonos",
     "link_de_pago"                          : "link_de_pago",
+    "link_pago"                             : "link_de_pago",
     "addi"                                  : "addi",
     "giftcard"                              : "giftcard",
     "cheque"                                : "otros",
@@ -76,6 +77,7 @@ def _metodos_pago_base() -> Dict[str, float]:
         "addi": 0,
         "abonos": 0,
         "otros": 0,
+        "descuento_por_nomina": 0,
     }
 
 
@@ -689,15 +691,83 @@ async def calcular_ingresos_por_metodo_pago(
                 metodos[metodo_norm] = 0
             metodos[metodo_norm] += monto
 
-    abonos_valor = metodos.pop("abonos", 0)  # sacar del dict principal
+    # ❌ ELIMINAR estas líneas al final de calcular_ingresos_por_metodo_pago
+    abonos_valor = metodos.pop("abonos", 0)
     metodos["abonos_informativos"] = abonos_valor
 
+    # ✅ REEMPLAZAR por esto — query que filtra por TIPO, no por método
+    pipeline_abonos = [
+        {
+            "$match": {
+                "sede_id": sede_id,
+                "historial_pagos": {"$exists": True, "$ne": []},
+                "$or": [
+                    {"estado_factura": {"$exists": False}},
+                    {"estado_factura": {"$ne": "facturado"}}
+                ]
+            }
+        },
+        {"$unwind": "$historial_pagos"},
+        {
+            "$match": {
+                "historial_pagos.tipo": "abono_inicial",
+                "historial_pagos.fecha": {
+                    "$gte": fecha_inicio,
+                    "$lte": fecha_fin
+                }
+            }
+        },
+        {
+            "$group": {
+                "_id": None,
+                "total": {"$sum": "$historial_pagos.monto"}
+            }
+        }
+    ]
+
+    total_abonos = 0
+    resultado_abonos = await appointments.aggregate(pipeline_abonos, allowDiskUse=True).to_list(None)
+    if resultado_abonos:
+        total_abonos += resultado_abonos[0]["total"]
+
+    # Lo mismo para sales
+    pipeline_abonos_sales = [
+        {
+            "$match": {
+                "sede_id": sede_id,
+                "historial_pagos": {"$exists": True, "$ne": []}
+            }
+        },
+        {"$unwind": "$historial_pagos"},
+        {
+            "$match": {
+                "historial_pagos.tipo": "abono_inicial",
+                "historial_pagos.fecha": {
+                    "$gte": fecha_inicio,
+                    "$lte": fecha_fin
+                }
+            }
+        },
+        {
+            "$group": {
+                "_id": None,
+                "total": {"$sum": "$historial_pagos.monto"}
+            }
+        }
+    ]
+
+    resultado_abonos_sales = await sales.aggregate(pipeline_abonos_sales, allowDiskUse=True).to_list(None)
+    if resultado_abonos_sales:
+        total_abonos += resultado_abonos_sales[0]["total"]
+
+    metodos["abonos_informativos"] = total_abonos
+
+    # total_general NO cambia — los abonos ya están sumados en su método real
     metodos["total_general"] = sum(
         monto for key, monto in metodos.items()
         if key not in ("total_general", "abonos_informativos")
     )
     return metodos
-
 
 async def calcular_egresos_efectivo(
     sede_id: str,
@@ -1153,16 +1223,17 @@ async def calcular_resumen_dia(
         "efectivo_inicial": efectivo_inicial,
         "ingresos_efectivo": ingresos_info,
         "ingresos_otros_metodos": {
-            "tarjeta_credito": ingresos_discriminados.get("tarjeta_credito", 0),
-            "tarjeta_debito" : ingresos_discriminados.get("tarjeta_debito",  0),
-            "abonos"         : ingresos_discriminados.get("abonos",          0),
-            "link_de_pago"   : ingresos_discriminados.get("link_de_pago",    0),
-            "giftcard"       : ingresos_discriminados.get("giftcard",        0),
-            "addi"           : ingresos_discriminados.get("addi",            0),
-            "pos"            : ingresos_discriminados.get("pos",             0),
-            "transferencia"  : ingresos_discriminados.get("transferencia",   0),
-            "otros"          : ingresos_discriminados.get("otros",           0),
-            "total"          : (
+            "tarjeta_credito"      : ingresos_discriminados.get("tarjeta_credito", 0),
+            "tarjeta_debito"       : ingresos_discriminados.get("tarjeta_debito",  0),
+            "abonos"               : ingresos_discriminados.get("abonos_informativos", 0),
+            "link_de_pago"         : ingresos_discriminados.get("link_de_pago",    0),
+            "giftcard"             : ingresos_discriminados.get("giftcard",        0),
+            "addi"                 : ingresos_discriminados.get("addi",            0),
+            "pos"                  : ingresos_discriminados.get("pos",             0),
+            "transferencia"        : ingresos_discriminados.get("transferencia",   0),
+            "descuento_por_nomina" : ingresos_discriminados.get("descuento_por_nomina", 0),
+            "otros"                : ingresos_discriminados.get("otros",           0),
+            "total"                : (
                 ingresos_discriminados.get("total_general", 0)
                 - ingresos_discriminados.get("efectivo", 0)
             )

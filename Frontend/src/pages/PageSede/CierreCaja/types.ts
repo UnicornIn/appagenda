@@ -23,6 +23,8 @@ export type CashIngreso = {
   sede_id?: string;
   monto: number;
   motivo: string;
+  // Algunos endpoints devuelven "concepto" como sinónimo de motivo
+  concepto?: string;
   tipo?: string;
   metodo_pago?: string;
   fecha: string;

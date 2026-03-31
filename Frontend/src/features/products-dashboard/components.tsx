@@ -5,7 +5,6 @@ import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Badge } from "../../components/ui/badge";
-import { Separator } from "../../components/ui/separator";
 import { Button as UiButton } from "../../components/ui/button";
 import { Pencil } from "lucide-react";
 import {
@@ -337,60 +336,74 @@ export const ProductCardsGrid: React.FC<ProductCardsGridProps> = ({
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {products.map((prod) => (
-          <Card key={prod.id} className="border-gray-200 p-4 bg-white hover:shadow-sm transition-shadow">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-900 truncate">{prod.nombre}</p>
-                {prod.categoria && (
-                  <p className="text-xs text-gray-600 truncate">{prod.categoria}</p>
-                )}
-              </div>
-              {prod.stock !== undefined && (
-                <Badge variant="outline" className="text-xs">
-                  Stock: {prod.stock}
-                </Badge>
-              )}
-            </div>
+      <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        {products.map((prod) => {
+          const bajoStock =
+            prod.stock !== undefined &&
+            prod.stockMinimo !== undefined &&
+            prod.stock <= prod.stockMinimo
+          const statusLabel = bajoStock ? "Bajo stock" : "Activo"
 
-            <div className="mt-3 space-y-1 text-xs text-gray-700">
-              {prod.stockMinimo !== undefined && (
-                <p className="text-gray-600">Mínimo: {prod.stockMinimo}</p>
-              )}
+          return (
+            <Card
+              key={prod.id}
+              className="border-gray-200 bg-white hover:shadow-sm transition-shadow rounded-2xl p-3 flex flex-col gap-2 min-h-[120px]"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 break-words leading-tight max-h-[3.6em] line-clamp-2">
+                    {prod.nombre}
+                  </p>
+                  {prod.categoria && (
+                    <p className="text-[11px] text-gray-600 truncate">{prod.categoria}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1 text-[12px] text-gray-700">
+                <div className="flex flex-col">
+                  <span className="text-gray-500">Mínimo:</span>
+                  <span className="font-medium text-gray-800">{prod.stockMinimo ?? "-"}</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-gray-500">Estado:</span>
+                  <span className={`font-semibold ${bajoStock ? "text-amber-600" : "text-emerald-700"}`}>
+                    {statusLabel}
+                  </span>
+                </div>
+              </div>
+
               {prod.price !== undefined && (
-                <p className="text-gray-800 font-medium">
+                <div className="text-[12px] font-medium text-gray-900">
                   {formatCurrencyNoDecimals(
                     prod.price,
                     resolveCurrencyLocale(prod.priceCurrency || "COP", "es-CO")
                   )}{" "}
                   {prod.priceCurrency || ""}
-                </p>
+                </div>
               )}
-            </div>
 
-            <Separator className="my-3" />
-
-            <div className="flex items-center justify-between text-xs text-gray-600">
-              <span className="font-medium text-gray-800">
-                {prod.stock !== undefined && prod.stockMinimo !== undefined && prod.stock <= prod.stockMinimo
-                  ? "Bajo stock"
-                  : "Activo"}
-              </span>
-              {onEditProduct && (
-                <UiButton
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-gray-700 hover:text-gray-900"
-                  onClick={() => onEditProduct(prod.id)}
-                >
-                  <Pencil className="h-4 w-4" />
-                  <span className="sr-only">Editar</span>
-                </UiButton>
-              )}
-            </div>
-          </Card>
-        ))}
+              <div className="flex items-center justify-start gap-2 pt-1">
+                {prod.stock !== undefined && (
+                  <Badge variant="outline" className="text-[11px] bg-gray-50 text-gray-800 border-gray-200 whitespace-nowrap">
+                    Stock: {prod.stock}
+                  </Badge>
+                )}
+                {onEditProduct && (
+                  <UiButton
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-gray-700 hover:text-gray-900"
+                    onClick={() => onEditProduct(prod.id)}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    <span className="sr-only">Editar</span>
+                  </UiButton>
+                )}
+              </div>
+            </Card>
+          )
+        })}
       </div>
     </div>
   );

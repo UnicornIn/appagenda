@@ -6,7 +6,6 @@ import { Bloqueo, deleteBloqueo } from '../../../components/Quotes/bloqueosApi';
 import { useState } from "react";
 import BloqueosModal from "../../../components/Quotes/Bloqueos";
 import BottomSheet from "../../../components/ui/bottom-sheet";
-import { API_BASE_URL } from "../../../types/config";
 
 interface AppointmentsListProps {
   appointments: Cita[];
@@ -71,11 +70,6 @@ export function AppointmentsList({
   const [bloqueoEditando, setBloqueoEditando] = useState<Bloqueo | null>(null);
   const [mostrarModalEdicion, setMostrarModalEdicion] = useState(false);
   const [eliminando, setEliminando] = useState(false);
-  const [notaAbierta, setNotaAbierta] = useState<string | null>(null);
-  const [notaTitulo, setNotaTitulo] = useState<string>("");
-  const [notaLoadingId, setNotaLoadingId] = useState<string | null>(null);
-  const [notaCache, setNotaCache] = useState<Record<string, string>>({});
-
   const getAuthToken = () => {
     return localStorage.getItem('access_token') || 
            sessionStorage.getItem('access_token') || 
@@ -142,57 +136,72 @@ export function AppointmentsList({
   const getEstadoCita = (cita: Cita) => {
     if (cita.estado) {
       const estadoNormalizado = cita.estado.toLowerCase().trim();
-      
+
       switch (estadoNormalizado) {
-        case "pendiente":
-        case "reservada":
-        case "reservada/pendiente":
-        case "confirmada":
-          return { 
-            estado: cita.estado,
-            color: "text-gray-700", 
-            icon: Clock,
-            borderColor: "border-gray-300"
-          };
-        
-        case "en proceso":
-        case "en_proceso":
-        case "en curso":
-          return { 
-            estado: "En Proceso", 
-            color: "text-gray-800", 
-            icon: PlayCircle,
-            borderColor: "border-gray-400"
-          };
-        
         case "cancelada":
         case "cancelado":
-          return { 
-            estado: "Cancelada", 
-            color: "text-red-700", 
+          return {
+            estado: "Cancelada",
+            color: "text-red-700",
             icon: X,
-            borderColor: "border-red-300 bg-red-50"
+            borderColor: "border-red-200 bg-red-50"
           };
-        
+
+        case "facturada":
+        case "facturado":
+          return {
+            estado: "Facturada",
+            color: "text-gray-700",
+            icon: Tag,
+            borderColor: "border-gray-200 bg-gray-50"
+          };
+
         case "no asistio":
         case "no_asistio":
         case "no asistió":
-          return { 
-            estado: "No Asistió", 
-            color: "text-gray-500", 
+          return {
+            estado: "No Asistió",
+            color: "text-yellow-700",
             icon: UserX,
-            borderColor: "border-gray-300"
+            borderColor: "border-yellow-200 bg-yellow-50"
           };
-        
+
         case "finalizada":
         case "finalizado":
         case "completada":
         case "completado":
-          return { 
-            estado: "Finalizada", 
-            color: "text-gray-700", 
+        case "terminada":
+        case "terminado":
+        case "realizada":
+        case "realizado":
+          return {
+            estado: "Finalizada",
+            color: "text-orange-700",
             icon: CheckCircle,
-            borderColor: "border-gray-400"
+            borderColor: "border-orange-200 bg-orange-50"
+          };
+
+        case "en proceso":
+        case "en_proceso":
+        case "en curso":
+          return {
+            estado: "En proceso",
+            color: "text-green-800",
+            icon: PlayCircle,
+            borderColor: "border-green-200 bg-green-50"
+          };
+
+        case "pendiente":
+        case "reservada":
+        case "reservada/pendiente":
+        case "confirmada":
+        case "agendada":
+        case "agendado":
+          return {
+            estado: "Agendada/Confirmada",
+            color: "text-green-700",
+            icon: Clock,
+            borderColor: "border-green-200 bg-green-50"
           };
       }
     }
@@ -212,32 +221,32 @@ export function AppointmentsList({
       
       if (ahora < inicioCita) {
         return { 
-          estado: "Pendiente", 
-          color: "text-gray-700", 
+          estado: "Agendada/Confirmada", 
+          color: "text-green-700", 
           icon: Clock,
-          borderColor: "border-gray-300"
+          borderColor: "border-green-200 bg-green-50"
         };
       } else if (ahora >= inicioCita && ahora <= finCita) {
         return { 
-          estado: "En Proceso", 
-          color: "text-gray-800", 
+          estado: "En proceso", 
+          color: "text-green-800", 
           icon: PlayCircle,
-          borderColor: "border-gray-400"
+          borderColor: "border-green-200 bg-green-50"
         };
       } else {
         return { 
           estado: "Finalizada", 
-          color: "text-gray-700", 
+          color: "text-orange-700", 
           icon: CheckCircle,
-          borderColor: "border-gray-400"
+          borderColor: "border-orange-200 bg-orange-50"
         };
       }
     } catch (error) {
       return { 
-        estado: "Pendiente", 
-        color: "text-gray-700", 
+        estado: "Agendada/Confirmada", 
+        color: "text-green-700", 
         icon: Clock,
-        borderColor: "border-gray-300"
+        borderColor: "border-green-200 bg-green-50"
       };
     }
   };
@@ -311,7 +320,7 @@ export function AppointmentsList({
             (appointment as any).observaciones ||
             "";
           const baseNota = baseNotaRaw?.toString().trim();
-          const notaCita = baseNota || notaCache[appointment.cita_id || "" ] || "";
+          const notaCita = baseNota || "";
           
           // 🔥 CAMBIO CRÍTICO: Usar helper para obtener TODOS los servicios
           const nombresServicios = obtenerNombresServicios(appointment);
@@ -380,72 +389,15 @@ export function AppointmentsList({
                     )}
                   </div>
 
-                  {notaCita && (
-                    <div className="mb-2 flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-700">
-                      <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <FileText className="mt-[1px] h-3.5 w-3.5 text-gray-500 shrink-0" />
-                        <div className="min-w-0 truncate">
-                          <span className="font-semibold text-gray-800">Nota call center: </span>
-                          <span className="truncate align-middle">{notaCita}</span>
-                        </div>
+                  {notaCita ? (
+                    <div className="mb-2 flex items-start gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                      <FileText className="mt-[1px] h-3.5 w-3.5 text-gray-500 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-800">Nota call center</p>
+                        <p className="whitespace-pre-wrap break-words text-xs text-gray-700">{notaCita}</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const titulo = `${nombreCliente} ${apellidoCliente}`.trim() || "Nota de cita";
-                          setNotaTitulo(titulo);
-
-                          if (!notaCita) {
-                            const citaKey = appointment.cita_id || "";
-                            if (!citaKey) return;
-                            if (notaLoadingId === citaKey) return;
-                            try {
-                              setNotaLoadingId(citaKey);
-                              const token =
-                                localStorage.getItem("access_token") ||
-                                sessionStorage.getItem("access_token") ||
-                                "";
-                              if (!token) throw new Error("Sin token");
-
-                              const resp = await fetch(
-                                `${API_BASE_URL}scheduling/quotes/${citaKey}`,
-                                {
-                                  headers: {
-                                    Authorization: `Bearer ${token}`,
-                                    Accept: "application/json",
-                                  },
-                                }
-                              );
-                              if (!resp.ok) throw new Error(`Error ${resp.status}`);
-                              const payload = await resp.json();
-                              const notaRemota =
-                                payload?.comentario ||
-                                payload?.notas ||
-                                payload?.nota ||
-                                payload?.observaciones ||
-                                "";
-                              const notaFinal = notaRemota?.toString().trim() || "";
-                              if (notaFinal) {
-                                setNotaCache((prev) => ({ ...prev, [citaKey]: notaFinal }));
-                                setNotaAbierta(notaFinal);
-                                return;
-                              }
-                            } catch (error) {
-                              console.warn("No se pudo cargar nota remota:", error);
-                            } finally {
-                              setNotaLoadingId(null);
-                            }
-                          }
-
-                          setNotaAbierta(notaCita || "Sin nota disponible");
-                        }}
-                        className="shrink-0 rounded-lg border border-gray-200 px-2 py-1 text-[11px] font-semibold text-gray-800 hover:bg-white active:scale-[0.98] disabled:opacity-60"
-                        disabled={notaLoadingId === appointment.cita_id}
-                      >
-                        {notaLoadingId === appointment.cita_id ? "Cargando..." : "Ver"}
-                      </button>
                     </div>
-                  )}
+                  ) : null}
                   
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div
@@ -541,22 +493,6 @@ export function AppointmentsList({
           }}
         />
       )}
-    </BottomSheet>
-
-    <BottomSheet
-      open={Boolean(notaAbierta)}
-      onClose={() => setNotaAbierta(null)}
-      title={notaTitulo || "Nota de la cita"}
-    >
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-800">
-          <FileText className="h-4 w-4 text-gray-600" />
-          <span className="font-semibold">Notas de la cita</span>
-        </div>
-        <p className="whitespace-pre-line break-words rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm text-gray-800">
-          {notaAbierta}
-        </p>
-      </div>
     </BottomSheet>
     </>
   );

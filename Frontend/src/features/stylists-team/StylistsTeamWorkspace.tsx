@@ -27,7 +27,6 @@ import type { Estilista, CreateEstilistaData } from "../../types/estilista";
 import type { SystemUser } from "../../types/system-user";
 import { formatSedeNombre } from "../../lib/sede";
 import { formatCurrencyNoDecimals, getStoredCurrency } from "../../lib/currency";
-import { parseDateToDate, toLocalYMD } from "../../lib/dateFormat";
 import {
   buildCategoryCommissionPayload,
   resolveCategoryCommissionEntries,
@@ -497,33 +496,18 @@ export function StylistsTeamWorkspace({
 
   const primarySelectedSedeId = selectedSedeIds[0] ?? "";
 
-  const monthlyRange = useMemo(() => {
-    const target =
-      parseDateToDate(dateRange.end) ||
-      parseDateToDate(dateRange.start) ||
-      new Date();
-
-    const monthStart = new Date(target.getFullYear(), target.getMonth(), 1);
-    const monthEnd = new Date(target);
-    const today = new Date();
-
-    const isCurrentMonth =
-      monthStart.getFullYear() === today.getFullYear() &&
-      monthStart.getMonth() === today.getMonth();
-
-    const effectiveEnd =
-      isCurrentMonth && monthEnd > today ? today : monthEnd;
-
-    return {
-      start: toLocalYMD(monthStart),
-      end: toLocalYMD(effectiveEnd),
-    };
-  }, [dateRange.end, dateRange.start]);
+  const performanceRange = useMemo(
+    () => ({
+      start: dateRange.start,
+      end: dateRange.end,
+    }),
+    [dateRange.end, dateRange.start],
+  );
 
   const performanceCacheKey = useMemo(
     () =>
-      `${isAllSedesSelected ? "ALL" : selectedSedeIds[0] ?? "NONE"}:${monthlyRange.start}:${monthlyRange.end}`,
-    [isAllSedesSelected, monthlyRange.end, monthlyRange.start, selectedSedeIds],
+      `${isAllSedesSelected ? "ALL" : selectedSedeIds[0] ?? "NONE"}:${performanceRange.start}:${performanceRange.end}`,
+    [isAllSedesSelected, performanceRange.end, performanceRange.start, selectedSedeIds],
   );
 
   const selectedSede = useMemo(
@@ -735,8 +719,8 @@ export function StylistsTeamWorkspace({
       return `${formatDateRangeSelectValue(performancePeriod.desde)} - ${formatDateRangeSelectValue(performancePeriod.hasta)}`;
     }
 
-    return `${formatDateRangeSelectValue(monthlyRange.start)} - ${formatDateRangeSelectValue(monthlyRange.end)}`;
-  }, [monthlyRange.end, monthlyRange.start, performancePeriod?.desde, performancePeriod?.hasta]);
+    return `${formatDateRangeSelectValue(performanceRange.start)} - ${formatDateRangeSelectValue(performanceRange.end)}`;
+  }, [performanceRange.end, performanceRange.start, performancePeriod?.desde, performancePeriod?.hasta]);
 
   const initializeEditorState = useCallback(
     (stylist: Estilista | null, mode: "create" | "edit" = "edit") => {
@@ -964,12 +948,12 @@ export function StylistsTeamWorkspace({
     setPerformanceError(null);
 
     try {
-      const response = await fetchPerformanceAnalytics({
-        token,
-        sedeId: sedeForRequest,
-        fechaDesde: monthlyRange.start,
-        fechaHasta: monthlyRange.end,
-      });
+        const response = await fetchPerformanceAnalytics({
+          token,
+          sedeId: sedeForRequest,
+          fechaDesde: performanceRange.start,
+          fechaHasta: performanceRange.end,
+        });
 
       const rows = Array.isArray(response.profesionales) ? response.profesionales : [];
       const period = response.periodo ?? null;
@@ -998,9 +982,9 @@ export function StylistsTeamWorkspace({
     }
   }, [
     isAllSedesSelected,
-    monthlyRange.end,
-    monthlyRange.start,
     performanceCacheKey,
+    performanceRange.end,
+    performanceRange.start,
     selectedSedeIds,
     token,
   ]);
