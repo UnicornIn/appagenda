@@ -5,15 +5,18 @@ import { Button } from "../../../components/ui/button"
 import {
   User, Scissors, Clock, X, Calendar, FileText, History,
   CheckCircle, Eye, Mail, Phone, IdCard, ShoppingCart, Plus,
-  DollarSign, Trash2
+  DollarSign, Trash2, Send
 } from "lucide-react"
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { API_BASE_URL } from "../../../types/config"
 import { ProductCatalogModal } from "./ProductCatalogModal"
 import { Badge } from "../../../components/ui/badge"
 import { formatSedeNombre } from "../../../lib/sede"
 import { formatDateDMY } from "../../../lib/dateFormat"
 import { handleFacturarRequest, type FacturarTipo } from "./facturarApi"
+import { emitElectronicInvoice, extractElectronicTargets } from "../../../lib/electronic-invoice"
+import { resolveAllegraGate } from "../../../lib/allegra-fe"
+import { useAuth } from "../../../components/Auth/AuthContext"
 
 // En service-protocol.tsx - REEMPLAZA toda tu interfaz Producto con esto:
 interface Producto {
@@ -141,6 +144,11 @@ export function ServiceProtocol({
   onClose,
   onAppointmentUpdated
 }: ServiceProtocolProps) {
+  const { user, activeSedeId } = useAuth()
+  const [lastFacturarResult, setLastFacturarResult] = useState<any>(null)
+  const [feStatus, setFeStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
+  const [feMessage, setFeMessage] = useState<string | null>(null)
+  const reloadTimeoutRef = useRef<number | null>(null)
   const [fichasCliente, setFichasCliente] = useState<FichaCliente[]>([])
   const [loadingFichas, setLoadingFichas] = useState(false)
   const [errorFichas, setErrorFichas] = useState<string | null>(null)
@@ -151,9 +159,37 @@ export function ServiceProtocol({
   const [selectedProducts, setSelectedProducts] = useState<Producto[]>([])
   const [productsQuantities, setProductsQuantities] = useState<Record<string, number>>({})
   const [isFacturando, setIsFacturando] = useState(false)
+
+  const activeSedeNombre =
+    (typeof window !== "undefined"
+      ? sessionStorage.getItem("beaux-nombre_local") || localStorage.getItem("beaux-nombre_local")
+      : null) || user?.nombre_local || ""
+
+  const allegraGate = useMemo(
+    () => resolveAllegraGate({ sedeId: activeSedeId, sedeNombre: activeSedeNombre }),
+    [activeSedeId, activeSedeNombre]
+  )
+  const allegraEnabled = allegraGate.allowed
+
+  const feTarget = useMemo(() => {
+    const fromLast = extractElectronicTargets(lastFacturarResult)
+    const fromAppointment = extractElectronicTargets(selectedAppointment as any)
+    return {
+      saleId: fromLast.saleId || fromAppointment.saleId,
+      invoiceId: fromLast.invoiceId || fromAppointment.invoiceId,
+    }
+  }, [lastFacturarResult, selectedAppointment])
+
+  const hasFeTarget = Boolean(feTarget.saleId || feTarget.invoiceId)
   const isPagoPendiente = selectedAppointment?.estado_pago === 'pendiente'
   const isPagoPagado = selectedAppointment?.estado_pago === 'pagado'
   const showCitaCompletadaInfo = selectedAppointment?.estado === 'completada' || selectedAppointment?.estado === 'completado'
+
+  useEffect(() => {
+    setFeStatus("idle")
+    setFeMessage(null)
+    setLastFacturarResult(null)
+  }, [selectedAppointment?._id])
 
   // Cargar fichas del cliente cuando se selecciona una cita
   useEffect(() => {
@@ -449,6 +485,13 @@ export function ServiceProtocol({
   }) => {
     try {
       setIsFacturando(true)
+      setFeStatus("idle")
+      setFeMessage(null)
+
+      if (reloadTimeoutRef.current) {
+        clearTimeout(reloadTimeoutRef.current)
+        reloadTimeoutRef.current = null
+      }
 
       const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token')
 
@@ -506,6 +549,8 @@ export function ServiceProtocol({
         total_final: calculateAppointmentTotal(),
       })
 
+      setLastFacturarResult(result)
+
       // Mostrar éxito
       alert(`✅ Facturación exitosa!\n\n` +
         `📋 Cita marcada como pagada\n` +
@@ -530,7 +575,7 @@ export function ServiceProtocol({
       }
 
       // ESPERAR 3 SEGUNDOS Y RECARGAR LA PÁGINA
-      setTimeout(() => {
+      reloadTimeoutRef.current = window.setTimeout(() => {
         window.location.reload();
       }, 3000);
 
@@ -539,6 +584,48 @@ export function ServiceProtocol({
       alert(`❌ Error al facturar: ${error instanceof Error ? error.message : 'Error desconocido'}`)
     } finally {
       setIsFacturando(false)
+    }
+  }
+
+  const handleSendFe = async () => {
+    if (!allegraEnabled) return
+
+    if (!hasFeTarget) {
+      setFeStatus("error")
+      setFeMessage("Falta sale_id o invoice_id de la venta para enviar FE. Solicita al backend devolverlos al facturar.")
+      return
+    }
+
+    const token = user?.access_token
+    if (!token) {
+      setFeStatus("error")
+      setFeMessage("No hay token de autenticación para FE")
+      return
+    }
+
+    if (reloadTimeoutRef.current) {
+      clearTimeout(reloadTimeoutRef.current)
+      reloadTimeoutRef.current = null
+    }
+
+    try {
+      setFeStatus("loading")
+      setFeMessage(null)
+      const result = await emitElectronicInvoice({
+        saleId: feTarget.saleId,
+        invoiceId: feTarget.invoiceId,
+        token,
+        sedeId: activeSedeId,
+      })
+      setFeStatus("success")
+      setFeMessage(result.message)
+    } catch (error) {
+      setFeStatus("error")
+      setFeMessage(
+        error instanceof Error
+          ? error.message
+          : "No fue posible enviar la factura electrónica"
+      )
     }
   }
 
@@ -993,24 +1080,84 @@ export function ServiceProtocol({
                     </div>
                   </div>
 
-                  <Button
-                    className="w-full bg-black text-white hover:bg-gray-800"
-                    size="lg"
-                    onClick={handleFacturarCita}
-                    disabled={isFacturando}
-                  >
-                    {isFacturando ? (
-                      <>
-                        <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                        Facturando...
-                      </>
-                    ) : (
-                      <>
-                        <DollarSign className="h-4 w-4 mr-2" />
-                        {`Facturar ${selectedProducts.length > 0 ? 'Servicio + Productos' : 'Servicio'}`}
-                      </>
+                  <div className="space-y-3">
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1 bg-black text-white hover:bg-gray-800"
+                        size="lg"
+                        onClick={handleFacturarCita}
+                        disabled={isFacturando}
+                      >
+                        {isFacturando ? (
+                          <>
+                            <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                            Facturando...
+                          </>
+                        ) : (
+                          <>
+                            <DollarSign className="h-4 w-4 mr-2" />
+                            {`Facturar ${selectedProducts.length > 0 ? 'Servicio + Productos' : 'Servicio'}`}
+                          </>
+                        )}
+                      </Button>
+
+                      <Button
+                        className="flex-1 border border-gray-300 text-gray-800 hover:bg-gray-200"
+                        size="lg"
+                        variant="outline"
+                        onClick={handleSendFe}
+                        title={
+                          !allegraEnabled
+                            ? "Disponible solo para sede El Poblado"
+                            : !hasFeTarget
+                              ? "Falta sale_id/invoice_id para enviar FE"
+                              : "Enviar Factura Electrónica"
+                        }
+                        disabled={
+                          isFacturando ||
+                          feStatus === "loading" ||
+                          !allegraEnabled ||
+                          !hasFeTarget
+                        }
+                      >
+                        {feStatus === "loading" ? (
+                          <>
+                            <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-gray-600 border-t-transparent" />
+                            FE...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="h-4 w-4 mr-2" />
+                            FE
+                          </>
+                        )}
+                      </Button>
+                    </div>
+
+                    {feStatus === "success" && (
+                      <p className="text-sm text-green-700">
+                        {feMessage || "Factura electrónica enviada"}
+                      </p>
                     )}
-                  </Button>
+
+                    {feStatus === "error" && (
+                      <p className="text-sm text-red-600">
+                        {feMessage || "No fue posible enviar la factura electrónica"}
+                      </p>
+                    )}
+
+                    {!allegraEnabled && (
+                      <p className="text-xs text-gray-600">
+                        Solo disponible en sede El Poblado
+                      </p>
+                    )}
+
+                    {allegraEnabled && !hasFeTarget && (
+                      <p className="text-xs text-gray-600">
+                        Backend debe devolver sale_id o invoice_id para enviar FE.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (

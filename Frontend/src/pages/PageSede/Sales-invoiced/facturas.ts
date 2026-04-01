@@ -36,6 +36,11 @@ export interface FacturaAPI {
   total_pagado?: number | string | null;
   pagado?: number | string | null;
   valor_total?: number | string | null;
+  factura_electronica_estado?: string;
+  factura_electronica_id?: string;
+  electronic_invoice_status?: string;
+  electronic_invoice_id?: string;
+  electronic_invoice_url?: string;
 }
 
 export interface ItemFactura {
@@ -103,6 +108,7 @@ export interface FacturaConverted {
   fecha_pago: string;
   local: string;
   sede_id: string;
+  venta_id?: string;
   moneda: string;
   tipo_comision: string;
   cliente_id: string;
@@ -124,6 +130,8 @@ export interface FacturaConverted {
   items?: ItemFactura[];
   historial_pagos?: HistorialPago[];
   desglose_pagos?: DesglosePagos;
+  electronic_invoice_status?: string;
+  electronic_invoice_id?: string;
 }
 
 export class FacturaService {
@@ -705,7 +713,16 @@ export class FacturaService {
       estado: estado,
       items: factura.items || [],
       historial_pagos: historial,
-      desglose_pagos: factura.desglose_pagos
+      desglose_pagos: factura.desglose_pagos,
+      venta_id: factura._id || "",
+      electronic_invoice_status:
+        factura.electronic_invoice_status ||
+        factura.factura_electronica_estado ||
+        "",
+      electronic_invoice_id:
+        factura.electronic_invoice_id ||
+        factura.factura_electronica_id ||
+        "",
     };
   }
 

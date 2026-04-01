@@ -155,6 +155,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   const [isLoadingSellers, setIsLoadingSellers] = useState(false);
   const [sellersError, setSellersError] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(DEFAULT_PAYMENT_METHOD);
+  const [deliveryCostInput, setDeliveryCostInput] = useState("0");
   const [giftCardCode, setGiftCardCode] = useState("");
   const [paymentBreakdown, setPaymentBreakdown] = useState<Record<PaymentBreakdownMethod, number>>(
     buildEmptyPaymentBreakdown()
@@ -200,6 +201,14 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     () => cartItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [cartItems]
   );
+  const deliveryCost = useMemo(() => {
+    const parsed = Number.parseFloat(deliveryCostInput);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return 0;
+    }
+    return roundMoney(parsed);
+  }, [deliveryCostInput]);
+  const finalTotal = useMemo(() => roundMoney(cartTotal + deliveryCost), [cartTotal, deliveryCost]);
   const availablePaymentMethodOptions = useMemo(
     () => ALL_PAYMENT_METHOD_OPTIONS.filter((option) => isCopCurrency || option.value !== "addi"),
     [isCopCurrency]
@@ -219,7 +228,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     [availablePaymentBreakdownMethods, paymentBreakdown]
   );
   const hasCustomPaymentBreakdown = paymentBreakdownTotal > 0;
-  const paymentBreakdownDelta = roundMoney(cartTotal - paymentBreakdownTotal);
+  const paymentBreakdownDelta = roundMoney(finalTotal - paymentBreakdownTotal);
   const paymentBreakdownOverpaid = hasCustomPaymentBreakdown && paymentBreakdownDelta < -0.009;
   const paymentBreakdownIncomplete = hasCustomPaymentBreakdown && paymentBreakdownDelta > 0.009;
   const hasGiftCardInBreakdown = (paymentBreakdown.giftcard || 0) > 0;
@@ -280,6 +289,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     setIsLoadingSellers(false);
     setSellersError(null);
     setPaymentMethod(DEFAULT_PAYMENT_METHOD);
+    setDeliveryCostInput("0");
     setGiftCardCode("");
     setPaymentBreakdown(buildEmptyPaymentBreakdown());
     setSaleId(null);
@@ -519,7 +529,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
 
   const calculateProductsTotal = (): number => roundMoney(cartTotal);
 
-  const calculateFinalTotal = (): number => roundMoney(cartTotal);
+  const calculateFinalTotal = (): number => roundMoney(cartTotal + deliveryCost);
 
   const handleFacturar = async ({
     id,
@@ -713,6 +723,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
         await deleteAllDirectSaleProducts(token, saleId);
       }
       setCartByProductId({});
+      setDeliveryCostInput("0");
       setSaleId(null);
       setSuccess("Venta limpiada correctamente.");
     } catch (error) {
@@ -750,7 +761,8 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     const created = await createDirectSale({
       token,
       sedeId,
-      total: cartTotal,
+      total: calculateFinalTotal(),
+      deliveryCost,
       paymentMethod: safeInitialPaymentMethod,
       giftCardCode: safeInitialPaymentMethod === "giftcard" ? codigoGiftcard : undefined,
       items: toSaleLineItems(),
@@ -815,7 +827,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
               amount: roundMoney(paymentBreakdown[method] || 0),
             }))
             .filter((payment) => payment.amount > 0)
-        : [{ method: safeMainMethod, amount: roundMoney(cartTotal) }];
+        : [{ method: safeMainMethod, amount: roundMoney(finalTotal) }];
 
       if (plannedPayments.length === 0) {
         setError("Define al menos un pago para continuar.");
@@ -823,12 +835,12 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
       }
 
       const plannedTotal = roundMoney(plannedPayments.reduce((sum, payment) => sum + payment.amount, 0));
-      if (plannedTotal > roundMoney(cartTotal) + 0.009) {
-        setError(`El total de pagos (${formatCurrency(plannedTotal)}) no puede superar la venta (${formatCurrency(cartTotal)}).`);
+      if (plannedTotal > roundMoney(finalTotal) + 0.009) {
+        setError(`El total de pagos (${formatCurrency(plannedTotal)}) no puede superar la venta (${formatCurrency(finalTotal)}).`);
         return;
       }
-      if (plannedTotal < roundMoney(cartTotal) - 0.009) {
-        setError(`Falta asignar ${formatCurrency(roundMoney(cartTotal - plannedTotal))} para completar la venta.`);
+      if (plannedTotal < roundMoney(finalTotal) - 0.009) {
+        setError(`Falta asignar ${formatCurrency(roundMoney(finalTotal - plannedTotal))} para completar la venta.`);
         return;
       }
 
@@ -1299,11 +1311,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                 <ShoppingCart className="h-5 w-5" />
                 Resumen de venta
               </h3>
-              {saleId ? (
-                <p className="mt-1 text-xs text-gray-600">Venta creada: {saleId}</p>
-              ) : (
-                <p className="mt-1 text-xs text-gray-600">Aún no se ha creado la venta en backend.</p>
-              )}
+              {saleId ? <p className="mt-1 text-xs text-gray-600">Venta creada: {saleId}</p> : null}
             </div>
 
             <div className="p-4">
@@ -1391,9 +1399,37 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
             </div>
 
             <div className="border-t border-gray-200 bg-white p-4">
-              <div className="mb-4 flex items-center justify-between">
-                <p className="text-sm text-gray-700">Total</p>
-                <p className="text-2xl font-bold text-gray-900">{formatCurrency(cartTotal)}</p>
+              <div className="mb-4">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600">
+                  Costo de domicilio (opcional)
+                </label>
+                <div className="mt-1 flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={deliveryCostInput}
+                    onChange={(event) => setDeliveryCostInput(event.target.value)}
+                    disabled={isBusy || isCatalogLocked}
+                    className="h-9 w-36"
+                  />
+                  <p className="text-xs text-gray-500">Se suma al total y se factura.</p>
+                </div>
+              </div>
+
+              <div className="mb-4 space-y-2">
+                <div className="flex items-center justify-between text-sm text-gray-700">
+                  <span>Subtotal productos</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(cartTotal)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm text-gray-700">
+                  <span>Domicilio</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(deliveryCost)}</span>
+                </div>
+                <div className="flex items-center justify-between pt-2">
+                  <p className="text-sm font-semibold text-gray-800">Total a cobrar</p>
+                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(finalTotal)}</p>
+                </div>
               </div>
 
               <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">

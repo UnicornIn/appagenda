@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type MouseEvent } from "react"
 import {
   Search,
   Loader2,
@@ -9,6 +9,9 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Send,
+  Check,
+  AlertCircle,
 } from "lucide-react"
 import { Button } from "../../../components/ui/button"
 import { Input } from "../../../components/ui/input"
@@ -23,6 +26,9 @@ import {
   calculatePaymentMethodTotals,
   type PaymentMethodTotals,
 } from "../../../lib/payment-methods-summary"
+import { useAuth } from "../../../components/Auth/AuthContext"
+import { emitElectronicInvoice } from "../../../lib/electronic-invoice"
+import { resolveAllegraGate } from "../../../lib/allegra-fe"
 
 type BillingPeriod = "today" | "last_7_days" | "last_30_days" | "month" | "custom"
 
@@ -145,6 +151,7 @@ const buildClientPagination = (page: number, pageSize: number, total: number) =>
 }
 
 export function VentasFacturadasList() {
+  const { user, activeSedeId } = useAuth()
   const defaultDateRange = useMemo(() => getDefaultCustomDateRange(), [])
   const [searchTerm, setSearchTerm] = useState("")
   const [period, setPeriod] = useState<BillingPeriod>(DEFAULT_BILLING_PERIOD)
@@ -162,6 +169,21 @@ export function VentasFacturadasList() {
   const [appliedFilters, setAppliedFilters] = useState<FacturaFilters>(EMPTY_FACTURA_FILTERS)
   const [limit] = useState(50)
   const [paymentSummary, setPaymentSummary] = useState<PaymentMethodTotals | null>(null)
+  const [feStatusById, setFeStatusById] = useState<
+    Record<string, { status: "idle" | "loading" | "success" | "error"; message?: string }>
+  >({})
+
+  const activeSedeNombre =
+    (typeof window !== "undefined"
+      ? sessionStorage.getItem("beaux-nombre_local") || localStorage.getItem("beaux-nombre_local")
+      : null) || user?.nombre_local || ""
+
+  const allegraGate = useMemo(
+    () => resolveAllegraGate({ sedeId: activeSedeId, sedeNombre: activeSedeNombre }),
+    [activeSedeId, activeSedeNombre]
+  )
+  const allegraEnabled = allegraGate.allowed
+  const authToken = user?.access_token
 
   const buildFilters = (
     nextSearchTerm: string,
@@ -403,6 +425,69 @@ export function VentasFacturadasList() {
     const safeCurrency = (currency || "COP").toUpperCase()
     const safeAmount = Number.isFinite(amount) ? amount : 0
     return `${safeCurrency} ${Math.round(safeAmount).toLocaleString(getCurrencyLocale(safeCurrency))}`
+  }
+
+  const updateFeStatus = (
+    key: string,
+    next: { status: "idle" | "loading" | "success" | "error"; message?: string }
+  ) => {
+    setFeStatusById((prev) => ({ ...prev, [key]: next }))
+  }
+
+  const handleSendFe = async (event: MouseEvent, factura: Factura) => {
+    event.stopPropagation()
+
+    const saleId = (factura as any).venta_id || (factura as any)._id || null
+    const invoiceId = (factura as any).factura_id || null
+    const statusKey = saleId || invoiceId || factura.identificador
+
+    if (!statusKey) return
+
+    if (!allegraEnabled) {
+      updateFeStatus(statusKey, {
+        status: "error",
+        message: allegraGate.reason || "FE disponible solo en sede El Poblado",
+      })
+      return
+    }
+
+    if (!saleId && !invoiceId) {
+      updateFeStatus(statusKey, {
+        status: "error",
+        message: "Falta sale_id o factura_id para enviar FE",
+      })
+      return
+    }
+
+    if (!authToken) {
+      updateFeStatus(statusKey, {
+        status: "error",
+        message: "No hay token de autenticación",
+      })
+      return
+    }
+
+    try {
+      updateFeStatus(statusKey, { status: "loading" })
+      const result = await emitElectronicInvoice({
+        saleId,
+        invoiceId,
+        token: authToken,
+        sedeId: activeSedeId,
+      })
+      updateFeStatus(statusKey, {
+        status: "success",
+        message: result.message,
+      })
+    } catch (error) {
+      updateFeStatus(statusKey, {
+        status: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "No fue posible enviar la factura electrónica",
+      })
+    }
   }
 
   const getStatusBadgeClass = (estado: string) => {
@@ -733,13 +818,14 @@ export function VentasFacturadasList() {
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">N° Comprobante</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Método pago</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Total</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">FE</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Estado</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {facturas.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                      <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
                         No se encontraron facturas con los filtros aplicados.
                       </td>
                     </tr>
@@ -760,6 +846,80 @@ export function VentasFacturadasList() {
                         <td className="px-6 py-4 text-sm text-gray-700 capitalize">{factura.metodo_pago}</td>
                         <td className="px-6 py-4 text-sm font-semibold text-gray-900">
                           {formatCurrency(factura.total, factura.moneda)}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-700">
+                          {(() => {
+                            const saleId = (factura as any).venta_id || (factura as any)._id || null
+                            const invoiceId = (factura as any).factura_id || null
+                            const statusKey = saleId || invoiceId || factura.identificador
+                            const feState = feStatusById[statusKey]?.status || "idle"
+                            const feMessage = feStatusById[statusKey]?.message
+                            const disabled =
+                              isLoading ||
+                              feState === "loading" ||
+                              !allegraEnabled ||
+                              (!saleId && !invoiceId)
+
+                            return (
+                              <div className="space-y-1">
+                                <Button
+                                  size="sm"
+                                  variant={feState === "success" ? "default" : "outline"}
+                                  className={`h-8 px-3 ${
+                                    feState === "success" ? "bg-green-600 hover:bg-green-700 text-white" : ""
+                                  }`}
+                                  disabled={disabled}
+                                  onClick={(event) => void handleSendFe(event, factura)}
+                                  title={
+                                    !allegraEnabled
+                                      ? allegraGate.reason || "Solo sede El Poblado"
+                                      : !saleId && !invoiceId
+                                        ? "Falta sale_id o factura_id"
+                                        : "Enviar factura electrónica"
+                                  }
+                                >
+                                  {feState === "loading" ? (
+                                    <>
+                                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                      Enviando...
+                                    </>
+                                  ) : feState === "success" ? (
+                                    <>
+                                      <Check className="mr-1.5 h-3.5 w-3.5" />
+                                      Enviada
+                                    </>
+                                  ) : feState === "error" ? (
+                                    <>
+                                      <AlertCircle className="mr-1.5 h-3.5 w-3.5" />
+                                      Reintentar
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Send className="mr-1.5 h-3.5 w-3.5" />
+                                      FE
+                                    </>
+                                  )}
+                                </Button>
+
+                                {!allegraEnabled && (
+                                  <p className="text-[11px] text-gray-500">
+                                    Solo disponible en sede El Poblado
+                                  </p>
+                                )}
+                                {allegraEnabled && !saleId && !invoiceId && (
+                                  <p className="text-[11px] text-gray-500">
+                                    Falta sale_id o factura_id
+                                  </p>
+                                )}
+                                {feState === "error" && feMessage && (
+                                  <p className="text-[11px] text-red-600">{feMessage}</p>
+                                )}
+                                {feState === "success" && feMessage && (
+                                  <p className="text-[11px] text-green-700">{feMessage}</p>
+                                )}
+                              </div>
+                            )
+                          })()}
                         </td>
                         <td className="px-6 py-4">
                           <span
