@@ -8,15 +8,36 @@ import {
   Loader2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { useNavigate } from "react-router-dom";
 import StylistBottomNav from "../../../components/Layout/StylistBottomNav";
 import { useAuth } from "../../../components/Auth/AuthContext";
-import { formatDateDMY, formatLongDateEs, parseDateToDate, toLocalYMD } from "../../../lib/dateFormat";
-import { formatCurrencyNoDecimals, getStoredCurrency, resolveCurrencyLocale } from "../../../lib/currency";
+import {
+  formatDateDMY,
+  formatLongDateEs,
+  parseDateToDate,
+  toLocalYMD,
+} from "../../../lib/dateFormat";
+import {
+  formatCurrencyNoDecimals,
+  getStoredCurrency,
+  resolveCurrencyLocale,
+} from "../../../lib/currency";
 import { cn } from "../../../lib/utils";
 import { estilistaApi } from "../Appoinment/api";
-import { facturaService, type FacturaConverted, type ItemFactura } from "../../PageSede/Sales-invoiced/facturas";
+import {
+  facturaService,
+  type FacturaConverted,
+  type ItemFactura,
+} from "../../PageSede/Sales-invoiced/facturas";
 import { citasApi } from "../Appoinment/api";
 import { enumerateDateRange } from "../../../features/stylists-team/stylists-team.utils";
 
@@ -30,6 +51,7 @@ type CommissionRow = {
   valor: number;
   comision: number | null;
   moneda: string;
+  tipo: "service" | "product";
 };
 
 const getDefaultRange = (): DateRange => {
@@ -48,7 +70,11 @@ const getInvoiceEffectiveDate = (invoice: FacturaConverted) =>
 
 const isServiceItem = (item: ItemFactura) => {
   const tipo = String(item.tipo || "").toLowerCase();
-  return tipo.includes("servicio") || tipo.includes("service") || Boolean(item.servicio_id);
+  return (
+    tipo.includes("servicio") ||
+    tipo.includes("service") ||
+    Boolean(item.servicio_id)
+  );
 };
 
 // Compara solo por la fecha (YYYY-MM-DD) para evitar desfases por zona horaria.
@@ -72,7 +98,10 @@ const isWithinRange = (iso: string | undefined, range: DateRange) => {
 
 const getItemSubtotal = (item: ItemFactura): number => {
   if (typeof item.subtotal === "number") return item.subtotal;
-  if (typeof item.precio_unitario === "number" && typeof item.cantidad === "number") {
+  if (
+    typeof item.precio_unitario === "number" &&
+    typeof item.cantidad === "number"
+  ) {
     return item.precio_unitario * item.cantidad;
   }
   return Number(item.subtotal || 0);
@@ -85,16 +114,46 @@ const getCommissionValue = (item: ItemFactura): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const buildSummary = (items: CommissionRow[]) => {
+  const totalVentas = items.reduce((sum, row) => sum + (row.valor || 0), 0);
+  const totalComisiones = items.reduce(
+    (sum, row) => sum + (row.comision ?? 0),
+    0,
+  );
+  const clientes = new Set(
+    items.map((row) => row.cliente || row.id || "sin-cliente"),
+  ).size;
+
+  const servicesMap = new Map<string, number>();
+  items.forEach((row) => {
+    const name = row.servicio || "Item";
+    const prev = servicesMap.get(name) || 0;
+    servicesMap.set(name, prev + (row.valor || 0));
+  });
+
+  const chartData = Array.from(servicesMap.entries()).map(([name, value]) => ({
+    name,
+    value,
+  }));
+
+  const hasCommissionValues = items.some((row) => row.comision !== null);
+
+  return {
+    totalVentas,
+    totalComisiones,
+    totalClientes: clientes,
+    chartData,
+    hasCommissionValues,
+  };
+};
+
 const calcularPrecioCita = (cita: any): number => {
-  const direct =
-    cita.valor_total ||
-    cita.precio_total ||
-    cita.total ||
-    0;
+  const direct = cita.valor_total || cita.precio_total || cita.total || 0;
   if (direct > 1) return direct;
   if (Array.isArray(cita.servicios) && cita.servicios.length > 0) {
     return cita.servicios.reduce((sum: number, servicio: any) => {
-      const subtotal = servicio.subtotal ?? servicio.precio ?? servicio.precio_local ?? 0;
+      const subtotal =
+        servicio.subtotal ?? servicio.precio ?? servicio.precio_local ?? 0;
       return sum + subtotal;
     }, 0);
   }
@@ -102,11 +161,15 @@ const calcularPrecioCita = (cita: any): number => {
   return 0;
 };
 
-const buildRowsFromCitas = (citas: any[], fallbackCurrency: string): CommissionRow[] => {
+const buildRowsFromCitas = (
+  citas: any[],
+  fallbackCurrency: string,
+): CommissionRow[] => {
   return citas.map((cita) => {
-    const servicios = Array.isArray(cita.servicios) && cita.servicios.length > 0
-      ? cita.servicios.map((s: any) => s.nombre).join(", ")
-      : cita.servicio?.nombre || "Servicio";
+    const servicios =
+      Array.isArray(cita.servicios) && cita.servicios.length > 0
+        ? cita.servicios.map((s: any) => s.nombre).join(", ")
+        : cita.servicio?.nombre || "Servicio";
 
     const cliente =
       cita.cliente?.nombre || cita.cliente_nombre || cita.cliente?.apellido
@@ -121,6 +184,7 @@ const buildRowsFromCitas = (citas: any[], fallbackCurrency: string): CommissionR
       valor: calcularPrecioCita(cita),
       comision: null,
       moneda: cita.moneda || fallbackCurrency,
+      tipo: "service",
     };
   });
 };
@@ -130,25 +194,32 @@ export default function StylistReportsPage() {
   const { user, activeSedeId } = useAuth();
 
   const [range, setRange] = useState<DateRange>(getDefaultRange);
-  const [pendingRange, setPendingRange] = useState<DateRange>(getDefaultRange());
+  const [pendingRange, setPendingRange] =
+    useState<DateRange>(getDefaultRange());
   const [rangeOpen, setRangeOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [invoices, setInvoices] = useState<FacturaConverted[]>([]);
   const [professionalId, setProfessionalId] = useState<string>("");
-  const [stylistName, setStylistName] = useState<string>(user?.name || "Estilista");
-  const [stylistSubtitle, setStylistSubtitle] = useState<string>("Especialista");
+  const [stylistName, setStylistName] = useState<string>(
+    user?.name || "Estilista",
+  );
+  const [stylistSubtitle, setStylistSubtitle] =
+    useState<string>("Especialista");
   const [currencyOverride, setCurrencyOverride] = useState<string | null>(null);
   const [manualRows, setManualRows] = useState<CommissionRow[] | null>(null);
+  const [commissionTab, setCommissionTab] = useState<"services" | "products">(
+    "services",
+  );
 
   const resolvedCurrency = useMemo(
     () => currencyOverride || getStoredCurrency("COP"),
-    [currencyOverride]
+    [currencyOverride],
   );
   const resolvedLocale = useMemo(
     () => resolveCurrencyLocale(resolvedCurrency, "es-CO"),
-    [resolvedCurrency]
+    [resolvedCurrency],
   );
 
   // Resolver profesional_id y datos básicos del estilista
@@ -167,7 +238,10 @@ export default function StylistReportsPage() {
       }
 
       try {
-        const perfil = await estilistaApi.getMiPerfil(user.access_token, user.email);
+        const perfil = await estilistaApi.getMiPerfil(
+          user.access_token,
+          user.email,
+        );
         const estilistaData = perfil?.estilista as any;
         if (estilistaData?.nombre) {
           setStylistName(estilistaData.nombre);
@@ -223,12 +297,12 @@ export default function StylistReportsPage() {
       try {
         setLoading(true);
         setError(null);
-        const facturas = await facturaService.getVentasBySede(
+        const facturas = await facturaService.getVentasBySedeAllPages(
           sedeId,
-          1,
-          200,
           range.start,
-          range.end
+          range.end,
+          undefined,
+          { pageSize: 200 },
         );
         setInvoices(Array.isArray(facturas) ? facturas : []);
         setManualRows(null);
@@ -237,21 +311,32 @@ export default function StylistReportsPage() {
           setCurrencyOverride(firstCurrency.toUpperCase());
         }
       } catch (fetchError) {
-        console.error("Error cargando facturas para reportes de estilista:", fetchError);
+        console.error(
+          "Error cargando facturas para reportes de estilista:",
+          fetchError,
+        );
         const message =
-          fetchError instanceof Error ? fetchError.message : "No se pudieron cargar las ventas.";
+          fetchError instanceof Error
+            ? fetchError.message
+            : "No se pudieron cargar las ventas.";
         setError(message);
 
         // Fallback: intentar con citas del estilista (rol sí permitido)
         try {
           if (!user?.access_token) throw new Error("Sin token de sesión");
-          const dates = enumerateDateRange({ start: range.start, end: range.end });
+          const dates = enumerateDateRange({
+            start: range.start,
+            end: range.end,
+          });
           const citasByDay = await Promise.all(
             dates.map((fecha) =>
               citasApi
-                .getCitas({ estilista_id: professionalId, fecha }, user.access_token)
-                .catch(() => [])
-            )
+                .getCitas(
+                  { estilista_id: professionalId, fecha },
+                  user.access_token,
+                )
+                .catch(() => []),
+            ),
           );
           const citas = citasByDay.flat();
           const fallbackRows = buildRowsFromCitas(citas, resolvedCurrency);
@@ -266,14 +351,21 @@ export default function StylistReportsPage() {
     };
 
     loadInvoices();
-  }, [activeSedeId, professionalId, range.end, range.start, user?.sede_id, user?.sede_id_principal]);
+  }, [
+    activeSedeId,
+    professionalId,
+    range.end,
+    range.start,
+    user?.sede_id,
+    user?.sede_id_principal,
+  ]);
 
   const filteredInvoices = useMemo(
     () =>
       invoices.filter((invoice) =>
-        isWithinRange(getInvoiceEffectiveDate(invoice), range)
+        isWithinRange(getInvoiceEffectiveDate(invoice), range),
       ),
-    [invoices, range]
+    [invoices, range],
   );
 
   const filteredItems = useMemo(() => {
@@ -299,6 +391,7 @@ export default function StylistReportsPage() {
             valor: invoice.total || 0,
             comision: null,
             moneda: invoice.moneda,
+            tipo: "service",
           } as CommissionRow,
         ];
       }
@@ -322,68 +415,32 @@ export default function StylistReportsPage() {
             valor: getItemSubtotal(item),
             comision: getCommissionValue(item),
             moneda: item.moneda || invoice.moneda || resolvedCurrency,
-          })
+            tipo: isServiceItem(item) ? "service" : "product",
+          }),
         );
     });
   }, [filteredInvoices, manualRows, professionalId, range, resolvedCurrency]);
 
-  const summary = useMemo(() => {
-    const totalVentas = filteredItems.reduce((sum, row) => sum + (row.valor || 0), 0);
-    const totalComisiones = filteredItems.reduce(
-      (sum, row) => sum + (row.comision ?? 0),
-      0
-    );
-    const clientes = new Set(
-      filteredItems.map((row) => row.cliente || row.id || "sin-cliente")
-    ).size;
+  const serviceItems = useMemo(
+    () => filteredItems.filter((row) => row.tipo === "service"),
+    [filteredItems],
+  );
 
-    const serviciosMap = new Map<string, number>();
+  const productItems = useMemo(
+    () => filteredItems.filter((row) => row.tipo === "product"),
+    [filteredItems],
+  );
 
-    if (manualRows) {
-      manualRows.forEach((row) => {
-        const name = row.servicio || "Servicio";
-        const prev = serviciosMap.get(name) || 0;
-        serviciosMap.set(name, prev + (row.valor || 0));
-      });
-    } else {
-      filteredInvoices.forEach((invoice) => {
-        const items = Array.isArray(invoice.items) ? invoice.items : [];
-        const belongsToPro =
-          invoice.profesional_id &&
-          String(invoice.profesional_id).trim().toLowerCase() ===
-            String(professionalId).trim().toLowerCase();
-
-        items.forEach((item) => {
-          const proItem = item.profesional_id
-            ? String(item.profesional_id).trim().toLowerCase()
-            : "";
-          const matchesPro = proItem
-            ? proItem === String(professionalId).trim().toLowerCase()
-            : belongsToPro;
-          if (!matchesPro) return;
-          if (!isServiceItem(item)) return;
-          const name = item.nombre || "Servicio";
-          const prev = serviciosMap.get(name) || 0;
-          serviciosMap.set(name, prev + getItemSubtotal(item));
-        });
-      });
-    }
-
-    const services = Array.from(serviciosMap.entries()).map(([name, value]) => ({
-      name,
-      value,
-    }));
-
-    const hasCommissionValues = filteredItems.some((row) => row.comision !== null);
-
-    return {
-      totalVentas,
-      totalComisiones,
-      totalClientes: clientes,
-      services,
-      hasCommissionValues,
-    };
-  }, [filteredItems, filteredInvoices, manualRows, professionalId]);
+  const serviceSummary = useMemo(
+    () => buildSummary(serviceItems),
+    [serviceItems],
+  );
+  const productSummary = useMemo(
+    () => buildSummary(productItems),
+    [productItems],
+  );
+  const selectedSummary =
+    commissionTab === "services" ? serviceSummary : productSummary;
 
   const formatMoney = (value: number) =>
     formatCurrencyNoDecimals(value || 0, resolvedCurrency, resolvedLocale);
@@ -392,6 +449,20 @@ export default function StylistReportsPage() {
     !loading && filteredItems.length === 0 && !error
       ? "No encontramos ventas para este rango. Ajusta las fechas o verifica tus comisiones."
       : null;
+
+  const detailRows = commissionTab === "services" ? serviceItems : productItems;
+  const detailColumnLabel =
+    commissionTab === "services" ? "Servicio" : "Producto";
+  const detailTabEmptyState =
+    !loading && !error && filteredItems.length > 0 && detailRows.length === 0
+      ? commissionTab === "services"
+        ? "No hay comisiones de servicios en este rango."
+        : "No hay comisiones de productos en este rango."
+      : null;
+  const detailTotalComision = detailRows.reduce(
+    (sum, row) => sum + (row.comision ?? 0),
+    0,
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -422,7 +493,9 @@ export default function StylistReportsPage() {
                 .toUpperCase() || "RF"}
             </div>
             <div className="flex-1">
-              <p className="text-base font-semibold text-gray-900">{stylistName}</p>
+              <p className="text-base font-semibold text-gray-900">
+                {stylistName}
+              </p>
               <p className="text-sm text-gray-600">{stylistSubtitle}</p>
             </div>
           </section>
@@ -456,7 +529,7 @@ export default function StylistReportsPage() {
                 <ChevronDown
                   className={cn(
                     "h-4 w-4 text-gray-600 transition-transform",
-                    rangeOpen ? "rotate-180" : ""
+                    rangeOpen ? "rotate-180" : "",
                   )}
                 />
               </button>
@@ -471,7 +544,10 @@ export default function StylistReportsPage() {
                         value={pendingRange.start}
                         max={pendingRange.end || undefined}
                         onChange={(e) =>
-                          setPendingRange((current) => ({ ...current, start: e.target.value }))
+                          setPendingRange((current) => ({
+                            ...current,
+                            start: e.target.value,
+                          }))
                         }
                         className="h-10 w-40 rounded-lg border border-gray-200 px-2 text-sm"
                       />
@@ -483,7 +559,10 @@ export default function StylistReportsPage() {
                         value={pendingRange.end}
                         min={pendingRange.start || undefined}
                         onChange={(e) =>
-                          setPendingRange((current) => ({ ...current, end: e.target.value }))
+                          setPendingRange((current) => ({
+                            ...current,
+                            end: e.target.value,
+                          }))
                         }
                         className="h-10 w-40 rounded-lg border border-gray-200 px-2 text-sm"
                       />
@@ -520,44 +599,59 @@ export default function StylistReportsPage() {
               <div className="rounded-lg bg-white px-3 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
                 <p className="text-xs text-gray-500">Ventas totales</p>
                 <p className="text-lg font-semibold text-gray-900">
-                  {formatMoney(summary.totalVentas)}
+                  {formatMoney(selectedSummary.totalVentas)}
                 </p>
               </div>
               <div className="rounded-lg bg-white px-3 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
                 <p className="text-xs text-gray-500">Comisiones totales</p>
                 <p className="text-lg font-semibold text-gray-900">
-                  {formatMoney(summary.totalComisiones)}
+                  {formatMoney(selectedSummary.totalComisiones)}
                 </p>
               </div>
               <div className="rounded-lg bg-white px-3 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
                 <p className="text-xs text-gray-500">Clientes atendidos</p>
-                <p className="text-lg font-semibold text-gray-900">{summary.totalClientes}</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {selectedSummary.totalClientes}
+                </p>
               </div>
             </div>
 
             <div className="mt-4">
-              <p className="text-sm font-semibold text-gray-900">Ventas por servicios</p>
+              <p className="text-sm font-semibold text-gray-900">
+                {commissionTab === "services"
+                  ? "Ventas por servicios"
+                  : "Ventas por productos"}
+              </p>
               <div className="mt-2 h-48">
                 {loading ? (
                   <div className="flex h-full items-center justify-center">
                     <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
                   </div>
-                ) : summary.services.length === 0 ? (
+                ) : selectedSummary.chartData.length === 0 ? (
                   <div className="flex h-full items-center justify-center rounded-xl bg-gray-50 text-sm text-gray-500">
-                    Sin datos de servicios en este rango.
+                    {commissionTab === "services"
+                      ? "Sin datos de servicios en este rango."
+                      : "Sin datos de productos en este rango."}
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={summary.services}>
+                    <BarChart data={selectedSummary.chartData}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} />
                       <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${Math.round(v / 1000)}K`} />
+                      <YAxis
+                        tick={{ fontSize: 12 }}
+                        tickFormatter={(v) => `${Math.round(v / 1000)}K`}
+                      />
                       <Tooltip
                         cursor={{ fill: "rgba(0,0,0,0.04)" }}
                         formatter={(value: number) => formatMoney(value)}
                         labelFormatter={(label) => label}
                       />
-                      <Bar dataKey="value" fill="var(--color-chart-1, #111827)" radius={[6, 6, 0, 0]} />
+                      <Bar
+                        dataKey="value"
+                        fill="var(--color-chart-1, #111827)"
+                        radius={[6, 6, 0, 0]}
+                      />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -567,8 +661,10 @@ export default function StylistReportsPage() {
 
           <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
-              <p className="text-sm font-semibold text-gray-900">Detalle de Comisiones</p>
-              {!summary.hasCommissionValues && (
+              <p className="text-sm font-semibold text-gray-900">
+                Detalle de Comisiones
+              </p>
+              {!selectedSummary.hasCommissionValues && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
                   <Info className="h-3 w-3" />
                   Falta comisión en items
@@ -576,10 +672,40 @@ export default function StylistReportsPage() {
               )}
             </div>
 
+            <div className="mb-3 inline-flex rounded-full bg-gray-100 p-1 text-xs font-semibold text-gray-600">
+              <button
+                type="button"
+                onClick={() => setCommissionTab("services")}
+                className={cn(
+                  "px-4 py-2 rounded-full transition-colors",
+                  commissionTab === "services"
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-600 hover:text-gray-900",
+                )}
+              >
+                Servicios
+              </button>
+              <button
+                type="button"
+                onClick={() => setCommissionTab("products")}
+                className={cn(
+                  "px-4 py-2 rounded-full transition-colors",
+                  commissionTab === "products"
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-600 hover:text-gray-900",
+                )}
+              >
+                Productos
+              </button>
+            </div>
+
             {loading && (
               <div className="space-y-2">
                 {[1, 2, 3].map((key) => (
-                  <div key={key} className="h-14 animate-pulse rounded-lg bg-gray-100" />
+                  <div
+                    key={key}
+                    className="h-14 animate-pulse rounded-lg bg-gray-100"
+                  />
                 ))}
               </div>
             )}
@@ -596,36 +722,50 @@ export default function StylistReportsPage() {
               </div>
             )}
 
-            {!loading && !error && filteredItems.length > 0 && (
+            {detailTabEmptyState && (
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-4 text-center text-sm text-gray-600">
+                {detailTabEmptyState}
+              </div>
+            )}
+
+            {!loading && !error && detailRows.length > 0 && (
               <div className="overflow-hidden rounded-xl border border-gray-200">
                 <div className="grid grid-cols-[1.2fr_1fr_0.9fr_0.9fr] bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700">
                   <span>Cliente</span>
-                  <span>Servicio</span>
+                  <span>{detailColumnLabel}</span>
                   <span className="text-right">Valor</span>
                   <span className="text-right">Comisión</span>
                 </div>
                 <div className="divide-y divide-gray-100">
-                  {filteredItems.map((row) => (
+                  {detailRows.map((row) => (
                     <div
                       key={row.id}
                       className="grid grid-cols-[1.2fr_1fr_0.9fr_0.9fr] px-3 py-3 text-sm text-gray-800"
                     >
                       <div>
-                        <p className="font-semibold text-gray-900">{row.cliente}</p>
+                        <p className="font-semibold text-gray-900">
+                          {row.cliente}
+                        </p>
                         <p className="text-xs text-gray-500">
                           {row.fecha ? formatDateDMY(row.fecha) : "-"}
                         </p>
                       </div>
-                      <div className="text-sm text-gray-800">{row.servicio}</div>
+                      <div className="text-sm text-gray-800">
+                        {row.servicio}
+                      </div>
                       <div className="text-right font-medium">
-                        {formatCurrencyNoDecimals(row.valor, row.moneda || resolvedCurrency, resolvedLocale)}
+                        {formatCurrencyNoDecimals(
+                          row.valor,
+                          row.moneda || resolvedCurrency,
+                          resolvedLocale,
+                        )}
                       </div>
                       <div className="text-right font-semibold text-gray-900">
                         {row.comision !== null
                           ? formatCurrencyNoDecimals(
                               row.comision,
                               row.moneda || resolvedCurrency,
-                              resolvedLocale
+                              resolvedLocale,
                             )
                           : "—"}
                       </div>
@@ -635,7 +775,9 @@ export default function StylistReportsPage() {
                     <span>Total</span>
                     <span />
                     <span />
-                    <span className="text-right">{formatMoney(summary.totalComisiones)}</span>
+                    <span className="text-right">
+                      {formatMoney(detailTotalComision)}
+                    </span>
                   </div>
                 </div>
               </div>

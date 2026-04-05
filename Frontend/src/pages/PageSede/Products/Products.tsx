@@ -1,725 +1,909 @@
-"use client"
+"use client";
 
-import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, Box, Edit2, Filter, Loader2, Package, Plus, Save, Search, X } from "lucide-react"
-import { Sidebar } from "../../../components/Layout/Sidebar"
-import { PageHeader } from "../../../components/Layout/PageHeader"
-import { Button } from "../../../components/ui/button"
-import { Input } from "../../../components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card"
-import { Badge } from "../../../components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog"
-import { useAuth } from "../../../components/Auth/AuthContext"
-import { inventarioService } from "./inventario"
-import type { InventarioProducto } from "./inventario"
-import { API_BASE_URL } from "../../../types/config"
-import { formatDateDMY } from "../../../lib/dateFormat"
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Plus,
+  Search,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
+import { Sidebar } from "../../../components/Layout/Sidebar";
+import { PageHeader } from "../../../components/Layout/PageHeader";
+import { Button } from "../../../components/ui/button";
+import { Input } from "../../../components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../../components/ui/select";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../../../components/ui/card";
+import { Badge } from "../../../components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../../../components/ui/table";
+import { Alert, AlertDescription } from "../../../components/ui/alert";
+import { useAuth } from "../../../components/Auth/AuthContext";
+import { inventarioService, type InventarioProducto } from "./inventario";
+import { API_BASE_URL } from "../../../types/config";
+import { cn } from "../../../lib/utils";
+import { APP_ROLES, resolveAppRole } from "../../../lib/access-control";
 
-type CatalogoProducto = { id: string; nombre: string; codigo: string }
+type CatalogoProducto = {
+  id: string;
+  nombre: string;
+  codigo: string;
+};
 
-const normalizeRole = (value: string | null | undefined): string =>
-  String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_")
+const LINEAS = [
+  { id: "Rizos Felices", label: "Rizos Felices" },
+  { id: "Profesional", label: "Profesional" },
+  { id: "Tratamientos", label: "Tratamientos" },
+  { id: "Otros", label: "Otros" },
+];
 
-const normalizeText = (value: unknown): string => (typeof value === "string" ? value.toLowerCase() : "")
+const PAGE_SIZE = 8;
 
-const stockBadgeClassName = (stockActual: number, stockMinimo: number): string => {
-  if (stockActual === 0) return "border-red-200 bg-red-50 text-red-700"
-  if (stockActual <= stockMinimo) return "border-amber-200 bg-amber-50 text-amber-700"
-  return "border-emerald-200 bg-emerald-50 text-emerald-700"
-}
+const normalizeText = (value: string | null | undefined): string =>
+  (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
 
-const stockLabel = (stockActual: number, stockMinimo: number): string => {
-  if (stockActual === 0) return "Sin stock"
-  if (stockActual <= stockMinimo) return "Bajo stock"
-  return "Disponible"
-}
+const formatDate = (iso?: string): string => {
+  if (!iso) return "Sin datos";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Sin datos";
+  return new Intl.DateTimeFormat("es-CO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+  }).format(date);
+};
+
+const parseApiError = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return "No fue posible completar la operación";
+};
+
+const stockStatus = (producto: InventarioProducto) => {
+  const actual = Number(producto.stock_actual ?? 0);
+  const minimo = Number(producto.stock_minimo ?? 0);
+
+  if (actual <= 0)
+    return { label: "Sin stock", variant: "destructive" as const };
+  if (actual <= minimo)
+    return { label: "Crítico", variant: "secondary" as const };
+  return { label: "OK", variant: "outline" as const };
+};
 
 export function ProductsList() {
-  const [searchTerm, setSearchTerm] = useState("")
-  const [selectedCategoria, setSelectedCategoria] = useState("all")
-  const [showLowStock, setShowLowStock] = useState(false)
-  const [productos, setProductos] = useState<InventarioProducto[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
-  const [productoEditando, setProductoEditando] = useState<string | null>(null)
-  const [stockTemporal, setStockTemporal] = useState<number>(0)
-  const [guardandoStock, setGuardandoStock] = useState<string | null>(null)
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
-  const [isLoadingCatalogo, setIsLoadingCatalogo] = useState(false)
-  const [isCreatingInventario, setIsCreatingInventario] = useState(false)
-  const [catalogoProductos, setCatalogoProductos] = useState<CatalogoProducto[]>([])
-  const [catalogoError, setCatalogoError] = useState<string | null>(null)
-  const [nuevoProductoId, setNuevoProductoId] = useState("")
-  const [nuevoStockInicial, setNuevoStockInicial] = useState("0")
-  const [nuevoStockMinimo, setNuevoStockMinimo] = useState("5")
+  const {
+    user,
+    isAuthenticated,
+    isLoading: authLoading,
+    activeSedeId,
+  } = useAuth();
 
-  const { user, isAuthenticated, isLoading: authLoading, activeSedeId } = useAuth()
+  const [productos, setProductos] = useState<InventarioProducto[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const role = normalizeRole(user?.role)
-  const canCreateInventory = role === "admin_sede" || role === "super_admin" || role === "superadmin"
-  const canAdjustStock = canCreateInventory || role === "recepcionista" || role === "call_center"
+  const [searchTerm, setSearchTerm] = useState("");
+  const [activeLineaTab, setActiveLineaTab] = useState<string>("all");
+  const [selectedCategoria, setSelectedCategoria] = useState<string>("all");
+  const [showLowStock, setShowLowStock] = useState(false);
+
+  const [productoEditando, setProductoEditando] = useState<string | null>(null);
+  const [stockTemporal, setStockTemporal] = useState<string>("");
+  const [guardandoStock, setGuardandoStock] = useState<string | null>(null);
+
+  const [catalogoProductos, setCatalogoProductos] = useState<
+    CatalogoProducto[]
+  >([]);
+  const [isLoadingCatalogo, setIsLoadingCatalogo] = useState(false);
+  const [catalogoError, setCatalogoError] = useState<string | null>(null);
+  const [nuevoProductoId, setNuevoProductoId] = useState("");
+  const [nuevoStockInicial, setNuevoStockInicial] = useState("0");
+  const [nuevoStockMinimo, setNuevoStockMinimo] = useState("5");
+  const [lineaFormulario, setLineaFormulario] = useState<string>(
+    LINEAS[0]?.id ?? "Rizos Felices",
+  );
+  const [isCreatingInventario, setIsCreatingInventario] = useState(false);
+
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const userRole = resolveAppRole(user?.role);
+  const canAdjustStock =
+    userRole === APP_ROLES.ADMIN_SEDE ||
+    userRole === APP_ROLES.SUPER_ADMIN ||
+    userRole === APP_ROLES.SUPERADMIN;
+  const canCreateInventory = canAdjustStock;
 
   const sedeId =
     activeSedeId ||
     user?.sede_id ||
-    sessionStorage.getItem("beaux-sede_id") ||
-    localStorage.getItem("beaux-sede_id")
-
-  const nombreLocal =
-    user?.nombre_local ||
-    sessionStorage.getItem("beaux-nombre_local") ||
-    localStorage.getItem("beaux-nombre_local") ||
-    "Sede actual"
+    (typeof window !== "undefined"
+      ? window.sessionStorage.getItem("beaux-sede_id")
+      : "") ||
+    (typeof window !== "undefined"
+      ? window.localStorage.getItem("beaux-sede_id")
+      : "") ||
+    "";
 
   const resolveToken = () =>
     user?.access_token ||
     user?.token ||
-    sessionStorage.getItem("access_token") ||
-    localStorage.getItem("access_token")
+    (typeof window !== "undefined"
+      ? window.sessionStorage.getItem("access_token")
+      : null) ||
+    (typeof window !== "undefined"
+      ? window.localStorage.getItem("access_token")
+      : null) ||
+    null;
+
+  const resetEdicionStock = () => {
+    setProductoEditando(null);
+    setStockTemporal("");
+    setGuardandoStock(null);
+  };
+
+  const cargarInventario = async () => {
+    if (!sedeId) {
+      setError("No se encontró la sede activa");
+      setIsLoading(false);
+      return;
+    }
+
+    const token = resolveToken();
+    if (!token) {
+      setError("No se encontró token de autenticación");
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      const data = await inventarioService.getInventarioUsuario(
+        showLowStock,
+        token,
+        sedeId,
+      );
+      setProductos(data);
+      setCurrentPage(1);
+    } catch (err) {
+      setError(parseApiError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const cargarCatalogoProductos = async () => {
+    if (!canCreateInventory || !sedeId) return;
+    const token = resolveToken();
+    if (!token) return;
+
+    try {
+      setIsLoadingCatalogo(true);
+      setCatalogoError(null);
+
+      const response = await fetch(
+        `${API_BASE_URL}inventary/product/productos/?moneda=COP&sede_id=${sedeId}`,
+        {
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          data?.detail || "No se pudo cargar el catálogo de productos",
+        );
+      }
+
+      const items = Array.isArray(data)
+        ? data
+        : Array.isArray((data as { results?: unknown }).results)
+          ? (data as { results: unknown[] }).results
+          : [];
+
+      const formatted = (items as any[])
+        .filter((item) => item?._id && item?.nombre)
+        .map((item) => ({
+          id: String(item._id),
+          nombre: String(item.nombre),
+          codigo: item.codigo || item.producto_codigo || "—",
+        }))
+        .filter((item) => !productos.some((p) => p.producto_id === item.id));
+
+      setCatalogoProductos(formatted);
+    } catch (err) {
+      setCatalogoError(parseApiError(err));
+    } finally {
+      setIsLoadingCatalogo(false);
+    }
+  };
+
+  const iniciarEdicionStock = (producto: InventarioProducto) => {
+    setProductoEditando(producto._id);
+    setStockTemporal(String(producto.stock_actual ?? 0));
+  };
+
+  const guardarStock = async (producto: InventarioProducto) => {
+    const token = resolveToken();
+    if (!token) {
+      setError("No se encontró token de autenticación");
+      return;
+    }
+
+    const nuevoValor = Number(stockTemporal);
+    if (Number.isNaN(nuevoValor)) {
+      setError("Ingresa un valor numérico de stock");
+      return;
+    }
+
+    const delta = nuevoValor - Number(producto.stock_actual ?? 0);
+    if (delta === 0) {
+      resetEdicionStock();
+      return;
+    }
+
+    try {
+      setGuardandoStock(producto._id);
+      const result = await inventarioService.ajustarInventario(
+        producto._id,
+        delta,
+        token,
+      );
+      if (!result.success) {
+        setError(result.error || "No se pudo ajustar el stock");
+        return;
+      }
+      setSuccessMessage(result.message || "Stock actualizado");
+      await cargarInventario();
+    } catch (err) {
+      setError(parseApiError(err));
+    } finally {
+      resetEdicionStock();
+    }
+  };
+
+  const crearInventario = async () => {
+    const token = resolveToken();
+    if (!token) {
+      setCatalogoError("No se encontró token de autenticación");
+      return;
+    }
+    if (!sedeId) {
+      setCatalogoError("No se encontró la sede activa");
+      return;
+    }
+    if (!nuevoProductoId) {
+      setCatalogoError("Selecciona un producto del catálogo");
+      return;
+    }
+
+    const payload = {
+      producto_id: nuevoProductoId,
+      sede_id: sedeId,
+      stock_actual: Number(nuevoStockInicial) || 0,
+      stock_minimo: Number(nuevoStockMinimo) || 0,
+    };
+
+    try {
+      setIsCreatingInventario(true);
+      setCatalogoError(null);
+      const result = await inventarioService.crearInventario(payload, token);
+      if (!result.success) {
+        setCatalogoError(result.error || "No se pudo crear el inventario");
+        return;
+      }
+      setSuccessMessage(result.message || "Producto agregado al inventario");
+      setNuevoProductoId("");
+      setNuevoStockInicial("0");
+      setNuevoStockMinimo("5");
+      await Promise.all([cargarInventario(), cargarCatalogoProductos()]);
+    } catch (err) {
+      setCatalogoError(parseApiError(err));
+    } finally {
+      setIsCreatingInventario(false);
+    }
+  };
+
+  const handleLineaChange = (lineaId: string) => {
+    setActiveLineaTab(lineaId);
+    setSelectedCategoria(lineaId);
+    setCurrentPage(1);
+  };
+
+  const handleFiltrarStockBajo = () => {
+    setShowLowStock((prev) => !prev);
+  };
 
   useEffect(() => {
-    if (!authLoading && sedeId) void cargarInventario()
-  }, [authLoading, sedeId, showLowStock])
+    if (!authLoading && sedeId) {
+      void cargarInventario();
+    }
+  }, [authLoading, sedeId, showLowStock]);
+
+  useEffect(() => {
+    if (!authLoading && canCreateInventory) {
+      void cargarCatalogoProductos();
+    }
+  }, [authLoading, canCreateInventory, sedeId]);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
-      setError("Debes iniciar sesión para acceder al inventario")
-      setIsLoading(false)
+      setError("Debes iniciar sesión para acceder al inventario");
+      setIsLoading(false);
     }
-  }, [authLoading, isAuthenticated])
+  }, [authLoading, isAuthenticated]);
 
   useEffect(() => {
-    if (!successMessage) return
-    const timeoutId = window.setTimeout(() => setSuccessMessage(null), 3000)
-    return () => window.clearTimeout(timeoutId)
-  }, [successMessage])
+    if (!successMessage) return;
+    const timeoutId = window.setTimeout(() => setSuccessMessage(null), 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [successMessage]);
 
-  const categorias = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          productos
-            .map((producto) => producto.categoria)
-            .filter((categoria): categoria is string => Boolean(categoria))
-        )
-      ).sort((a, b) => a.localeCompare(b)),
-    [productos]
-  )
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedCategoria, activeLineaTab]);
 
-  const productosFiltrados = useMemo(() => {
-    const termino = searchTerm.trim().toLowerCase()
-    return productos
-      .filter((producto) => {
-        if (termino) {
-          const cumpleBusqueda =
-            normalizeText(producto.nombre).includes(termino) ||
-            normalizeText(producto.producto_nombre).includes(termino) ||
-            normalizeText(producto.producto_id).includes(termino) ||
-            normalizeText(producto.producto_codigo).includes(termino) ||
-            normalizeText(producto.categoria).includes(termino)
-          if (!cumpleBusqueda) return false
-        }
-        if (selectedCategoria !== "all" && producto.categoria !== selectedCategoria) return false
-        return true
-      })
-      .sort((a, b) => {
-        const aCritico = a.stock_actual <= a.stock_minimo ? 1 : 0
-        const bCritico = b.stock_actual <= b.stock_minimo ? 1 : 0
-        if (aCritico !== bCritico) return bCritico - aCritico
-        return (a.nombre || a.producto_nombre || "").localeCompare(b.nombre || b.producto_nombre || "")
-      })
-  }, [productos, searchTerm, selectedCategoria])
+  const filteredProductos = useMemo(() => {
+    let data = [...productos];
 
-  const stats = useMemo(() => {
-    const totalProductos = productos.length
-    const productosBajoStock = productos.filter((producto) => producto.stock_actual <= producto.stock_minimo).length
-    const productosSinStock = productos.filter((producto) => producto.stock_actual === 0).length
-    const totalStock = productos.reduce((acc, producto) => acc + producto.stock_actual, 0)
-    return { totalProductos, productosBajoStock, productosSinStock, totalStock }
-  }, [productos])
-
-  const cargarInventario = async () => {
-    const token = resolveToken()
-    try {
-      setIsLoading(true)
-      setError(null)
-      if (!sedeId) throw new Error("No se encontró información de la sede activa")
-      if (!token) throw new Error("No hay token de autenticación disponible")
-      const inventario = await inventarioService.getInventarioUsuario(showLowStock, token, sedeId)
-      setProductos(Array.isArray(inventario) ? inventario : [])
-    } catch (err) {
-      console.error("Error cargando inventario:", err)
-      setError(err instanceof Error ? err.message : "No se pudo cargar el inventario")
-      setProductos([])
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const iniciarEdicionStock = (producto: InventarioProducto) => {
-    setProductoEditando(producto._id)
-    setStockTemporal(producto.stock_actual)
-    setError(null)
-    setSuccessMessage(null)
-  }
-
-  const cancelarEdicionStock = () => {
-    setProductoEditando(null)
-    setStockTemporal(0)
-  }
-
-  const guardarStock = async (producto: InventarioProducto) => {
-    const token = resolveToken()
-    if (stockTemporal < 0) return setError("El stock no puede ser negativo")
-    if (!token) return setError("No hay token de autenticación disponible")
-    setGuardandoStock(producto._id)
-    setError(null)
-    setSuccessMessage(null)
-    try {
-      const delta = stockTemporal - producto.stock_actual
-      const resultado = await inventarioService.ajustarInventario(producto._id, delta, token)
-      if (!resultado.success) return setError(resultado.error || "No se pudo actualizar el inventario")
-      setProductos((current) =>
-        current.map((item) =>
-          item._id === producto._id
-            ? { ...item, stock_actual: stockTemporal, fecha_ultima_actualizacion: new Date().toISOString() }
-            : item
-        )
-      )
-      setProductoEditando(null)
-      setSuccessMessage(resultado.message || "Inventario actualizado correctamente")
-    } catch (err) {
-      console.error("Error ajustando inventario:", err)
-      setError("Ocurrió un error inesperado al actualizar el inventario")
-    } finally {
-      setGuardandoStock(null)
-    }
-  }
-
-  const parseApiError = async (response: Response, fallback: string) => {
-    try {
-      const body = (await response.json()) as { detail?: string | Array<{ msg?: string }> }
-      if (typeof body?.detail === "string" && body.detail.trim().length > 0) return body.detail
-      if (Array.isArray(body?.detail) && body.detail.length > 0) {
-        const firstMessage = body.detail[0]?.msg
-        if (typeof firstMessage === "string" && firstMessage.trim().length > 0) return firstMessage
-      }
-      return fallback
-    } catch {
-      return fallback
-    }
-  }
-
-  const cargarCatalogoProductos = async () => {
-    const token = resolveToken()
-    if (!token) {
-      setCatalogoError("No hay token de autenticación disponible")
-      return
+    if (activeLineaTab !== "all") {
+      data = data.filter((producto) =>
+        normalizeText(producto.categoria).includes(
+          normalizeText(activeLineaTab),
+        ),
+      );
     }
 
-    setIsLoadingCatalogo(true)
-    setCatalogoError(null)
-
-    try {
-      const moneda = String(
-        user?.moneda ||
-          sessionStorage.getItem("beaux-moneda") ||
-          localStorage.getItem("beaux-moneda") ||
-          "COP"
-      ).toUpperCase()
-
-      const params = new URLSearchParams()
-      params.set("moneda", moneda)
-      if (sedeId) params.set("sede_id", sedeId)
-
-      const response = await fetch(`${API_BASE_URL}inventary/product/productos/?${params.toString()}`, {
-        method: "GET",
-        headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
-      })
-
-      if (!response.ok) {
-        throw new Error(await parseApiError(response, "No se pudieron cargar los productos"))
-      }
-
-      const data = await response.json()
-      const rawProductos: Array<Record<string, unknown>> = Array.isArray(data)
-        ? data
-        : Array.isArray((data as { productos?: Array<Record<string, unknown>> })?.productos)
-          ? (data as { productos: Array<Record<string, unknown>> }).productos
-          : Array.isArray((data as { items?: Array<Record<string, unknown>> })?.items)
-            ? (data as { items: Array<Record<string, unknown>> }).items
-            : []
-
-      const idsEnInventario = new Set(
-        productos.map((producto) => String(producto.producto_id || producto._id || "").trim()).filter(Boolean)
-      )
-
-      const catalogo = rawProductos
-        .map((producto) => {
-          const id = String(producto.id ?? producto._id ?? producto.producto_id ?? "").trim()
-          const nombre = String(producto.nombre ?? producto.producto_nombre ?? "").trim()
-          const codigo = String(producto.codigo ?? producto.producto_codigo ?? "").trim()
-          if (!id || !nombre || idsEnInventario.has(id)) return null
-          return { id, nombre, codigo }
-        })
-        .filter((producto): producto is CatalogoProducto => Boolean(producto))
-        .sort((a, b) => a.nombre.localeCompare(b.nombre))
-
-      setCatalogoProductos(catalogo)
-      if (catalogo.length === 1) setNuevoProductoId(catalogo[0].id)
-    } catch (err) {
-      console.error("Error cargando catálogo de productos:", err)
-      setCatalogoProductos([])
-      setCatalogoError(err instanceof Error ? err.message : "No se pudo cargar el catálogo de productos")
-    } finally {
-      setIsLoadingCatalogo(false)
-    }
-  }
-
-  const abrirModalCreacion = () => {
-    setNuevoProductoId("")
-    setNuevoStockInicial("0")
-    setNuevoStockMinimo("5")
-    setCatalogoProductos([])
-    setCatalogoError(null)
-    setIsCreateModalOpen(true)
-    void cargarCatalogoProductos()
-  }
-
-  const cerrarModalCreacion = () => {
-    setIsCreateModalOpen(false)
-    setCatalogoError(null)
-    setNuevoProductoId("")
-  }
-
-  const crearInventario = async () => {
-    const token = resolveToken()
-    const productoId = nuevoProductoId.trim()
-    const stockInicial = Number(nuevoStockInicial)
-    const stockMinimo = Number(nuevoStockMinimo)
-
-    if (!sedeId) return setCatalogoError("No se encontró la sede activa")
-    if (!token) return setCatalogoError("No hay token de autenticación disponible")
-    if (!productoId) return setCatalogoError("Selecciona un producto para agregar al inventario")
-    if (!Number.isFinite(stockInicial) || stockInicial < 0) {
-      return setCatalogoError("El stock inicial debe ser mayor o igual a 0")
-    }
-    if (!Number.isFinite(stockMinimo) || stockMinimo < 0) {
-      return setCatalogoError("El stock mínimo debe ser mayor o igual a 0")
+    if (selectedCategoria !== "all") {
+      data = data.filter((producto) =>
+        normalizeText(producto.categoria).includes(
+          normalizeText(selectedCategoria),
+        ),
+      );
     }
 
-    setIsCreatingInventario(true)
-    setCatalogoError(null)
-
-    try {
-      const resultado = await inventarioService.crearInventario(
-        {
-          producto_id: productoId,
-          sede_id: sedeId,
-          stock_actual: stockInicial,
-          stock_minimo: stockMinimo,
-        },
-        token
-      )
-
-      if (!resultado.success) {
-        return setCatalogoError(resultado.error || "No se pudo crear el producto en inventario")
-      }
-
-      cerrarModalCreacion()
-      setSuccessMessage(resultado.message || "Producto agregado al inventario")
-      await cargarInventario()
-    } catch (err) {
-      console.error("Error creando inventario:", err)
-      setCatalogoError("Ocurrió un error inesperado al crear el inventario")
-    } finally {
-      setIsCreatingInventario(false)
+    if (searchTerm.trim()) {
+      const term = normalizeText(searchTerm);
+      data = data.filter(
+        (producto) =>
+          normalizeText(producto.producto_nombre).includes(term) ||
+          normalizeText(producto.nombre).includes(term) ||
+          normalizeText(producto.producto_codigo).includes(term),
+      );
     }
-  }
 
-  if (authLoading) {
-    return (
-      <div className="flex min-h-screen bg-white">
-        <Sidebar />
-        <div className="flex flex-1 items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-          <p className="ml-2 text-gray-600">Verificando autenticación...</p>
-        </div>
-      </div>
-    )
-  }
+    return data;
+  }, [productos, activeLineaTab, selectedCategoria, searchTerm]);
 
-  if (!isAuthenticated) {
-    return (
-      <div className="flex min-h-screen bg-gray-50">
-        <Sidebar />
-        <div className="flex flex-1 flex-col items-center justify-center px-6">
-          <AlertTriangle className="mb-4 h-12 w-12 text-red-500" />
-          <h2 className="mb-2 text-xl font-semibold text-gray-900">Acceso no autorizado</h2>
-          <p className="mb-4 text-gray-600">Debes iniciar sesión para acceder a esta página.</p>
-          <Button onClick={() => { window.location.href = "/" }} className="bg-black text-white hover:bg-neutral-900">
-            Ir al inicio de sesión
-          </Button>
-        </div>
-      </div>
-    )
-  }
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredProductos.length / PAGE_SIZE),
+  );
+  const currentPageSafe = Math.min(currentPage, totalPages);
+  const paginatedProductos = filteredProductos.slice(
+    (currentPageSafe - 1) * PAGE_SIZE,
+    currentPageSafe * PAGE_SIZE,
+  );
+
+  const kpis = useMemo(
+    () => ({
+      totalProductos: productos.length,
+      totalUnidades: productos.reduce(
+        (acc, item) => acc + Number(item.stock_actual ?? 0),
+        0,
+      ),
+      criticos: productos.filter(
+        (item) =>
+          Number(item.stock_actual ?? 0) <= Number(item.stock_minimo ?? 0),
+      ).length,
+      sinStock: productos.filter((item) => Number(item.stock_actual ?? 0) <= 0)
+        .length,
+    }),
+    [productos],
+  );
+
+  const scrollToCrearProducto = () => {
+    const section = document.getElementById("crear-producto-panel");
+    section?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const renderEstadoBadge = (producto: InventarioProducto) => {
+    const { label, variant } = stockStatus(producto);
+    return <Badge variant={variant}>{label}</Badge>;
+  };
 
   return (
-    <>
-      <div className="flex min-h-screen bg-white">
-        <Sidebar />
-        <div className="flex-1">
-          <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-            <PageHeader
-              title="Inventario detallado"
-              subtitle="Consulta, filtra y ajusta el stock de productos de la sede activa."
-              actions={
-                canCreateInventory ? (
-                  <Button onClick={abrirModalCreacion} className="gap-2 bg-gray-900 text-white hover:bg-gray-800">
-                    <Plus className="h-4 w-4" />
-                    Crear producto
-                  </Button>
-                ) : null
-              }
-            />
-            <div className="mb-6 rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-xl bg-gray-100 p-2.5">
-                    <Box className="h-5 w-5 text-gray-700" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">{nombreLocal}</p>
-                    <p className="text-sm text-gray-500">Sede activa para la gestión de inventario.</p>
-                  </div>
-                </div>
+    <div className="flex min-h-screen bg-gray-50">
+      <Sidebar />
+      <main className="flex-1 overflow-y-auto p-6 lg:p-10">
+        <PageHeader
+          title="Inventario"
+          subtitle="Administra el stock por sede"
+          actions={
+            canCreateInventory ? (
+              <Button onClick={scrollToCrearProducto} variant="secondary">
+                <Plus className="mr-2 h-4 w-4" />
+                Crear producto
+              </Button>
+            ) : null
+          }
+        />
 
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline" className="border-gray-200 bg-white text-gray-700">
-                    {stats.totalProductos} productos
-                  </Badge>
-                  <Badge variant="outline" className="border-gray-200 bg-white text-gray-700">
-                    {stats.totalStock} unidades
-                  </Badge>
-                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
-                    {stats.productosBajoStock} críticos
-                  </Badge>
-                  <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">
-                    {stats.productosSinStock} sin stock
-                  </Badge>
-                </div>
-              </div>
+        {error ? (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {successMessage ? (
+          <Alert className="mb-4 border-emerald-200 bg-emerald-50 text-emerald-800">
+            <Check className="h-4 w-4" />
+            <AlertDescription>{successMessage}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        <Card className="mb-6 shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex flex-wrap items-center gap-3">
+              {LINEAS.map((linea) => (
+                <Button
+                  key={linea.id}
+                  variant={activeLineaTab === linea.id ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => handleLineaChange(linea.id)}
+                  className={cn(
+                    "rounded-full px-4",
+                    activeLineaTab === linea.id && "border border-gray-200",
+                  )}
+                >
+                  {linea.label}
+                </Button>
+              ))}
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2 text-sm text-gray-700">
+              <Badge variant="outline" className="bg-white">
+                {kpis.totalProductos} productos
+              </Badge>
+              <Badge variant="outline" className="bg-white">
+                {kpis.totalUnidades} unidades
+              </Badge>
+              <Badge variant="outline" className="bg-white">
+                {kpis.criticos} críticos
+              </Badge>
+              <Badge variant="outline" className="bg-white">
+                {kpis.sinStock} sin stock
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[240px]">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <Input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar producto..."
+                className="pl-9"
+              />
             </div>
 
-            {(error || successMessage) && (
-              <div className="mb-6 space-y-3">
-                {error && (
-                  <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    <AlertTriangle className="mt-0.5 h-4 w-4" />
-                    <div>
-                      <p className="font-semibold text-red-800">No se pudo completar la acción</p>
-                      <p>{error}</p>
-                    </div>
-                  </div>
-                )}
+            <Select
+              value={selectedCategoria}
+              onValueChange={(value) => setSelectedCategoria(value)}
+            >
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="Todas las líneas" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las líneas</SelectItem>
+                {LINEAS.map((linea) => (
+                  <SelectItem key={linea.id} value={linea.id}>
+                    {linea.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-                {successMessage && (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                    {successMessage}
-                  </div>
-                )}
-              </div>
-            )}
+            <Button
+              variant={showLowStock ? "secondary" : "outline"}
+              onClick={handleFiltrarStockBajo}
+              className="gap-2"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Filtre
+            </Button>
 
-            <Card className="mb-6 border border-gray-200">
-              <CardContent className="pt-6">
-                <div className="flex flex-col gap-3 lg:flex-row">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                    <Input
-                      placeholder="Buscar productos por nombre, ID, código o categoría..."
-                      value={searchTerm}
-                      onChange={(event) => setSearchTerm(event.target.value)}
-                      className="pl-10"
-                      disabled={isLoading}
-                    />
-                  </div>
+            {canCreateInventory ? (
+              <Button onClick={scrollToCrearProducto} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Crear producto
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
 
-                  <div className="flex flex-col gap-3 sm:flex-row">
-                    <Select value={selectedCategoria} onValueChange={setSelectedCategoria} disabled={isLoading}>
-                      <SelectTrigger className="w-full min-w-[220px] bg-white text-gray-900">
-                        <SelectValue placeholder="Selecciona una categoría" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-white text-gray-900">
-                        <SelectItem value="all">Todas las categorías</SelectItem>
-                        {categorias.map((categoria) => (
-                          <SelectItem key={categoria} value={categoria}>
-                            {categoria}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-
-                    <Button
-                      variant={showLowStock ? "default" : "outline"}
-                      onClick={() => setShowLowStock((current) => !current)}
-                      className={showLowStock ? "bg-amber-600 text-white hover:bg-amber-700" : ""}
-                      disabled={isLoading}
-                    >
-                      <Filter className="mr-2 h-4 w-4" />
-                      {showLowStock ? "Mostrar todo" : "Stock bajo"}
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border border-gray-200">
-              <CardHeader className="border-b border-gray-200">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <CardTitle className="text-lg font-semibold text-gray-900">Productos en inventario</CardTitle>
-                    <CardDescription className="text-gray-600">
-                      Lista detallada de productos disponibles en la sede.
-                    </CardDescription>
-                  </div>
-                  <Badge variant="outline" className="w-fit border-gray-200 bg-white text-gray-700">
-                    {productosFiltrados.length} de {productos.length} productos
-                  </Badge>
-                </div>
-              </CardHeader>
-
-              <CardContent className="pt-6">
+        <Card className="mb-8 shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle className="text-lg font-semibold">Inventario</CardTitle>
+            <div className="text-sm text-gray-500">
+              Sede: {sedeId || "No disponible"}
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader className="bg-gray-50">
+                <TableRow>
+                  <TableHead className="w-[220px]">Producto</TableHead>
+                  <TableHead>Línea</TableHead>
+                  <TableHead>SKU</TableHead>
+                  <TableHead className="text-right">Stock actual</TableHead>
+                  <TableHead className="text-right">Stock mínimo</TableHead>
+                  <TableHead className="text-right">Precio</TableHead>
+                  <TableHead>Último movimiento</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {isLoading ? (
-                  <div className="flex flex-col items-center justify-center py-16 text-center">
-                    <Loader2 className="mb-4 h-8 w-8 animate-spin text-gray-400" />
-                    <p className="text-gray-700">Cargando inventario...</p>
-                    <p className="mt-1 text-sm text-gray-500">Obteniendo productos de la sede activa.</p>
-                  </div>
-                ) : productosFiltrados.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-16 text-center">
-                    <div className="mb-4 rounded-full bg-gray-100 p-4">
-                      <Package className="h-8 w-8 text-gray-400" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-gray-900">
-                      {productos.length === 0 ? "No hay productos en inventario" : "No se encontraron productos"}
-                    </h3>
-                    <p className="mt-2 max-w-md text-sm text-gray-500">
-                      {productos.length === 0
-                        ? "Aún no hay productos registrados para esta sede."
-                        : "Prueba con otro término de búsqueda o cambia los filtros seleccionados."}
-                    </p>
-                  </div>
+                  <TableRow>
+                    <TableCell
+                      colSpan={9}
+                      className="py-8 text-center text-sm text-gray-500"
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Cargando inventario...
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : paginatedProductos.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={9}
+                      className="py-8 text-center text-sm text-gray-500"
+                    >
+                      No hay productos para mostrar con los filtros actuales
+                    </TableCell>
+                  </TableRow>
                 ) : (
-                  <div className="space-y-4">
-                    {productosFiltrados.map((producto) => {
-                      const isEditing = productoEditando === producto._id
-                      const isSaving = guardandoStock === producto._id
-                      const nombreProducto = producto.nombre || producto.producto_nombre || "Producto"
-
-                      return (
-                        <div
-                          key={producto._id}
-                          className="rounded-2xl border border-gray-200 bg-white px-4 py-4 transition-colors hover:border-gray-300"
-                        >
-                          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-start gap-3">
-                                <div className="rounded-xl bg-gray-100 p-2.5">
-                                  <Package className="h-4 w-4 text-gray-600" />
-                                </div>
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <h3 className="truncate text-sm font-semibold text-gray-900">{nombreProducto}</h3>
-                                </div>
-
-                                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
-                                  <span>Categoría: {producto.categoria || "Sin categoría"}</span>
-                                  <span>Stock mínimo: {producto.stock_minimo}</span>
-                                    <span>Actualizado: {formatDateDMY(producto.fecha_ultima_actualizacion, "—")}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex flex-col gap-3 lg:min-w-[320px] lg:items-end">
-                              {isEditing ? (
-                                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                                  <Input
-                                    type="number"
-                                    min="0"
-                                    value={stockTemporal}
-                                    onChange={(event) => setStockTemporal(Number(event.target.value) || 0)}
-                                    className="w-28 text-center"
-                                    disabled={isSaving}
-                                    onKeyDown={(event) => {
-                                      if (event.key === "Enter") void guardarStock(producto)
-                                      if (event.key === "Escape") cancelarEdicionStock()
-                                    }}
-                                  />
-                                  <Button
-                                    onClick={() => { void guardarStock(producto) }}
-                                    disabled={isSaving}
-                                    className="gap-2 bg-gray-900 text-white hover:bg-gray-800"
-                                  >
-                                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                                    Guardar
-                                  </Button>
-                                  <Button variant="outline" onClick={cancelarEdicionStock} disabled={isSaving}>
-                                    <X className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">
-                                  <div className="text-left sm:text-right">
-                                    <p className="text-lg font-semibold text-gray-900">{producto.stock_actual}</p>
-                                    <p className="text-xs text-gray-500">Stock actual</p>
-                                  </div>
-
-                                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                                    <Badge
-                                      variant="outline"
-                                      className={stockBadgeClassName(producto.stock_actual, producto.stock_minimo)}
-                                    >
-                                      {stockLabel(producto.stock_actual, producto.stock_minimo)}
-                                    </Badge>
-
-                                    {canAdjustStock && (
-                                      <Button
-                                        variant="outline"
-                                        size="icon"
-                                        onClick={() => iniciarEdicionStock(producto)}
-                                        className="h-9 w-9"
-                                        title="Editar inventario"
-                                      >
-                                        <Edit2 className="h-4 w-4" />
-                                      </Button>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
+                  paginatedProductos.map((producto) => (
+                    <TableRow
+                      key={producto._id}
+                      className="hover:bg-gray-50/60"
+                    >
+                      <TableCell>
+                        <div className="font-semibold text-gray-900">
+                          {producto.producto_nombre ||
+                            producto.nombre ||
+                            "Producto"}
                         </div>
-                      )
-                    })}
-                  </div>
+                        <div className="text-xs text-gray-500">
+                          {producto.producto_codigo}
+                        </div>
+                      </TableCell>
+                      <TableCell>{producto.categoria || "—"}</TableCell>
+                      <TableCell>{producto.producto_codigo || "—"}</TableCell>
+                      <TableCell className="text-right font-semibold text-gray-900">
+                        {producto.stock_actual ?? 0}
+                      </TableCell>
+                      <TableCell className="text-right text-gray-700">
+                        {producto.stock_minimo ?? 0}
+                      </TableCell>
+                      <TableCell className="text-right text-gray-500">
+                        —
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {producto.fecha_ultima_actualizacion
+                            ? formatDate(producto.fecha_ultima_actualizacion)
+                            : "Sin datos"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{renderEstadoBadge(producto)}</TableCell>
+                      <TableCell className="text-right">
+                        {canAdjustStock ? (
+                          productoEditando === producto._id ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <Input
+                                type="number"
+                                value={stockTemporal}
+                                onChange={(e) =>
+                                  setStockTemporal(e.target.value)
+                                }
+                                className="w-24"
+                                min={0}
+                              />
+                              <Button
+                                size="sm"
+                                onClick={() => guardarStock(producto)}
+                                disabled={guardandoStock === producto._id}
+                              >
+                                {guardandoStock === producto._id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  "Guardar"
+                                )}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={resetEdicionStock}
+                                className="text-gray-600"
+                              >
+                                <X className="mr-1 h-4 w-4" />
+                                Cancelar
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => iniciarEdicionStock(producto)}
+                            >
+                              Editar stock
+                            </Button>
+                          )
+                        ) : (
+                          <span className="text-xs text-gray-500">
+                            Solo lectura
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
                 )}
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </div>
+              </TableBody>
+            </Table>
 
-      <Dialog
-        open={isCreateModalOpen}
-        onOpenChange={(open) => {
-          if (!open) return cerrarModalCreacion()
-          setIsCreateModalOpen(true)
-        }}
-      >
-        <DialogContent className="sm:max-w-md bg-white text-gray-900">
-          <DialogHeader>
-            <DialogTitle>Crear producto en inventario</DialogTitle>
-            <DialogDescription>
-              Agrega un producto del catálogo global al inventario de la sede activa.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            {isLoadingCatalogo && (
-              <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Cargando catálogo de productos...
+            <div className="flex items-center justify-between border-t px-4 py-3 text-sm text-gray-600">
+              <div>
+                Página {currentPageSafe} de {totalPages}
               </div>
-            )}
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700" htmlFor="nuevo-producto-id">
-                Producto
-              </label>
-              {catalogoProductos.length > 0 ? (
-                <Select
-                  value={nuevoProductoId}
-                  onValueChange={setNuevoProductoId}
-                  disabled={isLoadingCatalogo || isCreatingInventario}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPageSafe === 1}
                 >
-                  <SelectTrigger id="nuevo-producto-id" className="bg-white text-gray-900">
-                    <SelectValue placeholder="Selecciona un producto" />
+                  <ChevronLeft className="h-4 w-4" />
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setCurrentPage((p) => Math.min(totalPages, p + 1))
+                  }
+                  disabled={currentPageSafe === totalPages}
+                >
+                  Siguiente
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card id="crear-producto-panel" className="shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-lg font-semibold">
+                Crear producto
+              </CardTitle>
+              <p className="text-sm text-gray-500">
+                Reutiliza el catálogo existente. Precios y costos no se envían
+                al backend actual.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {catalogoError ? (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{catalogoError}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Select
+                  value={lineaFormulario}
+                  onValueChange={(value) => setLineaFormulario(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Línea de producto" />
                   </SelectTrigger>
-                  <SelectContent className="bg-white text-gray-900">
-                    {catalogoProductos.map((producto) => (
-                      <SelectItem key={producto.id} value={producto.id}>
-                        {producto.nombre}{producto.codigo ? ` (${producto.codigo})` : ""}
+                  <SelectContent>
+                    {LINEAS.map((linea) => (
+                      <SelectItem key={linea.id} value={linea.id}>
+                        {linea.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              ) : (
+
                 <Input
-                  id="nuevo-producto-id"
-                  placeholder="Ingresa el ID del producto"
+                  value="No disponible (backend)"
+                  readOnly
+                  className="cursor-not-allowed bg-gray-100 text-gray-500"
+                />
+
+                <Select
                   value={nuevoProductoId}
-                  onChange={(event) => setNuevoProductoId(event.target.value)}
-                  disabled={isCreatingInventario}
-                />
-              )}
-            </div>
+                  onValueChange={(value) => setNuevoProductoId(value)}
+                  disabled={isLoadingCatalogo}
+                >
+                  <SelectTrigger className="col-span-1 sm:col-span-2">
+                    <SelectValue
+                      placeholder={
+                        isLoadingCatalogo
+                          ? "Cargando catálogo..."
+                          : "Selecciona producto"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {catalogoProductos.length === 0 ? (
+                      <SelectItem value="none" disabled>
+                        {isLoadingCatalogo
+                          ? "Cargando..."
+                          : "No hay productos disponibles"}
+                      </SelectItem>
+                    ) : (
+                      catalogoProductos.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.nombre} — {item.codigo}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700" htmlFor="nuevo-stock-inicial">
-                  Stock inicial
-                </label>
                 <Input
-                  id="nuevo-stock-inicial"
-                  type="number"
-                  min="0"
-                  value={nuevoStockInicial}
-                  onChange={(event) => setNuevoStockInicial(event.target.value)}
-                  disabled={isCreatingInventario}
+                  value={
+                    catalogoProductos.find(
+                      (item) => item.id === nuevoProductoId,
+                    )?.codigo || "SKU"
+                  }
+                  readOnly
+                  className="col-span-1 sm:col-span-2 bg-gray-100 text-gray-600"
                 />
-              </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700" htmlFor="nuevo-stock-minimo">
-                  Stock mínimo
-                </label>
                 <Input
-                  id="nuevo-stock-minimo"
                   type="number"
-                  min="0"
+                  min={0}
                   value={nuevoStockMinimo}
-                  onChange={(event) => setNuevoStockMinimo(event.target.value)}
-                  disabled={isCreatingInventario}
+                  onChange={(e) => setNuevoStockMinimo(e.target.value)}
+                  placeholder="Stock mínimo"
+                />
+                <Input
+                  type="number"
+                  min={0}
+                  value={nuevoStockInicial}
+                  onChange={(e) => setNuevoStockInicial(e.target.value)}
+                  placeholder="Stock inicial"
+                />
+
+                <Input
+                  value="Precio de venta (falta en backend)"
+                  readOnly
+                  className="col-span-1 sm:col-span-2 cursor-not-allowed bg-gray-100 text-gray-500"
+                />
+                <Input
+                  value="Costo (falta en backend)"
+                  readOnly
+                  className="col-span-1 sm:col-span-2 cursor-not-allowed bg-gray-100 text-gray-500"
                 />
               </div>
-            </div>
 
-            {catalogoError && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {catalogoError}
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setNuevoProductoId("");
+                    setNuevoStockInicial("0");
+                    setNuevoStockMinimo("5");
+                    setLineaFormulario(LINEAS[0]?.id ?? "Rizos Felices");
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={crearInventario}
+                  disabled={isCreatingInventario}
+                >
+                  {isCreatingInventario ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : null}
+                  Registrar producto
+                </Button>
               </div>
-            )}
-          </div>
+            </CardContent>
+          </Card>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={cerrarModalCreacion} disabled={isCreatingInventario}>
-              Cancelar
-            </Button>
-            <Button
-              onClick={() => { void crearInventario() }}
-              disabled={isCreatingInventario || isLoadingCatalogo}
-              className="gap-2 bg-gray-900 text-white hover:bg-gray-800"
-            >
-              {isCreatingInventario && <Loader2 className="h-4 w-4 animate-spin" />}
-              Guardar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  )
+          <Card className="shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <div>
+                <CardTitle className="text-lg font-semibold">
+                  Historial de salidas
+                </CardTitle>
+                <p className="text-sm text-gray-500">
+                  Pendiente de endpoint de historial para mostrar movimientos.
+                </p>
+              </div>
+              <Select disabled>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Últimos 30 días" />
+                </SelectTrigger>
+              </Select>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                {["Todos", ...LINEAS.map((l) => l.label)].map((label) => (
+                  <Button
+                    key={label}
+                    size="sm"
+                    variant="outline"
+                    disabled
+                    className="rounded-full"
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                <Input
+                  disabled
+                  placeholder="Buscar por producto, usuario o nota..."
+                  className="pl-9"
+                />
+              </div>
+              <div className="flex items-center justify-center rounded-md border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+                Conecta el endpoint de movimientos para mostrar el historial de
+                salidas por sede.
+              </div>
+              <div className="flex items-center justify-end gap-2 text-sm text-gray-500">
+                <Button variant="outline" size="sm" disabled>
+                  Anterior
+                </Button>
+                <Button variant="outline" size="sm" disabled>
+                  Siguiente
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    </div>
+  );
 }

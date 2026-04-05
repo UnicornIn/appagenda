@@ -36,6 +36,11 @@ export interface FacturaAPI {
   total_pagado?: number | string | null;
   pagado?: number | string | null;
   valor_total?: number | string | null;
+  factura_electronica_estado?: string;
+  factura_electronica_id?: string;
+  electronic_invoice_status?: string;
+  electronic_invoice_id?: string;
+  electronic_invoice_url?: string;
 }
 
 export interface ItemFactura {
@@ -103,6 +108,7 @@ export interface FacturaConverted {
   fecha_pago: string;
   local: string;
   sede_id: string;
+  venta_id?: string;
   moneda: string;
   tipo_comision: string;
   cliente_id: string;
@@ -124,6 +130,8 @@ export interface FacturaConverted {
   items?: ItemFactura[];
   historial_pagos?: HistorialPago[];
   desglose_pagos?: DesglosePagos;
+  electronic_invoice_status?: string;
+  electronic_invoice_id?: string;
 }
 
 export class FacturaService {
@@ -170,7 +178,9 @@ export class FacturaService {
     }, []);
   }
 
-  private async getSedeQueryCandidates(preferredSedeId?: string): Promise<string[]> {
+  private async getSedeQueryCandidates(
+    preferredSedeId?: string,
+  ): Promise<string[]> {
     const initialCandidates = [
       String(preferredSedeId ?? "").trim(),
       ...this.getStoredSedeCandidates(),
@@ -183,7 +193,9 @@ export class FacturaService {
     };
 
     const resolvedCandidates: string[] = [];
-    initialCandidates.forEach((candidate) => pushUnique(resolvedCandidates, candidate));
+    initialCandidates.forEach((candidate) =>
+      pushUnique(resolvedCandidates, candidate),
+    );
 
     const token = this.getAuthToken();
     if (!token || resolvedCandidates.length === 0) {
@@ -192,7 +204,9 @@ export class FacturaService {
 
     try {
       const sedes = await getSedes(token);
-      const normalizedCandidates = new Set(resolvedCandidates.map((candidate) => candidate.toUpperCase()));
+      const normalizedCandidates = new Set(
+        resolvedCandidates.map((candidate) => candidate.toUpperCase()),
+      );
 
       sedes.forEach((sede) => {
         const ids = [
@@ -201,7 +215,9 @@ export class FacturaService {
           String(sede.unique_id ?? "").trim(),
         ].filter(Boolean);
 
-        const matchesCandidate = ids.some((id) => normalizedCandidates.has(id.toUpperCase()));
+        const matchesCandidate = ids.some((id) =>
+          normalizedCandidates.has(id.toUpperCase()),
+        );
         if (!matchesCandidate) return;
 
         pushUnique(resolvedCandidates, sede.sede_id);
@@ -209,7 +225,10 @@ export class FacturaService {
         pushUnique(resolvedCandidates, sede.unique_id);
       });
     } catch (error) {
-      console.warn("No se pudieron resolver IDs alternos de sede para facturación:", error);
+      console.warn(
+        "No se pudieron resolver IDs alternos de sede para facturación:",
+        error,
+      );
     }
 
     return resolvedCandidates;
@@ -217,7 +236,7 @@ export class FacturaService {
 
   private normalizeDateRange(
     fecha_desde?: string,
-    fecha_hasta?: string
+    fecha_hasta?: string,
   ): { fecha_desde: string; fecha_hasta: string } {
     const desde = toBackendDate(String(fecha_desde || "").trim());
     const hasta = toBackendDate(String(fecha_hasta || "").trim());
@@ -245,7 +264,7 @@ export class FacturaService {
   private getHeaders() {
     const token = this.getAuthToken();
     const headers: HeadersInit = {
-      "accept": "application/json",
+      accept: "application/json",
       "Content-Type": "application/json",
     };
 
@@ -277,7 +296,11 @@ export class FacturaService {
 
     if (!normalized) return null;
 
-    if (["pagado", "paid", "pago_completo", "completo", "completed"].includes(normalized)) {
+    if (
+      ["pagado", "paid", "pago_completo", "completo", "completed"].includes(
+        normalized,
+      )
+    ) {
       return "pagado";
     }
 
@@ -285,7 +308,16 @@ export class FacturaService {
       return "pendiente";
     }
 
-    if (["abonado", "abono", "parcial", "partial", "partial_paid", "partially_paid"].includes(normalized)) {
+    if (
+      [
+        "abonado",
+        "abono",
+        "parcial",
+        "partial",
+        "partial_paid",
+        "partially_paid",
+      ].includes(normalized)
+    ) {
       return "abonado";
     }
 
@@ -325,19 +357,21 @@ export class FacturaService {
   private getLatestPago(historial: HistorialPago[]): HistorialPago | null {
     if (historial.length === 0) return null;
 
-    return historial
-      .map((pago, index) => ({
-        pago,
-        index,
-        timestamp: this.getTimestamp(pago?.fecha),
-      }))
-      .sort((a, b) => {
-        if (a.timestamp !== b.timestamp) {
-          return a.timestamp - b.timestamp;
-        }
-        return a.index - b.index;
-      })
-      .at(-1)?.pago ?? null;
+    return (
+      historial
+        .map((pago, index) => ({
+          pago,
+          index,
+          timestamp: this.getTimestamp(pago?.fecha),
+        }))
+        .sort((a, b) => {
+          if (a.timestamp !== b.timestamp) {
+            return a.timestamp - b.timestamp;
+          }
+          return a.index - b.index;
+        })
+        .at(-1)?.pago ?? null
+    );
   }
 
   private getTotalPagadoHistorial(historial: HistorialPago[]): number {
@@ -374,13 +408,19 @@ export class FacturaService {
     }
 
     if (Array.isArray(factura.items) && factura.items.length > 0) {
-      return factura.items.reduce((sum, item) => sum + (this.toNumber(item?.subtotal) ?? 0), 0);
+      return factura.items.reduce(
+        (sum, item) => sum + (this.toNumber(item?.subtotal) ?? 0),
+        0,
+      );
     }
 
     return 0;
   }
 
-  private getMetodoPagoPrincipal(desglose?: DesglosePagos, historial?: HistorialPago[]): string {
+  private getMetodoPagoPrincipal(
+    desglose?: DesglosePagos,
+    historial?: HistorialPago[],
+  ): string {
     const historialSeguro = this.getSafeHistorial(historial);
 
     if (historialSeguro.length > 0) {
@@ -392,7 +432,9 @@ export class FacturaService {
         montosPorMetodo[metodo] = (montosPorMetodo[metodo] || 0) + monto;
       });
 
-      const metodoPrincipal = Object.entries(montosPorMetodo).sort((a, b) => b[1] - a[1])[0];
+      const metodoPrincipal = Object.entries(montosPorMetodo).sort(
+        (a, b) => b[1] - a[1],
+      )[0];
       if (metodoPrincipal && metodoPrincipal[1] > 0) {
         return metodoPrincipal[0];
       }
@@ -410,13 +452,17 @@ export class FacturaService {
     ];
 
     const metodoPrincipal = metodos.reduce((prev, current) =>
-      prev.monto > current.monto ? prev : current
+      prev.monto > current.monto ? prev : current,
     );
 
     return metodoPrincipal.monto > 0 ? metodoPrincipal.metodo : "efectivo";
   }
 
-  private getEstadoFactura(factura: FacturaAPI, historial: HistorialPago[], total: number): string {
+  private getEstadoFactura(
+    factura: FacturaAPI,
+    historial: HistorialPago[],
+    total: number,
+  ): string {
     const explicitStatus =
       this.normalizePaymentStatus(factura.estado_pago) ??
       this.normalizePaymentStatus(factura.estado);
@@ -432,11 +478,13 @@ export class FacturaService {
       this.getTotalPagadoHistorial(historial),
       this.getTotalPagadoDesglose(factura.desglose_pagos),
       this.toNumber(factura.total_pagado) ?? 0,
-      this.toNumber(factura.pagado) ?? 0
+      this.toNumber(factura.pagado) ?? 0,
     );
     const reachedZeroBalance = historial.some((pago) => {
       const saldo = this.toNumber(pago?.saldo_despues);
-      return saldo !== null && Math.abs(saldo) <= FacturaService.PAYMENT_EPSILON;
+      return (
+        saldo !== null && Math.abs(saldo) <= FacturaService.PAYMENT_EPSILON
+      );
     });
 
     if (saldoPendiente !== null) {
@@ -444,7 +492,10 @@ export class FacturaService {
         return "pagado";
       }
 
-      if (total > FacturaService.PAYMENT_EPSILON && totalPagado + FacturaService.PAYMENT_EPSILON >= total) {
+      if (
+        total > FacturaService.PAYMENT_EPSILON &&
+        totalPagado + FacturaService.PAYMENT_EPSILON >= total
+      ) {
         return "pagado";
       }
 
@@ -452,14 +503,19 @@ export class FacturaService {
         return explicitStatus;
       }
 
-      return totalPagado > FacturaService.PAYMENT_EPSILON ? "abonado" : "pendiente";
+      return totalPagado > FacturaService.PAYMENT_EPSILON
+        ? "abonado"
+        : "pendiente";
     }
 
     if (reachedZeroBalance) {
       return "pagado";
     }
 
-    if (total > FacturaService.PAYMENT_EPSILON && totalPagado + FacturaService.PAYMENT_EPSILON >= total) {
+    if (
+      total > FacturaService.PAYMENT_EPSILON &&
+      totalPagado + FacturaService.PAYMENT_EPSILON >= total
+    ) {
       return "pagado";
     }
 
@@ -474,10 +530,15 @@ export class FacturaService {
       return "pendiente";
     }
 
-    return totalPagado > FacturaService.PAYMENT_EPSILON ? "abonado" : "pendiente";
+    return totalPagado > FacturaService.PAYMENT_EPSILON
+      ? "abonado"
+      : "pendiente";
   }
 
-  private async fetchDetalleVentaRaw(sede_id: string, venta_id: string): Promise<FacturaAPI> {
+  private async fetchDetalleVentaRaw(
+    sede_id: string,
+    venta_id: string,
+  ): Promise<FacturaAPI> {
     const url = `${API_BASE_URL}api/billing/sales/${encodeURIComponent(sede_id)}/${encodeURIComponent(venta_id)}`;
     const response = await fetch(url, {
       method: "GET",
@@ -499,7 +560,7 @@ export class FacturaService {
       fecha_hasta?: string;
       page?: number;
       limit?: number;
-    }
+    },
   ): Promise<{
     facturas: FacturaConverted[];
     pagination?: any;
@@ -508,7 +569,10 @@ export class FacturaService {
   }> {
     let url = `${API_BASE_URL}api/billing/sales/${sede_id}`;
     const params = new URLSearchParams();
-    const normalizedRange = this.normalizeDateRange(filtros.fecha_desde, filtros.fecha_hasta);
+    const normalizedRange = this.normalizeDateRange(
+      filtros.fecha_desde,
+      filtros.fecha_hasta,
+    );
 
     params.append("page", (filtros.page || 1).toString());
     params.append("limit", (filtros.limit || 50).toString());
@@ -537,8 +601,14 @@ export class FacturaService {
     const ventas = Array.isArray(data.ventas)
       ? data.ventas.filter((factura) => factura != null)
       : [];
-    const facturasIniciales = ventas.map((factura) => this.convertToAppFormat(factura));
-    const facturas = await this.revalidateNonPaidFacturas(sede_id, ventas, facturasIniciales);
+    const facturasIniciales = ventas.map((factura) =>
+      this.convertToAppFormat(factura),
+    );
+    const facturas = await this.revalidateNonPaidFacturas(
+      sede_id,
+      ventas,
+      facturasIniciales,
+    );
 
     return {
       facturas,
@@ -548,7 +618,10 @@ export class FacturaService {
     };
   }
 
-  async getDetalleVenta(sede_id: string, venta_id: string): Promise<FacturaConverted> {
+  async getDetalleVenta(
+    sede_id: string,
+    venta_id: string,
+  ): Promise<FacturaConverted> {
     const factura = await this.fetchDetalleVentaRaw(sede_id, venta_id);
     return this.convertToAppFormat(factura);
   }
@@ -556,7 +629,7 @@ export class FacturaService {
   private async revalidateNonPaidFacturas(
     sede_id: string,
     ventas: FacturaAPI[],
-    facturas: FacturaConverted[]
+    facturas: FacturaConverted[],
   ): Promise<FacturaConverted[]> {
     const candidates = ventas
       .map((venta, index) => ({
@@ -564,7 +637,10 @@ export class FacturaService {
         index,
         factura: facturas[index],
       }))
-      .filter(({ venta, factura }) => Boolean(venta?._id) && factura && factura.estado !== "pagado")
+      .filter(
+        ({ venta, factura }) =>
+          Boolean(venta?._id) && factura && factura.estado !== "pagado",
+      )
       .slice(0, FacturaService.DETAIL_REVALIDATION_LIMIT);
 
     if (candidates.length === 0) {
@@ -573,7 +649,9 @@ export class FacturaService {
 
     const refreshed = [...facturas];
     const results = await Promise.allSettled(
-      candidates.map(({ venta }) => this.fetchDetalleVentaRaw(sede_id, venta._id))
+      candidates.map(({ venta }) =>
+        this.fetchDetalleVentaRaw(sede_id, venta._id),
+      ),
     );
 
     results.forEach((result, candidateIndex) => {
@@ -588,23 +666,23 @@ export class FacturaService {
 
   // Obtener ventas/facturas de una sede específica con filtros
   async getVentasBySede(
-    sede_id: string, 
-    page: number = 1, 
+    sede_id: string,
+    page: number = 1,
     limit: number = 50,
     fecha_desde?: string,
     fecha_hasta?: string,
-    search?: string
+    search?: string,
   ): Promise<FacturaConverted[]> {
     try {
       const normalizedRange = this.normalizeDateRange(fecha_desde, fecha_hasta);
 
       // Construir URL con parámetros
       let url = `${API_BASE_URL}api/billing/sales/${sede_id}?page=${page}&limit=${limit}&sort_order=desc`;
-      
+
       // Forzar rango explícito para evitar filtros implícitos del backend.
       url += `&fecha_desde=${normalizedRange.fecha_desde}`;
       url += `&fecha_hasta=${normalizedRange.fecha_hasta}`;
-      
+
       if (search) {
         url += `&search=${encodeURIComponent(search)}`;
       }
@@ -619,42 +697,90 @@ export class FacturaService {
       }
 
       const data: FacturaResponse = await response.json();
-      
+
       // Validar que data.ventas existe y es un array
       if (!data.ventas || !Array.isArray(data.ventas)) {
         console.warn("La respuesta no contiene un array válido de ventas");
         return [];
       }
-      
+
       // Convertir los datos de la API al formato que usa nuestra aplicación
       const ventas = data.ventas.filter((factura) => factura != null);
-      const facturas = ventas.map((factura) => this.convertToAppFormat(factura));
+      const facturas = ventas.map((factura) =>
+        this.convertToAppFormat(factura),
+      );
       return await this.revalidateNonPaidFacturas(sede_id, ventas, facturas);
-      
     } catch (error) {
       console.error("Error obteniendo ventas de la sede:", error);
       throw error;
     }
   }
 
+  /**
+   * Obtener todas las ventas de una sede paginando automáticamente.
+   * Útil para rangos amplios de fechas donde la API limita la cantidad por página.
+   */
+  async getVentasBySedeAllPages(
+    sede_id: string,
+    fecha_desde?: string,
+    fecha_hasta?: string,
+    search?: string,
+    options?: { pageSize?: number; maxPages?: number },
+  ): Promise<FacturaConverted[]> {
+    const pageSize = Math.max(1, options?.pageSize || 200);
+    const maxPages = Math.max(1, options?.maxPages || 500);
+    const all: FacturaConverted[] = [];
+
+    let page = 1;
+    let keepGoing = true;
+
+    while (keepGoing && page <= maxPages) {
+      const pageData = await this.getVentasBySede(
+        sede_id,
+        page,
+        pageSize,
+        fecha_desde,
+        fecha_hasta,
+        search,
+      );
+
+      all.push(...pageData);
+
+      // Si la página vino incompleta, asumimos que no hay más.
+      if (pageData.length < pageSize) {
+        keepGoing = false;
+      } else {
+        page += 1;
+      }
+    }
+
+    return all;
+  }
+
   // Obtener todas las facturas del usuario autenticado con filtros
   async getVentasUsuario(
-    page: number = 1, 
+    page: number = 1,
     limit: number = 50,
     fecha_desde?: string,
     fecha_hasta?: string,
-    search?: string
+    search?: string,
   ): Promise<FacturaConverted[]> {
     try {
       const sede_id = this.getStoredSedeId();
-      
+
       if (!sede_id) {
         console.warn("No se encontró sede_id en la sesión");
         return [];
       }
 
-      return await this.getVentasBySede(sede_id, page, limit, fecha_desde, fecha_hasta, search);
-      
+      return await this.getVentasBySede(
+        sede_id,
+        page,
+        limit,
+        fecha_desde,
+        fecha_hasta,
+        search,
+      );
     } catch (error) {
       console.error("Error obteniendo ventas del usuario:", error);
       return [];
@@ -664,48 +790,59 @@ export class FacturaService {
   // Convertir datos de API al formato de la aplicación
   private convertToAppFormat(factura: FacturaAPI): FacturaConverted {
     const historial = this.getSafeHistorial(factura.historial_pagos);
-    const metodoPago = this.getMetodoPagoPrincipal(factura.desglose_pagos, historial);
+    const metodoPago = this.getMetodoPagoPrincipal(
+      factura.desglose_pagos,
+      historial,
+    );
     const total = this.getFacturaTotal(factura);
     const estado = this.getEstadoFactura(factura, historial, total);
-    const fechaComprobante = this.getLatestPago(historial)?.fecha || factura.fecha_pago || "";
-    
+    const fechaComprobante =
+      this.getLatestPago(historial)?.fecha || factura.fecha_pago || "";
+
     // Obtener profesional_id y nombre de los items si no están en la factura
-    let profesionalId = factura.profesional_id || '';
-    let profesionalNombre = factura.profesional_nombre || '';
-    
+    let profesionalId = factura.profesional_id || "";
+    let profesionalNombre = factura.profesional_nombre || "";
+
     // Si no hay profesional en la factura, buscarlo en los items
     if (!profesionalId && factura.items && factura.items.length > 0) {
       const primerItem = factura.items[0];
-      profesionalId = primerItem.profesional_id || '';
-      profesionalNombre = primerItem.profesional_nombre || '';
+      profesionalId = primerItem.profesional_id || "";
+      profesionalNombre = primerItem.profesional_nombre || "";
     }
 
     return {
-      identificador: factura.identificador || '',
-      fecha_pago: factura.fecha_pago || '',
-      local: factura.local || '',
-      sede_id: factura.sede_id || '',
-      moneda: factura.moneda || 'COP',
-      tipo_comision: factura.tipo_comision || 'porcentaje',
-      cliente_id: factura.cliente_id || '',
-      nombre_cliente: factura.nombre_cliente?.trim() || '',
-      cedula_cliente: factura.cedula_cliente || '',
-      email_cliente: factura.email_cliente || '',
-      telefono_cliente: factura.telefono_cliente || '',
+      identificador: factura.identificador || "",
+      fecha_pago: factura.fecha_pago || "",
+      local: factura.local || "",
+      sede_id: factura.sede_id || "",
+      moneda: factura.moneda || "COP",
+      tipo_comision: factura.tipo_comision || "porcentaje",
+      cliente_id: factura.cliente_id || "",
+      nombre_cliente: factura.nombre_cliente?.trim() || "",
+      cedula_cliente: factura.cedula_cliente || "",
+      email_cliente: factura.email_cliente || "",
+      telefono_cliente: factura.telefono_cliente || "",
       total: total,
       comprobante_de_pago: "Factura",
-      numero_comprobante: factura.numero_comprobante || '',
+      numero_comprobante: factura.numero_comprobante || "",
       fecha_comprobante: fechaComprobante,
       monto: total,
       profesional_id: profesionalId,
       profesional_nombre: profesionalNombre,
       metodo_pago: metodoPago,
-      facturado_por: factura.facturado_por || factura.vendido_por || 'Sistema',
-      vendido_por: factura.vendido_por || factura.facturado_por || 'Sistema',
+      facturado_por: factura.facturado_por || factura.vendido_por || "Sistema",
+      vendido_por: factura.vendido_por || factura.facturado_por || "Sistema",
       estado: estado,
       items: factura.items || [],
       historial_pagos: historial,
-      desglose_pagos: factura.desglose_pagos
+      desglose_pagos: factura.desglose_pagos,
+      venta_id: factura._id || "",
+      electronic_invoice_status:
+        factura.electronic_invoice_status ||
+        factura.factura_electronica_estado ||
+        "",
+      electronic_invoice_id:
+        factura.electronic_invoice_id || factura.factura_electronica_id || "",
     };
   }
 
@@ -723,7 +860,9 @@ export class FacturaService {
     paymentSummary?: PaymentMethodTotals | null;
   }> {
     try {
-      const sedeCandidates = await this.getSedeQueryCandidates(this.getStoredSedeId() ?? undefined);
+      const sedeCandidates = await this.getSedeQueryCandidates(
+        this.getStoredSedeId() ?? undefined,
+      );
 
       if (sedeCandidates.length === 0) {
         console.warn("No se encontró sede_id");
@@ -747,14 +886,20 @@ export class FacturaService {
         try {
           const result = await this.fetchFacturasResult(sedeId, filtros);
 
-          if ((result.facturas?.length || 0) > 0 || (result.pagination?.total || 0) > 0) {
+          if (
+            (result.facturas?.length || 0) > 0 ||
+            (result.pagination?.total || 0) > 0
+          ) {
             return result;
           }
 
           lastEmptyResult = result;
         } catch (error) {
           lastError = error;
-          console.warn(`No se pudieron cargar facturas para sede ${sedeId}:`, error);
+          console.warn(
+            `No se pudieron cargar facturas para sede ${sedeId}:`,
+            error,
+          );
         }
       }
 
@@ -763,7 +908,6 @@ export class FacturaService {
       }
 
       return lastEmptyResult;
-      
     } catch (error) {
       console.error("Error buscando facturas:", error);
       throw error;
