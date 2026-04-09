@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { Sidebar } from "../../../components/Layout/Sidebar";
+import { PageHeader } from "../../../components/Layout/PageHeader";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 // import { Textarea } from "../../../components/ui/textarea";
@@ -14,6 +15,9 @@ import { toast } from "../../../hooks/use-toast";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import { giftcardsService } from "../../GiftCards/giftcardsService";
 import type { GiftCard } from "../../GiftCards/types";
+import { getSedes } from "../../../components/Branch/sedesApi";
+import { formatSedeNombre } from "../../../lib/sede";
+import { persistSedeContext } from "../../../lib/sede-context";
 import {
   CASH_EXPENSE_TYPE_OPTIONS,
   CASH_INCOME_TYPE_OPTIONS,
@@ -291,6 +295,22 @@ const normalizeGiftcardIngresos = (giftcards: GiftCard[], start: string, end: st
     .filter((ingreso) => ingreso.monto > 0);
 };
 
+const SECTION_CARD_CLASS = "border-gray-300 bg-white shadow-sm";
+const METRIC_CARD_CLASS = "border-gray-300 bg-white transition-colors hover:border-gray-400";
+const TABLE_WRAPPER_CLASS = "overflow-x-auto rounded-lg border border-gray-300";
+const TABLE_HEAD_CLASS = "bg-gray-50 text-left text-sm font-medium text-gray-700";
+const TABLE_HEAD_CELL_CLASS = "px-4 py-3";
+const TABLE_CELL_CLASS = "px-4 py-3";
+const FIELD_LABEL_CLASS = "mb-2 block text-sm font-medium text-gray-700";
+const INPUT_CLASS =
+  "h-10 rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus-visible:border-gray-500 focus-visible:ring-1 focus-visible:ring-gray-500";
+const SELECT_CLASS =
+  "flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-gray-500";
+const PRIMARY_BUTTON_CLASS = "bg-black text-white hover:bg-gray-800";
+const OUTLINE_BUTTON_CLASS = "border-gray-300 text-gray-800 hover:bg-gray-100";
+const INFO_PANEL_CLASS = "rounded-lg border border-gray-300 bg-gray-50 p-3 text-sm text-gray-600";
+const BADGE_BASE_CLASS = "inline-flex rounded-full border px-2 py-1 text-xs font-medium";
+
 export default function CierreCajaPage() {
   const { user } = useAuth();
   const [moneda, setMoneda] = useState("COP");
@@ -361,11 +381,38 @@ export default function CierreCajaPage() {
   const [cierreNota, setCierreNota] = useState("");
   const [cierreFecha, setCierreFecha] = useState(getToday());
   const [cierreEfectivoContado, setCierreEfectivoContado] = useState("");
+  const [sedesOptions, setSedesOptions] = useState<Array<{ id: string; nombre: string }>>([]);
+  const [loadingSedes, setLoadingSedes] = useState(false);
 
   const normalizedRole = useMemo(() => String(user?.role || "").toLowerCase(), [user?.role]);
   const canEditMovimientos = useMemo(
     () => ["admin_sede", "adminsede", "admin", "super_admin", "superadmin"].includes(normalizedRole),
     [normalizedRole]
+  );
+  const isSuperAdmin = useMemo(
+    () => normalizedRole === "super_admin" || normalizedRole === "superadmin",
+    [normalizedRole]
+  );
+
+  const applySedeSelection = useCallback(
+    (nextSedeId: string, nextSedeNombre?: string | null) => {
+      const resolvedId = String(nextSedeId || "").trim();
+      if (!resolvedId) return;
+
+      const resolvedName = formatSedeNombre(nextSedeNombre, resolvedId);
+
+      setSedeId(resolvedId);
+      setSedeNombre(resolvedName);
+
+      persistSedeContext({ activeSedeId: resolvedId });
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("beaux-sede_id", resolvedId);
+        localStorage.setItem("beaux-sede_id", resolvedId);
+        sessionStorage.setItem("beaux-nombre_local", resolvedName);
+        localStorage.setItem("beaux-nombre_local", resolvedName);
+      }
+    },
+    []
   );
 
   useEffect(() => {
@@ -392,6 +439,65 @@ export default function CierreCajaPage() {
     setSedeNombre(resolvedSedeNombre || null);
     setMoneda((resolvedMoneda || "COP").toUpperCase());
   }, [user?.sede_id, user?.nombre_local, user?.moneda]);
+
+  useEffect(() => {
+    if (!isSuperAdmin || !user?.access_token) return;
+
+    let isMounted = true;
+
+    const loadSedes = async () => {
+      try {
+        setLoadingSedes(true);
+        const sedes = await getSedes(user.access_token);
+        const mapped =
+          (Array.isArray(sedes) ? sedes : [])
+            .map((sede) => {
+              const id = String(
+                (sede as any).sede_id || (sede as any).unique_id || (sede as any)._id || ""
+              ).trim();
+              if (!id) return null;
+              return { id, nombre: formatSedeNombre((sede as any).nombre, id) };
+            })
+            .filter(Boolean) as Array<{ id: string; nombre: string }>;
+
+        if (!isMounted) return;
+
+        const hasCurrent = sedeId
+          ? mapped.some((item) => item.id === sedeId)
+          : false;
+        const nextOptions = hasCurrent || !sedeId
+          ? mapped
+          : [{ id: sedeId as string, nombre: sedeNombre || sedeId }, ...mapped];
+
+        setSedesOptions(nextOptions);
+
+        if (!sedeId && nextOptions.length > 0) {
+          applySedeSelection(nextOptions[0].id, nextOptions[0].nombre);
+        }
+      } catch (err) {
+        if (isMounted) {
+          setSedesOptions([]);
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingSedes(false);
+        }
+      }
+    };
+
+    void loadSedes();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isSuperAdmin, user?.access_token, applySedeSelection, sedeId, sedeNombre]);
+
+  const handleSedeChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const value = String(event.target.value || "").trim();
+    if (!value) return;
+    const option = sedesOptions.find((item) => item.id === value);
+    applySedeSelection(value, option?.nombre || value);
+  };
 
   const handlePeriodChange = (newPeriod: HeaderPeriod) => {
     if (newPeriod === "custom") {
@@ -1640,23 +1746,25 @@ export default function CierreCajaPage() {
 
           <div className="space-y-4">
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-800">Fecha de inicio</label>
+              <label className={FIELD_LABEL_CLASS}>Fecha de inicio</label>
               <Input
                 type="date"
                 value={tempDateRange.start_date}
                 onChange={(event) => setTempDateRange((prev) => ({ ...prev, start_date: event.target.value }))}
                 max={tempDateRange.end_date || maxDate}
+                className={INPUT_CLASS}
               />
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-800">Fecha de fin</label>
+              <label className={FIELD_LABEL_CLASS}>Fecha de fin</label>
               <Input
                 type="date"
                 value={tempDateRange.end_date}
                 onChange={(event) => setTempDateRange((prev) => ({ ...prev, end_date: event.target.value }))}
                 min={tempDateRange.start_date}
                 max={maxDate}
+                className={INPUT_CLASS}
               />
             </div>
           </div>
@@ -1669,12 +1777,12 @@ export default function CierreCajaPage() {
           </div>
 
           <div className="mt-6 flex gap-3">
-            <Button className="flex-1 bg-black text-white hover:bg-gray-800" onClick={handleApplyDateRange}>
+            <Button className={`flex-1 ${PRIMARY_BUTTON_CLASS}`} onClick={handleApplyDateRange}>
               Aplicar rango
             </Button>
             <Button
               variant="outline"
-              className="flex-1 border-gray-300 text-gray-800 hover:bg-gray-100"
+              className={`flex-1 ${OUTLINE_BUTTON_CLASS}`}
               onClick={() => setShowDateModal(false)}
             >
               Cancelar
@@ -1686,129 +1794,148 @@ export default function CierreCajaPage() {
   };
 
   return (
-    <div className="flex h-screen bg-[#f1eff6]">
+    <div className="flex h-screen bg-gray-50">
       <Sidebar />
       <main className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-[1360px] p-3 sm:p-6 lg:p-8">
-          <div className="space-y-4">
+        <div className="p-8">
+          <div className="space-y-6">
             <DateRangeModal />
+            <PageHeader title="Cierre de Caja" />
             {error && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-gray-900">
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {error}
               </div>
             )}
             {success && (
-              <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
                 {success}
               </div>
             )}
 
-            <section className="space-y-4 rounded-2xl border border-[#d8d4e2] bg-[#f7f5fb] p-4 shadow-sm sm:p-6">
-              <div className="space-y-1 border-b border-[#dfdce8] pb-4">
-                <h1 className="text-4xl font-semibold tracking-tight text-[#2e2d35]">Cierres de caja</h1>
-                <p className="text-xl text-[#656271]">{sedeNombre ? `Caja Sede ${sedeNombre}` : "Caja de la sede"}</p>
-              </div>
-
-              <div className="flex flex-col gap-3 border-b border-[#dfdce8] pb-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-gray-600" />
-                    <span className="text-sm text-gray-600">Período:</span>
+            <Card className={SECTION_CARD_CLASS}>
+              <CardContent className="p-6">
+                <div className="grid gap-4 xl:grid-cols-[minmax(240px,320px)_minmax(0,1fr)_auto] xl:items-end">
+                  <div>
+                    <label className={FIELD_LABEL_CLASS}>Sede</label>
+                    {isSuperAdmin ? (
+                      <select className={SELECT_CLASS} value={sedeId ?? ""} onChange={handleSedeChange}>
+                        <option value="">{loadingSedes ? "Cargando sedes..." : "Selecciona sede"}</option>
+                        {sedesOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="flex h-10 items-center rounded-md border border-gray-300 bg-gray-50 px-3 text-sm text-gray-900 shadow-sm">
+                        {sedeNombre ? `Caja Sede ${sedeNombre}` : "Caja de la sede"}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex flex-wrap gap-1">
-                    {HEADER_PERIOD_OPTIONS.map((option) => (
-                      <Button
-                        key={option.id}
-                        size="sm"
-                        variant={periodoSeleccionado === option.id ? "default" : "outline"}
-                        className={`border-gray-300 text-xs ${
-                          periodoSeleccionado === option.id
-                            ? "bg-black text-white hover:bg-gray-800"
-                            : "text-gray-700 hover:bg-gray-100"
-                        }`}
-                        onClick={() => handlePeriodChange(option.id)}
-                      >
-                        {option.label}
-                      </Button>
-                    ))}
+                  <div>
+                    <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
+                      <Calendar className="h-4 w-4 text-gray-600" />
+                      <span>Período</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {HEADER_PERIOD_OPTIONS.map((option) => (
+                        <Button
+                          key={option.id}
+                          size="sm"
+                          variant={periodoSeleccionado === option.id ? "default" : "outline"}
+                          className={
+                            periodoSeleccionado === option.id
+                              ? PRIMARY_BUTTON_CLASS
+                              : OUTLINE_BUTTON_CLASS
+                          }
+                          onClick={() => handlePeriodChange(option.id)}
+                        >
+                          {option.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 xl:min-w-[250px] xl:justify-self-end">
+                    <p className="text-sm font-medium text-gray-900">{displayDateRange}</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Caja abierta desde: {loadingCierres ? "..." : cajaAbiertaDesde}
+                    </p>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
 
-                <div className="space-y-0.5 lg:text-right">
-                  <p className="text-lg font-semibold text-[#2e2d35]">{displayDateRange}</p>
-                  <p className="text-xs text-[#6d6a77]">Caja abierta desde: {loadingCierres ? "..." : cajaAbiertaDesde}</p>
-                </div>
-              </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <Card className={METRIC_CARD_CLASS}>
+                <CardContent className="p-6">
+                  <p className="text-sm font-medium text-gray-700">Dinero recibido hoy</p>
+                  <p className="mt-2 text-2xl font-bold text-black">
+                    {loadingIngresos || loadingGiftcards ? "..." : formatMoney(ingresosConGiftcardsTotal)}
+                  </p>
+                </CardContent>
+              </Card>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <Card className="border-[#d7d4df] bg-white/80 shadow-[0_1px_2px_rgba(17,24,39,0.06)]">
-                  <CardContent className="space-y-2 p-4">
-                    <p className="text-sm text-[#656271]">Dinero recibido hoy</p>
-                    <p className="text-4xl font-semibold text-[#2e2d35]">
-                      {loadingIngresos || loadingGiftcards
-                        ? "..."
-                        : formatMoney(ingresosConGiftcardsTotal)}
-                    </p>
-                  </CardContent>
-                </Card>
+              <Card className={METRIC_CARD_CLASS}>
+                <CardContent className="p-6">
+                  <p className="text-sm font-medium text-gray-700">Abonos recibidos</p>
+                  <p className="mt-2 text-2xl font-bold text-black">
+                    {loadingIngresos ? "..." : formatMoney(abonosTotal)}
+                  </p>
+                </CardContent>
+              </Card>
 
-                <Card className="border-[#d7d4df] bg-white/80 shadow-[0_1px_2px_rgba(17,24,39,0.06)]">
-                  <CardContent className="space-y-2 p-4">
-                    <p className="text-sm text-[#656271]">Abonos recibidos</p>
-                    <p className="text-4xl font-semibold text-[#2e2d35]">
-                      {loadingIngresos ? "..." : formatMoney(abonosTotal)}
-                    </p>
-                  </CardContent>
-                </Card>
+              <Card className={METRIC_CARD_CLASS}>
+                <CardContent className="p-6">
+                  <p className="text-sm font-medium text-gray-700">Egresos</p>
+                  <p className="mt-2 text-2xl font-bold text-black">
+                    {loadingEgresos ? "..." : formatSignedMoney(-Math.abs(resumen.egresos || egresosTotal))}
+                  </p>
+                </CardContent>
+              </Card>
 
-                <Card className="border-[#d7d4df] bg-white/80 shadow-[0_1px_2px_rgba(17,24,39,0.06)]">
-                  <CardContent className="space-y-2 p-4">
-                    <p className="text-sm text-[#656271]">Egresos</p>
-                    <p className="text-4xl font-semibold text-[#2e2d35]">
-                      {loadingEgresos ? "..." : formatSignedMoney(-Math.abs(resumen.egresos || egresosTotal))}
-                    </p>
-                  </CardContent>
-                </Card>
+              <Card className={METRIC_CARD_CLASS}>
+                <CardContent className="p-6">
+                  <p className="text-sm font-medium text-gray-700">Efectivo en caja</p>
+                  <p className="mt-2 text-2xl font-bold text-black">
+                    {loadingEfectivoEnCaja ? "..." : efectivoEnCaja === null ? "--" : formatMoney(efectivoEnCaja)}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
 
-                <Card className="border-[#d7d4df] bg-white/80 shadow-[0_1px_2px_rgba(17,24,39,0.06)]">
-                  <CardContent className="space-y-2 p-4">
-                    <p className="text-sm text-[#656271]">Efectivo en caja</p>
-                    <p className="text-4xl font-semibold text-[#2e2d35]">
-                      {loadingEfectivoEnCaja ? "..." : efectivoEnCaja === null ? "--" : formatMoney(efectivoEnCaja)}
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                <CardHeader className="border-b border-[#e3e0ea] pb-3">
-                  <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Saldos por medio de pago</CardTitle>
+              <Card className={SECTION_CARD_CLASS}>
+                <CardHeader className="border-b border-gray-200 pb-3">
+                  <CardTitle className="text-xl font-semibold text-gray-900">Saldos por medio de pago</CardTitle>
                 </CardHeader>
-                <CardContent className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-2 md:gap-4">
-                  <div className="space-y-1 md:border-r md:border-[#e3e0ea] md:pr-4">
+                <CardContent className="grid grid-cols-1 gap-3 pt-6 md:grid-cols-2 md:gap-4">
+                  <div className="space-y-3 md:border-r md:border-gray-200 md:pr-4">
                     {saldosPorMedio.izquierda.map((item) => (
                       <div
                         key={`left-${item.label}`}
-                        className={`flex items-center justify-between gap-3 rounded-md px-2 py-1 ${
-                          item.total ? "bg-[#efedf5]" : ""
+                        className={`flex items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
+                          item.total ? "border-gray-300 bg-gray-50" : "border-gray-200 bg-white"
                         }`}
                       >
-                        <span className={`text-[#3c3946] ${item.total ? "text-2xl font-semibold" : "text-xl"}`}>
+                        <span className={`text-gray-700 ${item.total ? "text-base font-semibold" : "text-sm"}`}>
                           {item.label}
                         </span>
-                        <span className={`font-semibold text-[#2e2d35] ${item.total ? "text-3xl" : "text-2xl"}`}>
+                        <span className={`font-semibold text-gray-900 ${item.total ? "text-lg" : "text-base"}`}>
                           {item.trend ? formatTrendMoney(item.value) : formatMoney(item.value)}
                         </span>
                       </div>
                     ))}
                   </div>
 
-                  <div className="space-y-1">
+                  <div className="space-y-3">
                     {saldosPorMedio.derecha.map((item) => (
-                      <div key={`right-${item.label}`} className="flex items-center justify-between gap-3 rounded-md px-2 py-1">
-                        <span className="text-xl text-[#3c3946]">{item.label}</span>
-                        <span className="text-2xl font-semibold text-[#2e2d35]">
+                      <div
+                        key={`right-${item.label}`}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3"
+                      >
+                        <span className="text-sm text-gray-700">{item.label}</span>
+                        <span className="text-base font-semibold text-gray-900">
                           {item.trend ? formatTrendMoney(item.value) : formatMoney(item.value)}
                         </span>
                       </div>
@@ -1817,140 +1944,144 @@ export default function CierreCajaPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                  <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Abrir caja</CardTitle>
-                </CardHeader>
-                <CardContent className="grid grid-cols-1 gap-3 pt-4 md:grid-cols-5">
-                  <div>
-                    <label className="text-xs font-medium text-[#666370]">Fecha de apertura</label>
-                    <Input type="date" value={aperturaFecha} onChange={(e) => setAperturaFecha(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#666370]">Monto inicial</label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={aperturaMonto}
-                      onChange={(e) => setAperturaMonto(e.target.value)}
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="text-xs font-medium text-[#666370]">Observaciones (opcional)</label>
-                    <Input value={aperturaNota} onChange={(e) => setAperturaNota(e.target.value)} />
-                  </div>
-                  <div className="flex flex-col justify-end gap-2">
-                    <div className="rounded-md border border-[#ddd9e6] bg-[#f2f0f7] p-2 text-xs text-[#4b4857]">
-                      El monto inicial se registra como efectivo de apertura.
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <Card className={SECTION_CARD_CLASS}>
+                  <CardHeader className="border-b border-gray-200 pb-3">
+                    <CardTitle className="text-xl font-semibold text-gray-900">Abrir caja</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 gap-4 pt-6 md:grid-cols-5">
+                    <div>
+                      <label className={FIELD_LABEL_CLASS}>Fecha de apertura</label>
+                      <Input type="date" value={aperturaFecha} onChange={(e) => setAperturaFecha(e.target.value)} className={INPUT_CLASS} />
                     </div>
-                    <Button
-                      onClick={handleApertura}
-                      disabled={loadingAction || !aperturaMonto.trim()}
-                      className="w-full bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
-                    >
-                      {loadingAction && activeAction === "apertura" ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Abriendo caja...
-                        </>
-                      ) : (
-                        "Abrir caja"
-                      )}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                  <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Cierre de caja</CardTitle>
-                </CardHeader>
-                <CardContent className="grid grid-cols-1 gap-3 pt-4 md:grid-cols-4">
-                  <div>
-                    <label className="text-xs font-medium text-[#666370]">Fecha de cierre</label>
-                    <Input type="date" value={cierreFecha} onChange={(e) => setCierreFecha(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#666370]">Efectivo contado</label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={cierreEfectivoContado}
-                      onChange={(e) => setCierreEfectivoContado(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#666370]">Observaciones (opcional)</label>
-                    <Input value={cierreNota} onChange={(e) => setCierreNota(e.target.value)} />
-                  </div>
-                  <div className="flex flex-col justify-end gap-2">
-                    <div className="rounded-md border border-[#ddd9e6] bg-[#f2f0f7] p-2 text-xs text-[#4b4857]">
-                      <div className="flex items-center justify-between">
-                        <span>Diferencia</span>
-                        <span
-                          className={`font-semibold ${
-                            cierreDiferencia === null
-                              ? "text-[#4b4857]"
-                              : cierreDiferencia > 0
-                                ? "text-emerald-700"
-                                : "text-[#2e2d35]"
-                          }`}
-                        >
-                          {cierreDiferencia === null ? "--" : formatMoney(cierreDiferencia)}
-                        </span>
+                    <div>
+                      <label className={FIELD_LABEL_CLASS}>Monto inicial</label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={aperturaMonto}
+                        onChange={(e) => setAperturaMonto(e.target.value)}
+                        className={INPUT_CLASS}
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className={FIELD_LABEL_CLASS}>Observaciones</label>
+                      <Input value={aperturaNota} onChange={(e) => setAperturaNota(e.target.value)} className={INPUT_CLASS} placeholder="Opcional" />
+                    </div>
+                    <div className="flex flex-col justify-end gap-3">
+                      <div className={INFO_PANEL_CLASS}>
+                        El monto inicial se registra como efectivo de apertura.
                       </div>
+                      <Button
+                        onClick={handleApertura}
+                        disabled={loadingAction || !aperturaMonto.trim()}
+                        className={`w-full ${PRIMARY_BUTTON_CLASS}`}
+                      >
+                        {loadingAction && activeAction === "apertura" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Abriendo caja...
+                          </>
+                        ) : (
+                          "Abrir caja"
+                        )}
+                      </Button>
                     </div>
-                    <Button
-                      onClick={handleCierreCaja}
-                      disabled={
-                        loadingAction || loadingEfectivoEnCaja || efectivoEnCaja === null || !cierreEfectivoContado.trim()
-                      }
-                      className="w-full bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
-                    >
-                      {loadingAction && activeAction === "cierre" ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Cerrando caja...
-                        </>
-                      ) : (
-                        "Cerrar caja"
-                      )}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+
+                <Card className={SECTION_CARD_CLASS}>
+                  <CardHeader className="border-b border-gray-200 pb-3">
+                    <CardTitle className="text-xl font-semibold text-gray-900">Cierre de caja</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 gap-4 pt-6 md:grid-cols-4">
+                    <div>
+                      <label className={FIELD_LABEL_CLASS}>Fecha de cierre</label>
+                      <Input type="date" value={cierreFecha} onChange={(e) => setCierreFecha(e.target.value)} className={INPUT_CLASS} />
+                    </div>
+                    <div>
+                      <label className={FIELD_LABEL_CLASS}>Efectivo contado</label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={cierreEfectivoContado}
+                        onChange={(e) => setCierreEfectivoContado(e.target.value)}
+                        className={INPUT_CLASS}
+                      />
+                    </div>
+                    <div>
+                      <label className={FIELD_LABEL_CLASS}>Observaciones</label>
+                      <Input value={cierreNota} onChange={(e) => setCierreNota(e.target.value)} className={INPUT_CLASS} placeholder="Opcional" />
+                    </div>
+                    <div className="flex flex-col justify-end gap-3">
+                      <div className={INFO_PANEL_CLASS}>
+                        <div className="flex items-center justify-between gap-3">
+                          <span>Diferencia</span>
+                          <span
+                            className={`font-semibold ${
+                              cierreDiferencia === null
+                                ? "text-gray-700"
+                                : cierreDiferencia > 0
+                                  ? "text-green-700"
+                                  : "text-gray-900"
+                            }`}
+                          >
+                            {cierreDiferencia === null ? "--" : formatMoney(cierreDiferencia)}
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        onClick={handleCierreCaja}
+                        disabled={
+                          loadingAction || loadingEfectivoEnCaja || efectivoEnCaja === null || !cierreEfectivoContado.trim()
+                        }
+                        className={`w-full ${PRIMARY_BUTTON_CLASS}`}
+                      >
+                        {loadingAction && activeAction === "cierre" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Cerrando caja...
+                          </>
+                        ) : (
+                          "Cerrar caja"
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
 
               {reporteResumen ? (
-                <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                  <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                    <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Reporte del cierre</CardTitle>
+                <Card className={SECTION_CARD_CLASS}>
+                  <CardHeader className="border-b border-gray-200 pb-3">
+                    <CardTitle className="text-xl font-semibold text-gray-900">Reporte del cierre</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-4 pt-4">
-                    <p className="text-sm text-[#666370]">
+                  <CardContent className="space-y-4 pt-6">
+                    <p className="text-sm text-gray-600">
                       Período: {formatDate(reporteResumen.inicio)} - {formatDate(reporteResumen.fin)}
                     </p>
 
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      <div className="rounded-md border border-[#e2deea] bg-[#f3f1f8] p-3">
-                        <p className="text-xs text-[#666370]">Ingresos</p>
-                        <p className="text-lg font-semibold text-[#2e2d35]">{formatMoney(reporteResumen.ingresos)}</p>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-sm text-gray-600">Ingresos</p>
+                        <p className="mt-1 text-lg font-semibold text-gray-900">{formatMoney(reporteResumen.ingresos)}</p>
                       </div>
-                      <div className="rounded-md border border-[#e2deea] bg-[#f3f1f8] p-3">
-                        <p className="text-xs text-[#666370]">Egresos</p>
-                        <p className="text-lg font-semibold text-[#2e2d35]">{formatSignedMoney(-Math.abs(reporteResumen.egresos))}</p>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-sm text-gray-600">Egresos</p>
+                        <p className="mt-1 text-lg font-semibold text-gray-900">{formatSignedMoney(-Math.abs(reporteResumen.egresos))}</p>
                       </div>
-                      <div className="rounded-md border border-[#e2deea] bg-[#f3f1f8] p-3">
-                        <p className="text-xs text-[#666370]">Neto</p>
-                        <p className="text-lg font-semibold text-[#2e2d35]">{formatMoney(reporteResumen.neto)}</p>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-sm text-gray-600">Neto</p>
+                        <p className="mt-1 text-lg font-semibold text-gray-900">{formatMoney(reporteResumen.neto)}</p>
                       </div>
-                      <div className="rounded-md border border-[#e2deea] bg-[#f3f1f8] p-3">
-                        <p className="text-xs text-[#666370]">Diferencias</p>
-                        <p className="text-lg font-semibold text-[#2e2d35]">{formatMoney(reporteResumen.diferencias)}</p>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-sm text-gray-600">Diferencias</p>
+                        <p className="mt-1 text-lg font-semibold text-gray-900">{formatMoney(reporteResumen.diferencias)}</p>
                       </div>
                     </div>
 
                     {reporteResumen.cierres.length > 0 ? (
-                      <div className="rounded-md border border-[#e2deea] bg-[#f8f7fc] p-3 text-sm text-[#44414f]">
+                      <div className={INFO_PANEL_CLASS}>
                         Último cierre: {String(reporteResumen.cierres[0]?.cierre_id || "--")} | Estado: {" "}
                         {String(reporteResumen.cierres[0]?.estado || "--")}
                       </div>
@@ -1961,7 +2092,7 @@ export default function CierreCajaPage() {
                         type="button"
                         onClick={handleDescargarReporte}
                         disabled={descargandoReporte}
-                        className="bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
+                        className={PRIMARY_BUTTON_CLASS}
                       >
                         {descargandoReporte ? (
                           <>
@@ -1978,47 +2109,49 @@ export default function CierreCajaPage() {
               ) : null}
 
               {showManualCashForms ? (
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                  <CardTitle className="text-2xl font-semibold text-[#2e2d35]">
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <Card className={SECTION_CARD_CLASS}>
+                <CardHeader className="border-b border-gray-200 pb-3">
+                  <CardTitle className="text-xl font-semibold text-gray-900">
                     {isEditingEgreso ? "Editar egreso" : "Registrar egreso"}
                   </CardTitle>
                   {isEditingEgreso ? (
-                    <p className="text-sm text-[#6b6878]">Estás editando un egreso existente.</p>
+                    <p className="text-sm text-gray-500">Estás editando un egreso existente.</p>
                   ) : null}
                 </CardHeader>
-                <CardContent className="space-y-4 pt-4">
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <CardContent className="space-y-4 pt-6">
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
-                          <label className="text-base text-[#666370]">Concepto</label>
+                          <label className={FIELD_LABEL_CLASS}>Concepto</label>
                           <Input
                             value={egresoMotivo}
                             onChange={(e) => {
                               setEgresoMotivo(e.target.value);
                               if (error && e.target.value.trim()) setError(null);
                             }}
+                            className={INPUT_CLASS}
                           />
                         </div>
                         <div>
-                          <label className="text-base text-[#666370]">Cantidad</label>
+                          <label className={FIELD_LABEL_CLASS}>Cantidad</label>
                           <Input
                             type="number"
                             min="0"
                             value={egresoMonto}
                             onChange={(e) => setEgresoMonto(e.target.value)}
+                            className={INPUT_CLASS}
                           />
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Método de pago</label>
+                          <label className={FIELD_LABEL_CLASS}>Método de pago</label>
                           <select
                             value={egresoMetodoPago}
                             onChange={(e) => setEgresoMetodoPago(e.target.value)}
-                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            className={SELECT_CLASS}
                           >
                             {CASH_PAYMENT_METHOD_OPTIONS.map((option) => (
                               <option key={`egreso-metodo-${option.value}`} value={option.value}>
@@ -2028,11 +2161,11 @@ export default function CierreCajaPage() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Tipo</label>
+                          <label className={FIELD_LABEL_CLASS}>Tipo</label>
                           <select
                             value={egresoTipo}
                             onChange={(e) => setEgresoTipo(e.target.value)}
-                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            className={SELECT_CLASS}
                           >
                             {CASH_EXPENSE_TYPE_OPTIONS.map((option) => (
                               <option key={`egreso-tipo-${option.value}`} value={option.value}>
@@ -2042,14 +2175,14 @@ export default function CierreCajaPage() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Fecha</label>
-                          <Input type="date" value={egresoFecha} onChange={(e) => setEgresoFecha(e.target.value)} />
+                          <label className={FIELD_LABEL_CLASS}>Fecha</label>
+                          <Input type="date" value={egresoFecha} onChange={(e) => setEgresoFecha(e.target.value)} className={INPUT_CLASS} />
                         </div>
                       </div>
 
                       {isEditingEgreso ? (
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-[#666370]">
+                        <div>
+                          <label className={FIELD_LABEL_CLASS}>
                             Motivo de edición (obligatorio para auditoría)
                           </label>
                           <Input
@@ -2059,13 +2192,14 @@ export default function CierreCajaPage() {
                               if (error && e.target.value.trim()) setError(null);
                             }}
                             placeholder="Ej: Corrección de monto, ajuste de método de pago, error de digitación..."
+                            className={INPUT_CLASS}
                           />
                         </div>
                       ) : null}
                     </div>
 
-                    <div className="flex items-center justify-end gap-2 border-t border-[#e4e1eb] pt-3">
-                      <Button variant="outline" onClick={resetEgresoForm} className="min-w-24">
+                    <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4">
+                      <Button variant="outline" onClick={resetEgresoForm} className={`min-w-24 ${OUTLINE_BUTTON_CLASS}`}>
                         Cancelar
                       </Button>
                       <Button
@@ -2075,7 +2209,7 @@ export default function CierreCajaPage() {
                           !egresoMotivo.trim() ||
                           (isEditingEgreso && !egresoMotivoEdicion.trim())
                         }
-                        className="min-w-24 bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
+                        className={`min-w-24 ${PRIMARY_BUTTON_CLASS}`}
                       >
                         {loadingAction && activeAction === "egreso" ? (
                           <>
@@ -2092,46 +2226,48 @@ export default function CierreCajaPage() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                  <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                    <CardTitle className="text-2xl font-semibold text-[#2e2d35]">
+                <Card className={SECTION_CARD_CLASS}>
+                  <CardHeader className="border-b border-gray-200 pb-3">
+                    <CardTitle className="text-xl font-semibold text-gray-900">
                       {editingIngresoId ? "Editar ingreso manual" : "Registrar ingreso manual"}
                     </CardTitle>
                     {editingIngresoId ? (
-                      <p className="text-sm text-[#6b6878]">Estás editando un ingreso existente.</p>
+                      <p className="text-sm text-gray-500">Estás editando un ingreso existente.</p>
                     ) : null}
                   </CardHeader>
-                  <CardContent className="space-y-4 pt-4">
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <CardContent className="space-y-4 pt-6">
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
-                          <label className="text-base text-[#666370]">Concepto</label>
+                          <label className={FIELD_LABEL_CLASS}>Concepto</label>
                           <Input
                             value={ingresoMotivo}
                             onChange={(e) => {
                               setIngresoMotivo(e.target.value);
                               if (error && e.target.value.trim()) setError(null);
                             }}
+                            className={INPUT_CLASS}
                           />
                         </div>
                         <div>
-                          <label className="text-base text-[#666370]">Cantidad</label>
+                          <label className={FIELD_LABEL_CLASS}>Cantidad</label>
                           <Input
                             type="number"
                             min="0"
                             value={ingresoMonto}
                             onChange={(e) => setIngresoMonto(e.target.value)}
+                            className={INPUT_CLASS}
                           />
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Método de pago</label>
+                          <label className={FIELD_LABEL_CLASS}>Método de pago</label>
                           <select
                             value={ingresoMetodoPago}
                             onChange={(e) => setIngresoMetodoPago(e.target.value)}
-                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            className={SELECT_CLASS}
                           >
                             {CASH_PAYMENT_METHOD_OPTIONS.map((option) => (
                               <option key={`ingreso-metodo-${option.value}`} value={option.value}>
@@ -2141,11 +2277,11 @@ export default function CierreCajaPage() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Tipo</label>
+                          <label className={FIELD_LABEL_CLASS}>Tipo</label>
                           <select
                             value={ingresoTipo}
                             onChange={(e) => setIngresoTipo(e.target.value)}
-                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            className={SELECT_CLASS}
                           >
                             {CASH_INCOME_TYPE_OPTIONS.map((option) => (
                               <option key={`ingreso-tipo-${option.value}`} value={option.value}>
@@ -2155,14 +2291,14 @@ export default function CierreCajaPage() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Fecha</label>
-                          <Input type="date" value={ingresoFecha} onChange={(e) => setIngresoFecha(e.target.value)} />
+                          <label className={FIELD_LABEL_CLASS}>Fecha</label>
+                          <Input type="date" value={ingresoFecha} onChange={(e) => setIngresoFecha(e.target.value)} className={INPUT_CLASS} />
                         </div>
                       </div>
 
                       {editingIngresoId ? (
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-[#666370]">
+                        <div>
+                          <label className={FIELD_LABEL_CLASS}>
                             Motivo de edición (obligatorio para auditoría)
                           </label>
                           <Input
@@ -2172,13 +2308,14 @@ export default function CierreCajaPage() {
                               if (error && e.target.value.trim()) setError(null);
                             }}
                             placeholder="Ej: Corrección de monto, método de pago, error de digitación..."
+                            className={INPUT_CLASS}
                           />
                         </div>
                       ) : null}
                     </div>
 
-                      <div className="flex items-center justify-end gap-2 border-t border-[#e4e1eb] pt-3">
-                        <Button variant="outline" onClick={resetIngresoForm} className="min-w-24">
+                      <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4">
+                        <Button variant="outline" onClick={resetIngresoForm} className={`min-w-24 ${OUTLINE_BUTTON_CLASS}`}>
                           Cancelar
                         </Button>
                         <Button
@@ -2188,7 +2325,7 @@ export default function CierreCajaPage() {
                             !ingresoMotivo.trim() ||
                             (Boolean(editingIngresoId) && !ingresoMotivoEdicion.trim())
                           }
-                          className="min-w-24 bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
+                          className={`min-w-24 ${PRIMARY_BUTTON_CLASS}`}
                         >
                           {loadingAction && activeAction === "ingreso" ? (
                             <>
@@ -2207,94 +2344,90 @@ export default function CierreCajaPage() {
               </div>
               ) : null}
 
-              <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                  <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Movimientos del día</CardTitle>
+              <Card className={SECTION_CARD_CLASS}>
+                <CardHeader className="border-b border-gray-200 pb-3">
+                  <CardTitle className="text-xl font-semibold text-gray-900">Movimientos del día</CardTitle>
                 </CardHeader>
-                <CardContent className="pt-4">
-                  <div className="overflow-x-auto rounded-md border border-[#dcd9e6]">
+                <CardContent className="pt-6">
+                  <div className={TABLE_WRAPPER_CLASS}>
                     <table className="min-w-full text-sm">
-                      <thead className="bg-[#eeebf4] text-left text-sm font-medium text-[#5f5c69]">
+                      <thead className={TABLE_HEAD_CLASS}>
                         <tr>
-                          <th className="px-3 py-2">Fecha</th>
-                          <th className="px-3 py-2">Tipo</th>
-                          <th className="px-3 py-2">Concepto</th>
-                          <th className="px-3 py-2">Motivo edición</th>
-                          <th className="px-3 py-2">Medio</th>
-                          <th className="px-3 py-2 text-right">Monto</th>
-                          <th className="px-3 py-2 text-right">Efectivo esperado</th>
-                          <th className="px-3 py-2 text-right">Acciones</th>
+                          <th className={TABLE_HEAD_CELL_CLASS}>Fecha</th>
+                          <th className={TABLE_HEAD_CELL_CLASS}>Tipo</th>
+                          <th className={TABLE_HEAD_CELL_CLASS}>Concepto</th>
+                          <th className={TABLE_HEAD_CELL_CLASS}>Motivo edición</th>
+                          <th className={TABLE_HEAD_CELL_CLASS}>Medio</th>
+                          <th className={`${TABLE_HEAD_CELL_CLASS} text-right`}>Monto</th>
+                          <th className={`${TABLE_HEAD_CELL_CLASS} text-right`}>Efectivo esperado</th>
+                          <th className={`${TABLE_HEAD_CELL_CLASS} text-right`}>Acciones</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-[#ece9f2] text-[#3d3a46]">
+                      <tbody className="divide-y divide-gray-200 text-gray-700">
                         {loadingIngresos || loadingEgresos || loadingGiftcards ? (
                           <tr>
-                            <td colSpan={8} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">
                               Cargando movimientos...
                             </td>
                           </tr>
                         ) : movimientosConSaldo.length === 0 ? (
                           <tr>
-                            <td colSpan={8} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">
                               No hay movimientos registrados para el día.
                             </td>
                           </tr>
                         ) : (
                           movimientosConSaldo.map((movimiento) => (
-                            <tr key={movimiento.id}>
-                              <td className="px-3 py-2 font-medium text-[#2e2d35]">{movimiento.fecha}</td>
-                              <td className="px-3 py-2">
+                            <tr key={movimiento.id} className="hover:bg-gray-50">
+                              <td className={`${TABLE_CELL_CLASS} font-medium text-gray-900`}>{movimiento.fecha}</td>
+                              <td className={TABLE_CELL_CLASS}>
                                 <div className="flex items-center gap-2">
                                   <span
-                                    className={`inline-flex rounded-md px-2 py-0.5 text-xs font-semibold ${
+                                    className={`${BADGE_BASE_CLASS} ${
                                       movimiento.tipo === "egreso"
-                                        ? "bg-rose-100 text-rose-700"
-                                        : "bg-emerald-100 text-emerald-700"
+                                        ? "border-red-200 bg-red-100 text-red-700"
+                                        : "border-green-200 bg-green-100 text-green-700"
                                     }`}
                                   >
                                     {movimiento.tipo === "egreso" ? "Egreso" : "Ingreso"}
                                   </span>
-                                  <span
-                                    className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${
-                                      movimiento.tipo === "egreso"
-                                        ? "bg-[#e9e6f0] text-[#4c4958]"
-                                        : "bg-[#efedf5] text-[#4f4b5d]"
-                                    }`}
-                                  >
+                                  <span className={`${BADGE_BASE_CLASS} border-gray-300 bg-gray-100 text-gray-700`}>
                                     {movimiento.etiquetaTipo}
                                   </span>
                                 </div>
                               </td>
-                              <td className="px-3 py-2">{movimiento.detalle}</td>
-                              <td className="px-3 py-2 text-xs text-[#555261]">
+                              <td className={TABLE_CELL_CLASS}>{movimiento.detalle}</td>
+                              <td className={`${TABLE_CELL_CLASS} text-xs text-gray-600`}>
                                 {movimiento.motivoEdicion ? (
-                                  <span className="inline-flex max-w-[220px] items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800">
+                                  <span className={`${BADGE_BASE_CLASS} max-w-[220px] border-yellow-200 bg-yellow-50 text-yellow-800`}>
                                     {movimiento.motivoEdicion}
                                   </span>
                                 ) : (
-                                  <span className="text-[#9c98aa]">—</span>
+                                  <span className="text-gray-400">—</span>
                                 )}
                               </td>
-                              <td className="px-3 py-2">{movimiento.medio}</td>
-                              <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
+                              <td className={TABLE_CELL_CLASS}>{movimiento.medio}</td>
+                              <td className={`${TABLE_CELL_CLASS} text-right font-semibold text-gray-900`}>
                                 {formatSignedMoney(movimiento.monto)}
                               </td>
-                              <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
+                              <td className={`${TABLE_CELL_CLASS} text-right font-semibold text-gray-900`}>
                                 {formatMoney(movimiento.saldo_esperado)}
                               </td>
-                              <td className="px-3 py-2 text-right">
+                              <td className={`${TABLE_CELL_CLASS} text-right`}>
                                 {canEditMovimientos && movimiento.editable !== false ? (
-                                  <button
+                                  <Button
                                     type="button"
+                                    variant="outline"
+                                    size="sm"
                                     onClick={() =>
                                       movimiento.tipo === "egreso"
                                         ? startEditEgreso(movimiento.id.replace(/^egreso-/, ""))
                                         : startEditIngreso(movimiento.id.replace(/^ingreso-/, ""))
                                     }
-                                    className="text-xs font-semibold text-[#6b6878] hover:text-[#2e2d35]"
+                                    className={OUTLINE_BUTTON_CLASS}
                                   >
                                     Editar
-                                  </button>
+                                  </Button>
                                 ) : null}
                               </td>
                             </tr>
@@ -2305,7 +2438,6 @@ export default function CierreCajaPage() {
                   </div>
                 </CardContent>
               </Card>
-            </section>
           </div>
         </div>
       </main>

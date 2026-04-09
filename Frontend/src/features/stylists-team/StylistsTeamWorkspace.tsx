@@ -242,6 +242,28 @@ const chunk = <T,>(items: T[], size: number): T[][] => {
   return result;
 };
 
+const PANEL_CLASS = "rounded-xl border border-gray-300 bg-white shadow";
+const TABLE_WRAPPER_CLASS = "overflow-hidden rounded-lg border border-gray-300 bg-white";
+const TABLE_HEAD_CLASS = "bg-gray-50";
+const TABLE_HEAD_CELL_CLASS = "px-4 py-3 text-left text-sm font-medium text-gray-700";
+const TABLE_ROW_CLASS = "border-t border-gray-200 hover:bg-gray-50";
+const TABLE_CELL_CLASS = "px-4 py-3 text-sm text-gray-700";
+const TABLE_CELL_MEDIUM_CLASS = "px-4 py-3 text-sm font-medium text-gray-900";
+const TABLE_CELL_STRONG_CLASS = "px-4 py-3 text-sm font-semibold text-gray-900";
+const FIELD_LABEL_CLASS = "mb-2 block text-sm font-medium text-gray-700";
+const INPUT_CLASS =
+  "h-10 rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus-visible:border-gray-500 focus-visible:ring-1 focus-visible:ring-gray-500";
+const SELECT_CLASS =
+  "h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 shadow-sm outline-none transition focus:border-gray-500 focus:ring-2 focus:ring-gray-500/20";
+const OUTLINE_BUTTON_CLASS = "border-gray-300 bg-white text-gray-800 hover:bg-gray-100 hover:text-gray-900";
+const PRIMARY_BUTTON_CLASS = "bg-black text-white hover:bg-gray-800";
+const STATUS_PILL_CLASS =
+  "inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600";
+const BADGE_BASE_CLASS = "rounded-full border px-2 py-1 text-xs font-medium shadow-none";
+const ERROR_ALERT_CLASS = "mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700";
+const WARNING_ALERT_CLASS =
+  "mt-4 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800";
+
 function HeaderLabel({ lines }: { lines: string[] }) {
   return (
     <span className="inline-flex min-w-[88px] flex-col leading-[1.15] whitespace-normal">
@@ -260,12 +282,12 @@ function EmptyPanel({
   description: string;
 }) {
   return (
-    <div className="flex min-h-[240px] flex-col items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
-      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-sm">
-        <Users className="h-6 w-6 text-slate-500" />
+    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg border border-gray-300 bg-white">
+        <Users className="h-5 w-5 text-gray-500" />
       </div>
-      <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-      <p className="mt-2 max-w-sm text-sm text-slate-500">{description}</p>
+      <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+      <p className="mt-2 max-w-sm text-sm text-gray-500">{description}</p>
     </div>
   );
 }
@@ -289,18 +311,18 @@ function MonthlyProjectionSection({
   const countFormatter = useMemo(() => new Intl.NumberFormat("es-CO"), []);
 
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_10px_35px_rgba(15,23,42,0.04)]">
+    <section className={`${PANEL_CLASS} p-6`}>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold text-slate-950">Proyección del mes</h2>
-          <p className="text-sm text-slate-500">
+          <h2 className="text-xl font-semibold text-gray-900">Proyección del mes</h2>
+          <p className="text-sm text-gray-500">
             Resumen de ingresos y proyección mensual por estilista.
           </p>
-          <p className="text-xs text-slate-500">Período: {periodLabel || "Mes en curso"}</p>
+          <p className="text-xs text-gray-500">Período: {periodLabel || "Mes en curso"}</p>
         </div>
         <div className="flex items-center gap-2">
           {loading ? (
-            <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
+            <div className={STATUS_PILL_CLASS}>
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               Cargando proyección
             </div>
@@ -308,7 +330,7 @@ function MonthlyProjectionSection({
           <Button
             type="button"
             variant="outline"
-            className="border-slate-200 bg-white"
+            className={OUTLINE_BUTTON_CLASS}
             onClick={onRetry}
             disabled={loading}
           >
@@ -318,9 +340,14 @@ function MonthlyProjectionSection({
       </div>
 
       {error ? (
-        <div className="mb-4 flex items-start justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <span>{error}</span>
-          <Button size="sm" variant="outline" onClick={onRetry} className="border-rose-200 bg-white">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onRetry}
+            className="border-red-300 bg-white text-red-700 hover:bg-red-100"
+          >
             Reintentar
           </Button>
         </div>
@@ -331,7 +358,7 @@ function MonthlyProjectionSection({
           {[0, 1, 2].map((index) => (
             <div
               key={index}
-              className="h-14 animate-pulse rounded-2xl bg-slate-100/80"
+              className="h-14 animate-pulse rounded-lg bg-gray-100"
             />
           ))}
         </div>
@@ -341,25 +368,25 @@ function MonthlyProjectionSection({
           description="No se encontraron métricas de performance mensual para los filtros actuales."
         />
       ) : (
-        <div className="overflow-hidden rounded-3xl border border-slate-200">
+        <div className={TABLE_WRAPPER_CLASS}>
           <div className="overflow-x-auto">
             <table className="min-w-[820px] w-full text-sm">
-              <thead className="bg-slate-50/90">
+              <thead className={TABLE_HEAD_CLASS}>
                 <tr>
-                  <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <th className={TABLE_HEAD_CELL_CLASS}>
                     Estilista
                   </th>
-                  <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <th className={TABLE_HEAD_CELL_CLASS}>
                     <HeaderLabel lines={["# Citas", "del mes"]} />
                   </th>
-                  <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <th className={TABLE_HEAD_CELL_CLASS}>
                     <HeaderLabel lines={["Ganado", "del mes"]} />
                   </th>
-                  <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <th className={TABLE_HEAD_CELL_CLASS}>
                     <HeaderLabel lines={["Proyección", "del mes"]} />
                   </th>
                   {hasOcupacion ? (
-                    <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <th className={TABLE_HEAD_CELL_CLASS}>
                       <HeaderLabel lines={["Ocupación", "del mes"]} />
                     </th>
                   ) : null}
@@ -367,25 +394,25 @@ function MonthlyProjectionSection({
               </thead>
               <tbody className="bg-white">
                 {rows.map((row) => (
-                  <tr key={row.profesionalId} className="border-t border-slate-100 hover:bg-slate-50/60">
-                    <td className="px-4 py-4 font-medium text-slate-900">{row.nombre}</td>
-                    <td className="px-4 py-4 font-medium text-slate-900">
+                  <tr key={row.profesionalId} className={TABLE_ROW_CLASS}>
+                    <td className={TABLE_CELL_MEDIUM_CLASS}>{row.nombre}</td>
+                    <td className={TABLE_CELL_MEDIUM_CLASS}>
                       {row.citasActivas === null
                         ? "--"
                         : countFormatter.format(row.citasActivas)}
                     </td>
-                    <td className="px-4 py-4 font-semibold text-slate-950">
+                    <td className={TABLE_CELL_STRONG_CLASS}>
                       {row.ingresosGenerados === null
                         ? "--"
                         : formatCurrencyNoDecimals(row.ingresosGenerados, currency)}
                     </td>
-                    <td className="px-4 py-4 font-semibold text-slate-950">
+                    <td className={TABLE_CELL_STRONG_CLASS}>
                       {row.comisionProyectada === null
                         ? "--"
                         : formatCurrencyNoDecimals(row.comisionProyectada, currency)}
                     </td>
                     {hasOcupacion ? (
-                      <td className="px-4 py-4 font-medium text-slate-900">
+                      <td className={TABLE_CELL_MEDIUM_CLASS}>
                         {row.ocupacionPct === null || Number.isNaN(row.ocupacionPct)
                           ? "--"
                           : `${row.ocupacionPct.toFixed(1)}%`}
@@ -1560,8 +1587,8 @@ export function StylistsTeamWorkspace({
 
   if (authLoading || isBootLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white">
-        <div className="flex items-center gap-3 text-slate-700">
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="flex items-center gap-3 text-gray-700">
           <Loader2 className="h-5 w-5 animate-spin" />
           <span>Cargando módulo de equipo...</span>
         </div>
@@ -1570,39 +1597,34 @@ export function StylistsTeamWorkspace({
   }
 
   return (
-    <div className="flex min-h-screen bg-[#f8fafc] text-slate-900">
+    <div className="flex h-screen bg-gray-50 text-gray-900">
       <Sidebar />
 
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1500px] px-4 py-5 sm:px-6 lg:px-8">
+      <main className="flex-1 overflow-auto">
+        <div className="p-8">
           <PageHeader
             title={
               viewMode === "dashboard"
-                ? "Dashboard de Estilistas / Equipo"
-                : "Configuración de Equipo"
-            }
-            subtitle={
-              viewMode === "dashboard"
-                ? `Sede: ${selectedSedeLabel}`
-                : `Sede activa: ${selectedSedeLabel}`
+                ? "Estilistas"
+                : "Configuración de Estilistas"
             }
             actions={
               <div className="flex flex-wrap items-center gap-2">
                 {viewMode === "dashboard" ? (
                   <Button
                     type="button"
-                    variant="outline"
-                    className="border-slate-200 bg-white"
+                    variant="default"
+                    className={PRIMARY_BUTTON_CLASS}
                     onClick={() => setViewMode("settings")}
                   >
                     <Settings2 className="mr-2 h-4 w-4" />
-                    Configuración de equipo
+                    Configuración de Estilistas
                   </Button>
                 ) : (
                   <Button
                     type="button"
                     variant="outline"
-                    className="border-slate-200 bg-white"
+                    className={OUTLINE_BUTTON_CLASS}
                     onClick={() => setViewMode("dashboard")}
                   >
                     <ArrowLeft className="mr-2 h-4 w-4" />
@@ -1613,17 +1635,17 @@ export function StylistsTeamWorkspace({
             }
           />
 
-          <section className="rounded-[28px] border border-slate-200 bg-white px-5 py-5 shadow-[0_10px_35px_rgba(15,23,42,0.04)]">
+          <section className={`${PANEL_CLASS} p-6`}>
             <div className="grid gap-4 xl:grid-cols-[minmax(240px,300px)_minmax(320px,360px)] xl:items-end xl:justify-between">
               <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                <label className={FIELD_LABEL_CLASS}>
                   Sede
                 </label>
                 {shouldShowSedeDropdown ? (
                   <select
                     value={selectedSedeId}
                     onChange={(event) => setSelectedSedeId(event.target.value)}
-                    className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm shadow-sm outline-none transition focus:border-slate-300"
+                    className={SELECT_CLASS}
                   >
                     {canSelectAllSedes ? (
                       <option value={ALL_SEDES_VALUE}>Todas las sedes</option>
@@ -1635,25 +1657,25 @@ export function StylistsTeamWorkspace({
                     ))}
                   </select>
                 ) : (
-                  <div className="flex h-11 w-full items-center rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 shadow-sm">
+                  <div className="flex h-10 w-full items-center rounded-md border border-gray-300 bg-gray-50 px-3 text-sm text-gray-900 shadow-sm">
                     {selectedSedeLabel}
                   </div>
                 )}
               </div>
 
               <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                <label className={FIELD_LABEL_CLASS}>
                   Rango
                 </label>
                 <Popover open={isDateRangeOpen} onOpenChange={setIsDateRangeOpen}>
                   <PopoverTrigger asChild>
                     <button
                       type="button"
-                      className="flex h-11 w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 text-left text-sm text-slate-900 shadow-sm transition hover:border-slate-300"
+                      className="flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 text-left text-sm text-gray-900 shadow-sm transition hover:bg-gray-50"
                     >
                       <span className="truncate">{formatDateRangeSelectLabel(dateRange)}</span>
                       <ChevronDown
-                        className={`ml-3 h-4 w-4 shrink-0 text-slate-500 transition-transform ${
+                        className={`ml-3 h-4 w-4 shrink-0 text-gray-500 transition-transform ${
                           isDateRangeOpen ? "rotate-180" : ""
                         }`}
                       />
@@ -1661,11 +1683,11 @@ export function StylistsTeamWorkspace({
                   </PopoverTrigger>
                   <PopoverContent
                     align="start"
-                    className="w-[min(92vw,360px)] rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_18px_50px_rgba(15,23,42,0.12)]"
+                    className="w-[min(92vw,360px)] rounded-lg border border-gray-300 bg-white p-4 shadow-lg"
                   >
                     <div className="space-y-4">
                       <div>
-                        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        <label className={FIELD_LABEL_CLASS}>
                           Fecha inicial
                         </label>
                         <Input
@@ -1675,12 +1697,12 @@ export function StylistsTeamWorkspace({
                           onChange={(event) =>
                             setDateRange((current) => ({ ...current, start: event.target.value }))
                           }
-                          className="h-11 rounded-2xl border-slate-200 shadow-none focus-visible:ring-0"
+                          className={INPUT_CLASS}
                         />
                       </div>
 
                       <div>
-                        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        <label className={FIELD_LABEL_CLASS}>
                           Fecha final
                         </label>
                         <Input
@@ -1690,11 +1712,11 @@ export function StylistsTeamWorkspace({
                           onChange={(event) =>
                             setDateRange((current) => ({ ...current, end: event.target.value }))
                           }
-                          className="h-11 rounded-2xl border-slate-200 shadow-none focus-visible:ring-0"
+                          className={INPUT_CLASS}
                         />
                       </div>
 
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                      <div className="rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-600">
                         {formatDateRangeSelectLabel(dateRange)}
                       </div>
                     </div>
@@ -1705,35 +1727,35 @@ export function StylistsTeamWorkspace({
           </section>
 
           {bootError ? (
-            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            <div className={ERROR_ALERT_CLASS}>
               {bootError}
             </div>
           ) : null}
 
           {metricsError ? (
-            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            <div className={ERROR_ALERT_CLASS}>
               {metricsError}
             </div>
           ) : null}
 
           {metricsWarning ? (
-            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <div className={WARNING_ALERT_CLASS}>
               {metricsWarning}
             </div>
           ) : null}
 
           {viewMode === "dashboard" ? (
-            <div className="mt-6 space-y-6">
-              <section className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_10px_35px_rgba(15,23,42,0.04)]">
+            <div className="mt-8 space-y-6">
+              <section className={`${PANEL_CLASS} p-6`}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-2xl font-semibold text-slate-950">Estilistas</h2>
-                    <p className="text-sm text-slate-500">
+                    <h2 className="text-xl font-semibold text-gray-900">Estilistas</h2>
+                    <p className="text-sm text-gray-500">
                       Métricas por estilista para la sede y el rango seleccionados.
                     </p>
                   </div>
                   {isMetricsLoading ? (
-                    <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
+                    <div className={STATUS_PILL_CLASS}>
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       Actualizando métricas
                     </div>
@@ -1746,15 +1768,15 @@ export function StylistsTeamWorkspace({
                     description="Selecciona otra sede o agrega estilistas al equipo para ver el tablero."
                   />
                 ) : (
-                  <div className="overflow-hidden rounded-3xl border border-slate-200">
+                  <div className={TABLE_WRAPPER_CLASS}>
                     <div className="overflow-x-auto">
                       <table className="min-w-[1240px] w-full text-sm">
-                        <thead className="bg-slate-50/90">
+                        <thead className={TABLE_HEAD_CLASS}>
                           <tr>
                             {DASHBOARD_HEADERS.map((header) => (
                               <th
                                 key={header.key}
-                                className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500"
+                                className={TABLE_HEAD_CELL_CLASS}
                               >
                                 <HeaderLabel lines={header.lines} />
                               </th>
@@ -1765,29 +1787,29 @@ export function StylistsTeamWorkspace({
                           {dashboardRows.map((row) => (
                             <tr
                               key={row.profesionalId}
-                              className="border-t border-slate-100 hover:bg-slate-50/60"
+                              className={TABLE_ROW_CLASS}
                             >
-                              <td className="px-4 py-4 font-medium text-slate-900">{row.nombre}</td>
-                              <td className="px-4 py-4 font-medium text-slate-900">{row.citas ?? "--"}</td>
-                              <td className="px-4 py-4 font-medium text-slate-900">
+                              <td className={TABLE_CELL_MEDIUM_CLASS}>{row.nombre}</td>
+                              <td className={TABLE_CELL_MEDIUM_CLASS}>{row.citas ?? "--"}</td>
+                              <td className={TABLE_CELL_MEDIUM_CLASS}>
                                 {row.cantidadProductos ?? 0}
                               </td>
-                              <td className="px-4 py-4 font-medium text-slate-900">
+                              <td className={TABLE_CELL_MEDIUM_CLASS}>
                                 {formatCurrencyNoDecimals(row.totalVentaServicios, currency)}
                               </td>
-                              <td className="px-4 py-4 font-medium text-slate-900">
+                              <td className={TABLE_CELL_MEDIUM_CLASS}>
                                 {formatCurrencyNoDecimals(row.totalVentaProductos, currency)}
                               </td>
-                              <td className="px-4 py-4 font-semibold text-slate-950">
+                              <td className={TABLE_CELL_STRONG_CLASS}>
                                 {formatCurrencyNoDecimals(row.totalVentas, currency)}
                               </td>
-                              <td className="px-4 py-4 font-medium text-slate-900">
+                              <td className={TABLE_CELL_MEDIUM_CLASS}>
                                 {formatCurrencyNoDecimals(row.comisionesServicios, currency)}
                               </td>
-                              <td className="px-4 py-4 font-medium text-slate-900">
+                              <td className={TABLE_CELL_MEDIUM_CLASS}>
                                 {formatCurrencyNoDecimals(row.comisionesProductos, currency)}
                               </td>
-                              <td className="px-4 py-4 font-semibold text-slate-950">
+                              <td className={TABLE_CELL_STRONG_CLASS}>
                                 {formatCurrencyNoDecimals(row.totalComisiones, currency)}
                               </td>
                             </tr>
@@ -1808,51 +1830,51 @@ export function StylistsTeamWorkspace({
                 currency={currency}
               />
 
-              <section className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_10px_35px_rgba(15,23,42,0.04)]">
+              <section className={`${PANEL_CLASS} p-6`}>
                 <div className="mb-4">
-                  <h2 className="text-2xl font-semibold text-slate-950">Vendedores</h2>
-                  <p className="text-sm text-slate-500">
+                  <h2 className="text-xl font-semibold text-gray-900">Vendedores</h2>
+                  <p className="text-sm text-gray-500">
                     Ventas de productos y comisiones registradas para usuarios de la sede actual.
                   </p>
                 </div>
 
                 {vendorRows.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-sm text-slate-500">
+                  <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-5 py-8 text-sm text-gray-500">
                     No hay vendedores configurados o no existen ventas de productos para este rango.
                   </div>
                 ) : (
-                  <div className="overflow-hidden rounded-3xl border border-slate-200">
+                  <div className={TABLE_WRAPPER_CLASS}>
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-sm">
-                        <thead className="bg-slate-50/90">
+                        <thead className={TABLE_HEAD_CLASS}>
                           <tr>
-                            <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            <th className={TABLE_HEAD_CELL_CLASS}>
                               Vendedor
                             </th>
-                            <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            <th className={TABLE_HEAD_CELL_CLASS}>
                               <HeaderLabel lines={["Total de Ventas", "Productos"]} />
                             </th>
-                            <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            <th className={TABLE_HEAD_CELL_CLASS}>
                               <HeaderLabel lines={["Comisiones por", "Productos"]} />
                             </th>
-                            <th className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            <th className={TABLE_HEAD_CELL_CLASS}>
                               <HeaderLabel lines={["Total", "Comisiones"]} />
                             </th>
                           </tr>
                         </thead>
                         <tbody className="bg-white">
                           {vendorRows.map((vendor) => (
-                            <tr key={vendor.id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                              <td className="px-4 py-4">
-                                <p className="font-medium text-slate-900">{vendor.nombre}</p>
+                            <tr key={vendor.id} className={TABLE_ROW_CLASS}>
+                              <td className={TABLE_CELL_CLASS}>
+                                <p className="font-medium text-gray-900">{vendor.nombre}</p>
                               </td>
-                              <td className="px-4 py-4 font-medium text-slate-900">
+                              <td className={TABLE_CELL_MEDIUM_CLASS}>
                                 {formatCurrencyNoDecimals(vendor.totalVentaProductos, currency)}
                               </td>
-                              <td className="px-4 py-4 font-medium text-slate-900">
+                              <td className={TABLE_CELL_MEDIUM_CLASS}>
                                 {formatCurrencyNoDecimals(vendor.comisionesProductos, currency)}
                               </td>
-                              <td className="px-4 py-4 font-semibold text-slate-950">
+                              <td className={TABLE_CELL_STRONG_CLASS}>
                                 {formatCurrencyNoDecimals(vendor.totalComisiones, currency)}
                               </td>
                             </tr>
@@ -1865,13 +1887,13 @@ export function StylistsTeamWorkspace({
               </section>
             </div>
           ) : (
-            <div className="mt-6 overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)] xl:grid xl:grid-cols-[minmax(0,1fr)_420px]">
-              <section className="p-5 sm:p-6">
+            <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+              <section className={`${PANEL_CLASS} p-6`}>
                 <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-                  <div className="flex items-center gap-6 border-b border-slate-200">
+                  <div className="flex items-center gap-6 border-b border-gray-200">
                     <button
                       type="button"
-                      className="border-b-2 border-slate-900 pb-3 text-sm font-semibold text-slate-900"
+                      className="border-b-2 border-black pb-3 text-sm font-semibold text-gray-900"
                       onClick={() =>
                         commissionsSectionRef.current?.scrollIntoView({
                           behavior: "smooth",
@@ -1883,7 +1905,7 @@ export function StylistsTeamWorkspace({
                     </button>
                     <button
                       type="button"
-                      className="pb-3 text-sm font-medium text-slate-500"
+                      className="pb-3 text-sm font-medium text-gray-500"
                       onClick={() =>
                         commissionsSectionRef.current?.scrollIntoView({
                           behavior: "smooth",
@@ -1897,7 +1919,7 @@ export function StylistsTeamWorkspace({
                   <Button
                     type="button"
                     variant="outline"
-                    className="border-slate-200 bg-white"
+                    className={OUTLINE_BUTTON_CLASS}
                     onClick={handleOpenCreate}
                   >
                     <Plus className="mr-2 h-4 w-4" />
@@ -1907,9 +1929,9 @@ export function StylistsTeamWorkspace({
 
                 <div className="space-y-8">
                   <div>
-                    <h2 className="text-2xl font-semibold text-slate-950">Estilistas del equipo</h2>
+                    <h2 className="text-xl font-semibold text-gray-900">Estilistas del equipo</h2>
 
-                    <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200">
+                    <div className={`mt-4 ${TABLE_WRAPPER_CLASS}`}>
                       {filteredStylists.length === 0 ? (
                         <EmptyPanel
                           title="No hay estilistas para configurar"
@@ -1918,15 +1940,15 @@ export function StylistsTeamWorkspace({
                       ) : (
                         <div className="overflow-x-auto">
                           <table className="min-w-full text-sm">
-                            <thead className="bg-slate-50/90">
+                            <thead className={TABLE_HEAD_CLASS}>
                               <tr>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   Estilistas
                                 </th>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   Servicios
                                 </th>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   Configurar
                                 </th>
                               </tr>
@@ -1943,35 +1965,35 @@ export function StylistsTeamWorkspace({
                                 return (
                                   <tr
                                     key={stylist.profesional_id}
-                                    className={`cursor-pointer border-t border-slate-100 transition ${
-                                      isSelected ? "bg-slate-50" : "hover:bg-slate-50/70"
+                                    className={`cursor-pointer transition ${
+                                      isSelected ? "bg-gray-100" : TABLE_ROW_CLASS
                                     }`}
                                     onClick={() => {
                                       setSelectedStylistId(stylist.profesional_id);
                                       initializeEditorState(stylist, "edit");
                                     }}
                                   >
-                                    <td className="px-4 py-3">
+                                    <td className={TABLE_CELL_CLASS}>
                                       <div className="flex items-center gap-3">
-                                        <Avatar className="h-9 w-9 bg-slate-100">
-                                          <AvatarFallback className="bg-slate-200 text-[11px] font-semibold text-slate-700">
+                                        <Avatar className="h-9 w-9 border border-gray-300 bg-gray-100">
+                                          <AvatarFallback className="bg-gray-200 text-[11px] font-semibold text-gray-700">
                                             {getInitials(stylist.nombre)}
                                           </AvatarFallback>
                                         </Avatar>
                                         <div className="min-w-0">
-                                          <p className="truncate font-medium text-slate-900">
+                                          <p className="truncate font-medium text-gray-900">
                                             {stylist.nombre}
                                           </p>
                                         </div>
                                       </div>
                                     </td>
-                                    <td className="px-4 py-3 text-slate-600">
+                                    <td className={TABLE_CELL_CLASS}>
                                       {servicesCount > 0 ? "Configurar" : "Sin servicios"}
                                     </td>
-                                    <td className="px-4 py-3">
+                                    <td className={TABLE_CELL_CLASS}>
                                       <Badge
                                         variant="outline"
-                                        className="border-slate-200 bg-white text-slate-700"
+                                        className={`${BADGE_BASE_CLASS} border-gray-300 bg-gray-100 text-gray-700`}
                                       >
                                         {stylist.comision !== null && stylist.comision !== undefined
                                           ? `${stylist.comision}%`
@@ -1989,9 +2011,9 @@ export function StylistsTeamWorkspace({
                   </div>
 
                   <div ref={commissionsSectionRef}>
-                    <h3 className="text-2xl font-semibold text-slate-950">Configurar Comisiones</h3>
+                    <h3 className="text-xl font-semibold text-gray-900">Configurar Comisiones</h3>
 
-                    <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200">
+                    <div className={`mt-4 ${TABLE_WRAPPER_CLASS}`}>
                       {filteredStylists.length === 0 ? (
                         <EmptyPanel
                           title="Sin registros para configurar"
@@ -2000,21 +2022,21 @@ export function StylistsTeamWorkspace({
                       ) : (
                         <div className="overflow-x-auto">
                           <table className="min-w-full text-sm">
-                            <thead className="bg-slate-50/90">
+                            <thead className={TABLE_HEAD_CLASS}>
                               <tr>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   Nombre
                                 </th>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   Correo
                                 </th>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   Teléfono
                                 </th>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   Comisión base
                                 </th>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   Estado
                                 </th>
                               </tr>
@@ -2023,27 +2045,27 @@ export function StylistsTeamWorkspace({
                               {filteredStylists.map((stylist) => (
                                 <tr
                                   key={`commission-${stylist.profesional_id}`}
-                                  className="cursor-pointer border-t border-slate-100 hover:bg-slate-50/60"
+                                  className={`cursor-pointer ${TABLE_ROW_CLASS}`}
                                   onClick={() => {
                                     setSelectedStylistId(stylist.profesional_id);
                                     initializeEditorState(stylist, "edit");
                                   }}
                                 >
-                                  <td className="px-4 py-3 font-medium text-slate-900">{stylist.nombre}</td>
-                                  <td className="px-4 py-3 text-slate-600">{stylist.email}</td>
-                                  <td className="px-4 py-3 text-slate-600">--</td>
-                                  <td className="px-4 py-3 text-slate-900">
+                                  <td className={TABLE_CELL_MEDIUM_CLASS}>{stylist.nombre}</td>
+                                  <td className={TABLE_CELL_CLASS}>{stylist.email}</td>
+                                  <td className={TABLE_CELL_CLASS}>--</td>
+                                  <td className={TABLE_CELL_MEDIUM_CLASS}>
                                     {stylist.comision !== null && stylist.comision !== undefined
                                       ? `${stylist.comision}%`
                                       : "--"}
                                   </td>
-                                  <td className="px-4 py-3">
+                                  <td className={TABLE_CELL_CLASS}>
                                     <Badge
                                       variant="outline"
-                                      className={`${
+                                      className={`${BADGE_BASE_CLASS} ${
                                         stylist.activo
-                                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                          : "border-slate-200 bg-slate-100 text-slate-500"
+                                          ? "border-green-200 bg-green-100 text-green-700"
+                                          : "border-gray-300 bg-gray-100 text-gray-600"
                                       }`}
                                     >
                                       {stylist.activo ? "Activo" : "Inactivo"}
@@ -2059,46 +2081,46 @@ export function StylistsTeamWorkspace({
                   </div>
 
                   <div>
-                    <h3 className="text-2xl font-semibold text-slate-950">Vendedores</h3>
+                    <h3 className="text-xl font-semibold text-gray-900">Vendedores</h3>
 
-                    <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200">
+                    <div className={`mt-4 ${TABLE_WRAPPER_CLASS}`}>
                       {vendorRows.length === 0 ? (
-                        <div className="px-4 py-6 text-sm text-slate-500">
+                        <div className="px-4 py-6 text-sm text-gray-500">
                           No hay vendedores configurados para esta sede.
                         </div>
                       ) : (
                         <div className="overflow-x-auto">
                           <table className="min-w-full text-sm">
-                            <thead className="bg-slate-50/90">
+                            <thead className={TABLE_HEAD_CLASS}>
                               <tr>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   Vendedor
                                 </th>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   <HeaderLabel lines={["Total de Ventas", "Productos"]} />
                                 </th>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   <HeaderLabel lines={["Comisiones por", "Productos"]} />
                                 </th>
-                                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                <th className={TABLE_HEAD_CELL_CLASS}>
                                   <HeaderLabel lines={["Total", "Comisiones"]} />
                                 </th>
                               </tr>
                             </thead>
                             <tbody className="bg-white">
                               {vendorRows.map((vendor) => (
-                                <tr key={vendor.id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                                  <td className="px-4 py-3">
-                                    <p className="font-medium text-slate-900">{vendor.nombre}</p>
-                                    <p className="text-xs text-slate-500">{vendor.email}</p>
+                                <tr key={vendor.id} className={TABLE_ROW_CLASS}>
+                                  <td className={TABLE_CELL_CLASS}>
+                                    <p className="font-medium text-gray-900">{vendor.nombre}</p>
+                                    <p className="text-xs text-gray-500">{vendor.email}</p>
                                   </td>
-                                  <td className="px-4 py-3 text-slate-900">
+                                  <td className={TABLE_CELL_MEDIUM_CLASS}>
                                     {formatCurrencyNoDecimals(vendor.totalVentaProductos, currency)}
                                   </td>
-                                  <td className="px-4 py-3 text-slate-900">
+                                  <td className={TABLE_CELL_MEDIUM_CLASS}>
                                     {formatCurrencyNoDecimals(vendor.comisionesProductos, currency)}
                                   </td>
-                                  <td className="px-4 py-3 font-semibold text-slate-950">
+                                  <td className={TABLE_CELL_STRONG_CLASS}>
                                     {formatCurrencyNoDecimals(vendor.totalComisiones, currency)}
                                   </td>
                                 </tr>
@@ -2112,16 +2134,16 @@ export function StylistsTeamWorkspace({
                 </div>
               </section>
 
-              <aside className="border-t border-slate-200 bg-slate-50/50 p-5 xl:border-l xl:border-t-0 xl:p-6">
+              <aside className={`${PANEL_CLASS} p-6`}>
                 {editorState ? (
                   <div className="space-y-6">
                     <div className="flex items-start justify-between gap-4">
-                      <h2 className="text-2xl font-semibold text-slate-950">
+                      <h2 className="text-xl font-semibold text-gray-900">
                         {editorState.mode === "create" ? "Nuevo Estilista" : "Editar Estilista"}
                       </h2>
                       <button
                         type="button"
-                        className="rounded-full p-2 text-slate-400 transition hover:bg-white hover:text-slate-700"
+                        className="rounded-md p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
                         onClick={() => {
                           if (selectedStylist) {
                             initializeEditorState(selectedStylist, "edit");
@@ -2135,16 +2157,16 @@ export function StylistsTeamWorkspace({
                     </div>
 
                     <div className="flex items-center gap-4">
-                      <Avatar className="h-16 w-16 bg-slate-100">
-                        <AvatarFallback className="bg-slate-200 text-lg font-semibold text-slate-700">
+                      <Avatar className="h-16 w-16 border border-gray-300 bg-gray-100">
+                        <AvatarFallback className="bg-gray-200 text-lg font-semibold text-gray-700">
                           {getInitials(editorState.nombre || selectedStylist?.nombre || "ST")}
                         </AvatarFallback>
                       </Avatar>
                       <div className="min-w-0">
-                        <p className="truncate text-xl font-semibold text-slate-950">
+                        <p className="truncate text-xl font-semibold text-gray-900">
                           {editorState.nombre || "Nuevo estilista"}
                         </p>
-                        <p className="truncate text-sm text-slate-500">
+                        <p className="truncate text-sm text-gray-500">
                           {editorState.mode === "edit"
                             ? getRoleLabel(editorState.rol)
                             : "Perfil en creación"}
@@ -2153,47 +2175,47 @@ export function StylistsTeamWorkspace({
                     </div>
 
                     <div>
-                      <h3 className="text-base font-semibold text-slate-950">Datos generales</h3>
+                      <h3 className="text-base font-semibold text-gray-900">Datos generales</h3>
                       <div className="mt-3 grid gap-3">
                         <div>
-                          <label className="mb-1.5 block text-sm font-medium text-slate-700">Nombre</label>
+                          <label className={FIELD_LABEL_CLASS}>Nombre</label>
                           <Input
                             value={editorState.nombre}
                             onChange={(event) => updateEditor("nombre", event.target.value)}
-                            className="h-11 rounded-2xl border-slate-200"
+                            className={INPUT_CLASS}
                             placeholder="Nombre completo"
                           />
                         </div>
 
                         <div>
-                          <label className="mb-1.5 block text-sm font-medium text-slate-700">Correo</label>
+                          <label className={FIELD_LABEL_CLASS}>Correo</label>
                           <Input
                             value={editorState.email}
                             onChange={(event) => updateEditor("email", event.target.value)}
-                            className="h-11 rounded-2xl border-slate-200"
+                            className={INPUT_CLASS}
                             placeholder="nombre@correo.com"
                           />
                     </div>
 
                     <div className="grid gap-3 md:grid-cols-2">
                       <div>
-                        <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                        <label className={FIELD_LABEL_CLASS}>
                               Teléfono
                             </label>
                           <Input
                             value={editorState.telefono}
                             onChange={(event) => updateEditor("telefono", event.target.value)}
-                            className="h-11 rounded-2xl border-slate-200"
+                            className={INPUT_CLASS}
                           placeholder="No disponible"
                         />
                       </div>
                       <div>
-                            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                            <label className={FIELD_LABEL_CLASS}>
                               Cargo o tipo
                             </label>
                             <Input
                               value={getRoleLabel(editorState.rol)}
-                              className="h-11 rounded-2xl border-slate-200"
+                              className={INPUT_CLASS}
                               disabled
                             />
                           </div>
@@ -2201,18 +2223,18 @@ export function StylistsTeamWorkspace({
 
                         <div className="grid gap-3 md:grid-cols-2">
                           <div>
-                            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                            <label className={FIELD_LABEL_CLASS}>
                               Comisión base
                             </label>
                             <Input
                               value={editorState.comision}
                               onChange={(event) => updateEditor("comision", event.target.value)}
-                              className="h-11 rounded-2xl border-slate-200"
+                              className={INPUT_CLASS}
                               placeholder="Ej: 20"
                             />
                           </div>
                           <div>
-                            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                            <label className={FIELD_LABEL_CLASS}>
                               Estado
                             </label>
                             <select
@@ -2220,7 +2242,7 @@ export function StylistsTeamWorkspace({
                               onChange={(event) =>
                                 updateEditor("activo", event.target.value === "activo")
                               }
-                              className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-slate-300"
+                              className={SELECT_CLASS}
                             >
                               <option value="activo">Activo</option>
                               <option value="inactivo">Inactivo</option>
@@ -2230,14 +2252,14 @@ export function StylistsTeamWorkspace({
 
                         {editorState.mode === "create" ? (
                           <div>
-                            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                            <label className={FIELD_LABEL_CLASS}>
                               Contraseña
                             </label>
                             <Input
                               type="password"
                               value={editorState.password}
                               onChange={(event) => updateEditor("password", event.target.value)}
-                              className="h-11 rounded-2xl border-slate-200"
+                              className={INPUT_CLASS}
                               placeholder="Mínimo 6 caracteres"
                             />
                           </div>
@@ -2247,16 +2269,16 @@ export function StylistsTeamWorkspace({
 
                     <div>
                       <div className="flex items-center justify-between gap-3">
-                        <h3 className="text-base font-semibold text-slate-950">Servicios que presta</h3>
+                        <h3 className="text-base font-semibold text-gray-900">Servicios que presta</h3>
                       </div>
 
-                      <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-white">
+                      <div className={`mt-4 ${TABLE_WRAPPER_CLASS}`}>
                         {editorState.serviceIds.length === 0 ? (
-                          <div className="px-4 py-6 text-sm text-slate-500">
+                          <div className="px-4 py-6 text-sm text-gray-500">
                             Todavía no hay servicios asignados a este perfil.
                           </div>
                         ) : (
-                          <div className="divide-y divide-slate-100">
+                          <div className="divide-y divide-gray-200">
                             {editorState.serviceIds.map((serviceId) => {
                               const service = serviceOptionsById.get(serviceId);
                               const commissionEntry =
@@ -2275,7 +2297,7 @@ export function StylistsTeamWorkspace({
                                       onChange={(event) =>
                                         updateServiceSelection(serviceId, event.target.value)
                                       }
-                                      className="h-10 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-slate-300"
+                                      className={SELECT_CLASS}
                                     >
                                       {selectServiceOptions.map((optionItem) => (
                                         <option key={optionItem.id} value={optionItem.id}>
@@ -2284,9 +2306,9 @@ export function StylistsTeamWorkspace({
                                       ))}
                                     </select>
                                     {useCategoryOptions ? (
-                                      <p className="mt-1 text-xs text-slate-500">Categoría</p>
+                                      <p className="mt-1 text-xs text-gray-500">Categoría</p>
                                     ) : service ? (
-                                      <p className="mt-1 text-xs text-slate-500">
+                                      <p className="mt-1 text-xs text-gray-500">
                                         {service.duracion} min • {formatCurrencyNoDecimals(service.precio, currency)}
                                       </p>
                                     ) : null}
@@ -2305,7 +2327,7 @@ export function StylistsTeamWorkspace({
                                           valor: Number(event.target.value || 0),
                                         })
                                       }
-                                      className="h-10 rounded-2xl border-slate-200 bg-white"
+                                      className={INPUT_CLASS}
                                     />
                                   </div>
 
@@ -2313,7 +2335,7 @@ export function StylistsTeamWorkspace({
                                     <select
                                       value="%"
                                       disabled
-                                      className="h-10 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-slate-300"
+                                      className={SELECT_CLASS}
                                     >
                                       <option value="%">%</option>
                                     </select>
@@ -2323,7 +2345,7 @@ export function StylistsTeamWorkspace({
                                     <Button
                                       type="button"
                                       variant="outline"
-                                      className="h-10 w-10 border-slate-200 bg-white p-0 text-slate-600"
+                                      className={`h-10 w-10 p-0 ${OUTLINE_BUTTON_CLASS}`}
                                       onClick={() => removeServiceSelection(serviceId)}
                                     >
                                       <Trash2 className="h-4 w-4" />
@@ -2340,7 +2362,7 @@ export function StylistsTeamWorkspace({
                         <Button
                           type="button"
                           variant="outline"
-                          className="border-slate-200 bg-white"
+                          className={OUTLINE_BUTTON_CLASS}
                           onClick={addServiceToEditor}
                           disabled={
                             selectServiceOptions.filter(
@@ -2353,7 +2375,7 @@ export function StylistsTeamWorkspace({
                         </Button>
                       </div>
 
-                      <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                      <div className="mt-3 rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-600">
                         {canPersistServiceCommissions
                           ? "Las comisiones se guardan por categoría con porcentaje. Si varios servicios comparten categoría, se sincronizan automáticamente."
                           : "Este perfil no tiene configurado un endpoint de guardado para comisiones por servicio."}
@@ -2361,9 +2383,9 @@ export function StylistsTeamWorkspace({
                     </div>
 
                     <div>
-                      <h3 className="text-base font-semibold text-slate-950">Comisión por productos</h3>
-                      <div className="mt-3 rounded-3xl border border-slate-200 bg-white p-4">
-                        <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                      <h3 className="text-base font-semibold text-gray-900">Comisión por productos</h3>
+                      <div className="mt-3 rounded-lg border border-gray-300 bg-white p-4">
+                        <label className={FIELD_LABEL_CLASS}>
                           Comisión por venta de productos
                         </label>
                         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_76px_52px]">
@@ -2374,7 +2396,7 @@ export function StylistsTeamWorkspace({
                             step={0.01}
                             value={editorState.productCommission}
                             onChange={(event) => updateEditor("productCommission", event.target.value)}
-                            className="h-11 rounded-2xl border-slate-200 bg-white"
+                            className={INPUT_CLASS}
                             placeholder="Ej: 10"
                           />
                           <Input
@@ -2383,28 +2405,28 @@ export function StylistsTeamWorkspace({
                                 ? `${editorState.productCommission}%`
                                 : ""
                             }
-                            className="h-11 rounded-2xl border-slate-200 bg-white text-center"
+                            className={`${INPUT_CLASS} text-center`}
                             readOnly
                           />
                           <Input
                             value="%"
-                            className="h-11 rounded-2xl border-slate-200 bg-white text-center"
+                            className={`${INPUT_CLASS} text-center`}
                             readOnly
                           />
                         </div>
-                        <p className="mt-2 text-xs text-slate-500">
+                        <p className="mt-2 text-xs text-gray-500">
                           Opcional. Valor entre 0 y 100. Si se deja vacío se usará la comisión del inventario/sede o la global del producto.
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
                       <div>
                         {editorState.mode === "edit" ? (
                           <Button
                             type="button"
                             variant="outline"
-                            className="border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
+                            className="border-red-300 bg-white text-red-700 hover:bg-red-50"
                             onClick={handleDelete}
                             disabled={isSaving}
                           >
@@ -2418,7 +2440,7 @@ export function StylistsTeamWorkspace({
                         <Button
                           type="button"
                           variant="outline"
-                          className="border-slate-200 bg-white text-slate-600"
+                          className={OUTLINE_BUTTON_CLASS}
                           onClick={() => {
                             if (selectedStylist) {
                               initializeEditorState(selectedStylist, "edit");
@@ -2432,7 +2454,7 @@ export function StylistsTeamWorkspace({
                         </Button>
                         <Button
                           type="button"
-                          className="bg-black text-white hover:bg-neutral-900"
+                          className={PRIMARY_BUTTON_CLASS}
                           onClick={handleSave}
                           disabled={
                             isSaving ||

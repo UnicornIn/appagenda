@@ -27,7 +27,10 @@ import {
   type PaymentMethodTotals,
 } from "../../../lib/payment-methods-summary";
 import { useAuth } from "../../../components/Auth/AuthContext";
-import { emitElectronicInvoice } from "../../../lib/electronic-invoice";
+import {
+  emitElectronicInvoice,
+  fetchElectronicInvoiceStatus,
+} from "../../../lib/electronic-invoice";
 import { resolveAllegraGate } from "../../../lib/allegra-fe";
 
 type BillingPeriod =
@@ -347,6 +350,84 @@ export function VentasFacturadasList() {
     void cargarFacturas(1, initialFilters);
   }, [defaultDateRange]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!allegraEnabled || !authToken || facturas.length === 0) return;
+
+    const abortController = new AbortController();
+    let isMounted = true;
+
+    const entries = facturas
+      .map((factura) => {
+        const saleId =
+          (factura as any).venta_id || (factura as any)._id || null;
+        const invoiceId =
+          (factura as any).electronic_invoice_id ||
+          (factura as any).factura_id ||
+          null;
+        const statusKey = saleId || invoiceId || factura.identificador;
+        const knownStatus = (factura as any).electronic_invoice_status;
+
+        return { saleId, invoiceId, statusKey, knownStatus };
+      })
+      .filter((entry) => entry.statusKey);
+
+    if (entries.length === 0) return;
+
+    const preload: Record<
+      string,
+      { status: "idle" | "loading" | "success" | "error"; message?: string }
+    > = {};
+
+    entries.forEach(({ statusKey, knownStatus }) => {
+      const mapped = mapBackendFeStatusToUi(knownStatus);
+      if (mapped) {
+        preload[statusKey] = mapped;
+      }
+    });
+
+    const fetchStatuses = async () => {
+      const updates: typeof preload = { ...preload };
+
+      await Promise.all(
+        entries.map(async ({ saleId, invoiceId, statusKey }) => {
+          if (updates[statusKey]) return;
+
+          try {
+            const result = await fetchElectronicInvoiceStatus({
+              saleId,
+              invoiceId,
+              token: authToken,
+              sedeId: activeSedeId,
+              signal: abortController.signal,
+            });
+
+            const mapped = mapBackendFeStatusToUi(
+              result.status,
+              result.provider,
+            );
+
+            if (mapped) {
+              updates[statusKey] = mapped;
+            }
+          } catch (err) {
+            console.warn("No se pudo obtener estado FE:", err);
+          }
+        }),
+      );
+
+      if (isMounted && Object.keys(updates).length > 0) {
+        setFeStatusById((prev) => ({ ...prev, ...updates }));
+      }
+    };
+
+    void fetchStatuses();
+
+    return () => {
+      isMounted = false;
+      abortController.abort();
+    };
+  }, [facturas, allegraEnabled, authToken, activeSedeId]);
+
   const aplicarFiltros = async () => {
     const filtros = buildFilters(searchTerm, period, dateRange);
     setAppliedFilters(filtros);
@@ -478,6 +559,39 @@ export function VentasFacturadasList() {
     return `${safeCurrency} ${Math.round(safeAmount).toLocaleString(getCurrencyLocale(safeCurrency))}`;
   };
 
+  const mapBackendFeStatusToUi = (
+    status?: string | null,
+    providerLabel?: string | null,
+  ):
+    | { status: "idle" | "loading" | "success" | "error"; message?: string }
+    | null => {
+    const normalized = String(status ?? "")
+      .trim()
+      .toLowerCase();
+
+    if (!normalized) return null;
+
+    if (
+      ["submitted", "stamped", "sent", "success", "approved"].some((value) =>
+        normalized.includes(value),
+      )
+    ) {
+      const provider =
+        providerLabel && providerLabel.trim().length > 0
+          ? providerLabel.trim()
+          : null;
+
+      return {
+        status: "success",
+        message: provider
+          ? `Enviada (${provider})`
+          : "Factura electrónica enviada",
+      };
+    }
+
+    return null;
+  };
+
   const updateFeStatus = (
     key: string,
     next: {
@@ -529,10 +643,53 @@ export function VentasFacturadasList() {
         token: authToken,
         sedeId: activeSedeId,
       });
+
+      const backendStatus =
+        (result.data as any)?.electronic_invoice?.status ||
+        (result.data as any)?.status ||
+        null;
+      const mappedStatus =
+        mapBackendFeStatusToUi(
+          backendStatus,
+          (result.data as any)?.electronic_invoice?.provider ||
+            (result.data as any)?.provider ||
+            null,
+        ) || {
+          status: "success",
+          message: result.message,
+        };
+
       updateFeStatus(statusKey, {
-        status: "success",
-        message: result.message,
+        status: mappedStatus.status,
+        message: mappedStatus.message || result.message,
       });
+
+      setFacturas((prev) =>
+        prev.map((item) => {
+          const itemSaleId = (item as any).venta_id || (item as any)._id || "";
+          const itemInvoiceId =
+            (item as any).electronic_invoice_id ||
+            (item as any).factura_id ||
+            "";
+          const matches =
+            itemSaleId === saleId ||
+            itemInvoiceId === invoiceId ||
+            item.identificador === factura.identificador;
+
+          if (!matches) return item;
+
+          return {
+            ...item,
+            electronic_invoice_status: backendStatus || "submitted",
+            electronic_invoice_id:
+              (result.data as any)?.invoice_id ||
+              (result.data as any)?.electronic_invoice?.invoice_id ||
+              (result.data as any)?.electronic_invoice?._id ||
+              itemInvoiceId ||
+              null,
+          };
+        }),
+      );
     } catch (error) {
       updateFeStatus(statusKey, {
         status: "error",
@@ -987,7 +1144,7 @@ export function VentasFacturadasList() {
                                     }
                                     className={`h-8 px-3 ${
                                       feState === "success"
-                                        ? "bg-green-600 hover:bg-green-700 text-white"
+                                        ? "bg-black hover:bg-gray-900 text-white"
                                         : ""
                                     }`}
                                     disabled={disabled}
@@ -1030,11 +1187,6 @@ export function VentasFacturadasList() {
                                   )}
                                   {feState === "error" && feMessage && (
                                     <p className="text-[11px] text-red-600">
-                                      {feMessage}
-                                    </p>
-                                  )}
-                                  {feState === "success" && feMessage && (
-                                    <p className="text-[11px] text-green-700">
                                       {feMessage}
                                     </p>
                                   )}

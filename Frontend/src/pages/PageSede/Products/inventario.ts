@@ -14,6 +14,13 @@ export interface InventarioProducto {
   producto_nombre: string;
   producto_codigo: string;
   categoria: string;
+  // Campos opcionales usados solo para UI (no todos vienen del backend)
+  ventas?: number;
+  precio?: number;
+  costo?: number;
+  imagen_url?: string;
+  producto_tipo?: string;
+  sku?: string;
 }
 
 export interface CrearInventarioInput {

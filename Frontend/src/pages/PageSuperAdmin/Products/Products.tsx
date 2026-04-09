@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { AlertTriangle, Loader2 } from "lucide-react"
+import { AlertTriangle, Loader2, AlertCircle } from "lucide-react"
 import { Button } from "../../../components/ui/button"
 import { Input } from "../../../components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select"
@@ -24,6 +24,14 @@ import {
   type ProductSalesRow,
   ProductCardsGrid,
 } from "../../../features/products-dashboard/components"
+import { Alert, AlertDescription } from "../../../components/ui/alert"
+
+const normalizeText = (value: string | null | undefined): string =>
+  (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
 
 type CatalogoProducto = {
   id: string
@@ -53,6 +61,7 @@ export function ProductsList() {
   const [editingProductId, setEditingProductId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState<string>("")
   const [editingPrice, setEditingPrice] = useState<string>("")
+  const [editingStock, setEditingStock] = useState<string>("")
   const [editingLoading, setEditingLoading] = useState<boolean>(false)
   const [productPrices, setProductPrices] = useState<Record<string, { price: number; currency: string }>>({})
   const [isCreateProductModalOpen, setIsCreateProductModalOpen] = useState(false)
@@ -72,7 +81,6 @@ export function ProductsList() {
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isCreatingInventario, setIsCreatingInventario] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
   const [modalDataError, setModalDataError] = useState<string | null>(null)
   const [isLoadingCreateData, setIsLoadingCreateData] = useState(false)
   const [sedesDisponibles, setSedesDisponibles] = useState<Sede[]>([])
@@ -81,6 +89,16 @@ export function ProductsList() {
   const [nuevoSedeId, setNuevoSedeId] = useState("")
   const [nuevoStockInicial, setNuevoStockInicial] = useState("0")
   const [nuevoStockMinimo, setNuevoStockMinimo] = useState("5")
+  const [creacionModo, setCreacionModo] = useState<"catalogo" | "manual">("catalogo")
+  const [lineaFormulario, setLineaFormulario] = useState("")
+  const [tipoProducto, setTipoProducto] = useState("ACCESORIO")
+  const [catalogoProductosForm, setCatalogoProductosForm] = useState<CatalogoProducto[]>([])
+  const [isLoadingCatalogo, setIsLoadingCatalogo] = useState(false)
+  const [catalogoError, setCatalogoError] = useState<string | null>(null)
+  const [nuevoNombreManual, setNuevoNombreManual] = useState("")
+  const [nuevoSkuManual, setNuevoSkuManual] = useState("")
+  const [precioReferencia, setPrecioReferencia] = useState("")
+  const [costoReferencia, setCostoReferencia] = useState("")
 
   // Usar el AuthContext en lugar de sessionStorage
   const { user, isAuthenticated, isLoading: authLoading, activeSedeId } = useAuth()
@@ -262,6 +280,12 @@ export function ProductsList() {
     void cargarSedesDisponibles()
   }, [authLoading])
 
+  useEffect(() => {
+    if (!authLoading && nuevoSedeId) {
+      void cargarCatalogoProductosForm(nuevoSedeId)
+    }
+  }, [authLoading, nuevoSedeId])
+
   const cargarInventario = async (sedeDestino?: string | null) => {
     if (sedeDestino === "all") {
       setProductos([])
@@ -320,6 +344,32 @@ export function ProductsList() {
     }
   }, [productos])
 
+  const lineasDisponibles = useMemo(() => {
+    const seen = new Set<string>()
+    const result: { id: string; label: string }[] = []
+
+    productos.forEach((producto) => {
+      const label = (producto.categoria || "").trim()
+      if (!label) return
+      const id = normalizeText(label) || label.toLowerCase()
+      if (seen.has(id)) return
+      seen.add(id)
+      result.push({ id, label })
+    })
+
+    if (result.length === 0) {
+      return [{ id: "general", label: "General" }]
+    }
+
+    return result
+  }, [productos])
+
+  useEffect(() => {
+    if (!lineaFormulario && lineasDisponibles.length > 0) {
+      setLineaFormulario(lineasDisponibles[0].id)
+    }
+  }, [lineasDisponibles, lineaFormulario])
+
   const agruparVentasPorPais = (
     sedes: Sede[],
     ventasPorSede: Record<string, ProductSalesRow[]>,
@@ -368,7 +418,6 @@ export function ProductsList() {
   }
 
   const abrirModalCreacion = () => {
-    setCreateError(null)
     setModalDataError(null)
     setNuevoProductoId("")
     setNuevoSedeId(resolveSedeId() || "")
@@ -380,8 +429,116 @@ export function ProductsList() {
 
   const cerrarModalCreacion = () => {
     setIsCreateModalOpen(false)
-    setCreateError(null)
     setModalDataError(null)
+  }
+
+  const parseApiErrorSimple = (error: unknown): string => {
+    if (error instanceof Error) return error.message
+    if (typeof error === "string") return error
+    return "No fue posible completar la operación"
+  }
+
+  const cargarCatalogoProductosForm = async (sedeObjetivo?: string) => {
+    const sedeDestino = sedeObjetivo || nuevoSedeId || resolveSedeId()
+    if (!sedeDestino) return
+    const token = resolveToken()
+    if (!token) return
+
+    try {
+      setIsLoadingCatalogo(true)
+      setCatalogoError(null)
+
+      const response = await fetch(
+        `${API_BASE_URL}inventary/product/productos/?moneda=COP&sede_id=${sedeDestino}`,
+        {
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data?.detail || "No se pudo cargar el catálogo de productos")
+      }
+
+      const items = Array.isArray(data)
+        ? data
+        : Array.isArray((data as { results?: unknown }).results)
+          ? (data as { results: unknown[] }).results
+          : []
+
+      const formatted = (items as any[])
+        .filter((item) => item?._id && item?.nombre)
+        .map((item) => ({
+          id: String(item._id),
+          nombre: String(item.nombre),
+          codigo: item.codigo || item.producto_codigo || "—",
+        }))
+        .filter((item) => !productos.some((p) => p.producto_id === item.id))
+
+      setCatalogoProductosForm(formatted)
+    } catch (err) {
+      setCatalogoError(parseApiErrorSimple(err))
+    } finally {
+      setIsLoadingCatalogo(false)
+    }
+  }
+
+  const crearInventarioDesdeCard = async () => {
+    if (creacionModo === "manual") {
+      setCatalogoError("Crear producto desde cero está listo en UI. Conecta el endpoint de creación y reemplaza este aviso.")
+      return
+    }
+
+    const token = resolveToken()
+    if (!token) {
+      setCatalogoError("No se encontró token de autenticación")
+      return
+    }
+    const sedeDestino = (nuevoSedeId || resolveSedeId())?.trim()
+    if (!sedeDestino) {
+      setCatalogoError("Selecciona una sede para registrar el inventario")
+      return
+    }
+    if (!nuevoProductoId) {
+      setCatalogoError("Selecciona un producto del catálogo")
+      return
+    }
+
+    const payload = {
+      producto_id: nuevoProductoId,
+      sede_id: sedeDestino,
+      stock_actual: Number(nuevoStockInicial) || 0,
+      stock_minimo: Number(nuevoStockMinimo) || 0,
+    }
+
+    try {
+      setIsCreatingInventario(true)
+      setCatalogoError(null)
+      const result = await inventarioService.crearInventario(payload, token)
+      if (!result.success) {
+        setCatalogoError(result.error || "No se pudo crear el inventario")
+        return
+      }
+      setCreateProductSuccess(result.message || "Producto agregado al inventario")
+      setNuevoProductoId("")
+      setNuevoStockInicial("0")
+      setNuevoStockMinimo("5")
+      setPrecioReferencia("")
+      setCostoReferencia("")
+      setTipoProducto("ACCESORIO")
+      setLineaFormulario(lineasDisponibles[0]?.id ?? "")
+      await Promise.all([
+        cargarInventario(sedeDestino),
+        cargarCatalogoProductosForm(sedeDestino),
+      ])
+    } catch (err) {
+      setCatalogoError(parseApiErrorSimple(err))
+    } finally {
+      setIsCreatingInventario(false)
+    }
   }
 
   const parseApiError = async (response: Response, fallback: string) => {
@@ -599,11 +756,13 @@ export function ProductsList() {
     if (productosResult.status === "fulfilled") {
       const catalogo = productosResult.value
       setProductosCatalogo(catalogo)
+      setCatalogoProductosForm(catalogo)
       if (!nuevoProductoId && catalogo.length === 1) {
         setNuevoProductoId(catalogo[0].id)
       }
     } else {
       setProductosCatalogo([])
+      setCatalogoProductosForm([])
       errores.push("No se pudieron cargar los productos")
     }
 
@@ -612,67 +771,6 @@ export function ProductsList() {
     }
 
     setIsLoadingCreateData(false)
-  }
-
-  const crearInventario = async () => {
-    const productoId = nuevoProductoId.trim()
-    const sedeInventarioId = nuevoSedeId.trim() || resolveSedeId()
-    const stockInicial = Number(nuevoStockInicial)
-    const stockMinimo = Number(nuevoStockMinimo)
-
-    if (!productoId) {
-      setCreateError("El campo producto_id es obligatorio")
-      return
-    }
-
-    if (!sedeInventarioId) {
-      setCreateError("El campo sede_id es obligatorio")
-      return
-    }
-
-    if (!Number.isFinite(stockInicial) || stockInicial < 0) {
-      setCreateError("El stock inicial debe ser un número mayor o igual a 0")
-      return
-    }
-
-    if (!Number.isFinite(stockMinimo) || stockMinimo < 0) {
-      setCreateError("El stock mínimo debe ser un número mayor o igual a 0")
-      return
-    }
-
-    const token = resolveToken()
-    if (!token) {
-      setCreateError("No hay token de autenticación disponible")
-      return
-    }
-
-    setIsCreatingInventario(true)
-    setCreateError(null)
-
-    try {
-      const resultado = await inventarioService.crearInventario(
-        {
-          producto_id: productoId,
-          sede_id: sedeInventarioId,
-          stock_actual: stockInicial,
-          stock_minimo: stockMinimo
-        },
-        token
-      )
-
-      if (!resultado.success) {
-        setCreateError(resultado.error || "No se pudo crear el inventario")
-        return
-      }
-
-      cerrarModalCreacion()
-      await cargarInventario(sedeInventarioId)
-    } catch (err) {
-      console.error("Error creando inventario:", err)
-      setCreateError("Error inesperado al crear el inventario")
-    } finally {
-      setIsCreatingInventario(false)
-    }
   }
 
   // Mostrar loading mientras se verifica la autenticación
@@ -798,6 +896,11 @@ export function ProductsList() {
     if (!product) return
     setEditingProductId(productId)
     setEditingName(product.nombre)
+    setEditingStock(
+      product.stock !== undefined && product.stock !== null
+        ? String(product.stock)
+        : "0"
+    )
     const cachedPrice = productPrices[productId]?.price
     setEditingPrice(cachedPrice !== undefined ? String(cachedPrice) : "")
     setEditingLoading(true)
@@ -840,7 +943,11 @@ export function ProductsList() {
     setProductos((prev) =>
       prev.map((p) =>
         (p.producto_id || p._id) === editingProductId
-          ? { ...p, nombre: editingName || p.nombre }
+          ? {
+              ...p,
+              nombre: editingName || p.nombre,
+              stock_actual: Number(editingStock) || 0,
+            }
           : p
       )
     )
@@ -882,6 +989,7 @@ export function ProductsList() {
               </div>
             </div>
           )}
+
 
           {selectedDashboardSede === "all" && missingCountrySedes.length > 0 && (
             <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -1017,9 +1125,9 @@ export function ProductsList() {
             <div className="grid gap-5 lg:grid-cols-[300px,1fr] xl:grid-cols-[320px,1fr]">
               <div className="space-y-4">
                 <DialogHeader className="p-0">
-                  <DialogTitle>Configuración de inventario</DialogTitle>
+                  <DialogTitle>Crear producto</DialogTitle>
                   <DialogDescription>
-                    Registra el inventario inicial o ajusta el mínimo de alertas para la sede seleccionada.
+                    Reutiliza el catálogo existente y registra el stock inicial para la sede seleccionada.
                   </DialogDescription>
                 </DialogHeader>
 
@@ -1036,54 +1144,34 @@ export function ProductsList() {
                   </div>
                 )}
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700" htmlFor="producto-id">
-                    Producto
-                  </label>
-                  {productosCatalogo.length > 0 ? (
-                    <Select
-                      value={nuevoProductoId}
-                      onValueChange={setNuevoProductoId}
-                      disabled={isCreatingInventario || isLoadingCreateData}
-                    >
-                      <SelectTrigger id="producto-id" className="bg-white border-gray-300 text-gray-900">
-                        <SelectValue placeholder="Selecciona un producto" />
-                      </SelectTrigger>
-                      <SelectContent className="z-[60] bg-white border-gray-200 text-gray-900">
-                        {productosCatalogo.map((producto) => (
-                          <SelectItem className="text-gray-900 focus:bg-gray-100 focus:text-gray-900" key={producto.id} value={producto.id}>
-                            {producto.nombre}{producto.codigo ? ` (${producto.codigo})` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input
-                      id="producto-id"
-                      placeholder="Ej: P001"
-                      value={nuevoProductoId}
-                      onChange={(e) => setNuevoProductoId(e.target.value)}
-                      disabled={isCreatingInventario || isLoadingCreateData}
-                      className="bg-white"
-                    />
-                  )}
-                </div>
+                {catalogoError ? (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{catalogoError}</AlertDescription>
+                  </Alert>
+                ) : null}
+                {createProductSuccess && (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                    {createProductSuccess}
+                  </div>
+                )}
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700" htmlFor="sede-id">
-                    Sede
-                  </label>
+                  <label className="text-sm font-medium text-gray-700">Sede destino</label>
                   <Select
-                    value={nuevoSedeId}
-                    onValueChange={setNuevoSedeId}
+                    value={nuevoSedeId || ""}
+                    onValueChange={(value) => {
+                      setNuevoSedeId(value)
+                      void cargarCatalogoProductosForm(value)
+                    }}
                     disabled={isCreatingInventario || isLoadingCreateData || sedesDisponibles.length === 0}
                   >
-                    <SelectTrigger id="sede-id" className="bg-white border-gray-300 text-gray-900">
-                      <SelectValue placeholder="Selecciona una sede" />
+                    <SelectTrigger className="border-gray-300 bg-white text-gray-900">
+                      <SelectValue placeholder="Selecciona la sede" />
                     </SelectTrigger>
-                    <SelectContent className="z-[60] bg-white border-gray-200 text-gray-900">
+                    <SelectContent className="bg-white">
                       {sedesDisponibles.map((sede) => (
-                        <SelectItem className="text-gray-900 focus:bg-gray-100 focus:text-gray-900" key={sede._id} value={sede.sede_id}>
+                        <SelectItem key={sede.sede_id} value={sede.sede_id}>
                           {sede.nombre}
                         </SelectItem>
                       ))}
@@ -1091,45 +1179,157 @@ export function ProductsList() {
                   </Select>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700" htmlFor="stock-inicial">
-                      Stock inicial
-                    </label>
-                    <Input
-                      id="stock-inicial"
-                      type="number"
-                      min="0"
-                      value={nuevoStockInicial}
-                      onChange={(e) => setNuevoStockInicial(e.target.value)}
-                      disabled={isCreatingInventario}
-                      className="bg-white"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700" htmlFor="stock-minimo">
-                      Stock mínimo
-                    </label>
-                    <Input
-                      id="stock-minimo"
-                      type="number"
-                      min="0"
-                      value={nuevoStockMinimo}
-                      onChange={(e) => setNuevoStockMinimo(e.target.value)}
-                      disabled={isCreatingInventario}
-                      className="bg-white"
-                    />
-                  </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant={creacionModo === "catalogo" ? "default" : "outline"}
+                    className={creacionModo === "catalogo" ? "bg-black text-white hover:bg-gray-800" : "border-gray-300 text-gray-700"}
+                    onClick={() => setCreacionModo("catalogo")}
+                  >
+                    Usar catálogo
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={creacionModo === "manual" ? "default" : "outline"}
+                    className={creacionModo === "manual" ? "bg-black text-white hover:bg-gray-800" : "border-gray-300 text-gray-700"}
+                    onClick={() => setCreacionModo("manual")}
+                  >
+                    Crear
+                  </Button>
                 </div>
 
-                {createError && (
-                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    {createError}
-                  </div>
-                )}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Select
+                    value={lineaFormulario}
+                    onValueChange={(value) => setLineaFormulario(value)}
+                  >
+                    <SelectTrigger className="border-gray-300 bg-white">
+                      <SelectValue placeholder="Línea de producto" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white">
+                      {lineasDisponibles.map((linea) => (
+                        <SelectItem key={linea.id} value={linea.id}>
+                          {linea.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
-                <DialogFooter className="pt-2">
+                  <Select
+                    value={tipoProducto}
+                    onValueChange={(value) => setTipoProducto(value)}
+                  >
+                    <SelectTrigger className="border-gray-300 bg-white">
+                      <SelectValue placeholder="Tipo de producto" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white">
+                      <SelectItem value="ACCESORIO">ACCESORIO</SelectItem>
+                      <SelectItem value="TRATAMIENTO">TRATAMIENTO</SelectItem>
+                      <SelectItem value="HERRAMIENTA">HERRAMIENTA</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {creacionModo === "catalogo" ? (
+                    <>
+                      <Select
+                        value={nuevoProductoId}
+                        onValueChange={(value) => setNuevoProductoId(value)}
+                        disabled={isLoadingCatalogo}
+                      >
+                        <SelectTrigger className="col-span-1 sm:col-span-2 border-gray-300 bg-white">
+                          <SelectValue
+                            placeholder={
+                              isLoadingCatalogo
+                                ? "Cargando catálogo..."
+                                : "Nombre (selecciona del catálogo)"
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent className="bg-white">
+                          {catalogoProductosForm.length === 0 ? (
+                            <SelectItem value="none" disabled>
+                              {isLoadingCatalogo
+                                ? "Cargando..."
+                                : "No hay productos disponibles"}
+                            </SelectItem>
+                          ) : (
+                            catalogoProductosForm.map((item) => (
+                              <SelectItem key={item.id} value={item.id}>
+                                {item.nombre} — {item.codigo}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+
+                      <Input
+                        value={
+                          catalogoProductosForm.find((item) => item.id === nuevoProductoId)?.codigo ||
+                          "SKU"
+                        }
+                        readOnly
+                        className="border-gray-300 bg-gray-100 text-gray-600"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <Input
+                        value={nuevoNombreManual}
+                        onChange={(e) => setNuevoNombreManual(e.target.value)}
+                        placeholder="Nombre del producto"
+                        className="col-span-1 sm:col-span-2 border-gray-300"
+                      />
+                      <Input
+                        value={nuevoSkuManual}
+                        onChange={(e) => setNuevoSkuManual(e.target.value)}
+                        placeholder="SKU / Código"
+                        className="border-gray-300"
+                      />
+                    </>
+                  )}
+
+                  <Input
+                    type="number"
+                    min={0}
+                    value={nuevoStockInicial}
+                    onChange={(e) => setNuevoStockInicial(e.target.value)}
+                    placeholder="Stock inicial"
+                    className="border-gray-300"
+                  />
+
+                  <Input
+                    type="number"
+                    min={0}
+                    value={nuevoStockMinimo}
+                    onChange={(e) => setNuevoStockMinimo(e.target.value)}
+                    placeholder="Stock mínimo"
+                    className="border-gray-300"
+                  />
+
+                  <Input
+                    type="number"
+                    min={0}
+                    value={precioReferencia}
+                    onChange={(e) => setPrecioReferencia(e.target.value)}
+                    placeholder="Precio de venta"
+                    className="border-gray-300"
+                  />
+
+                  <Input
+                    type="number"
+                    min={0}
+                    value={costoReferencia}
+                    onChange={(e) => setCostoReferencia(e.target.value)}
+                    placeholder="Costo"
+                    className="border-gray-300"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-gray-500">
+                  <span>Precios y costos son de referencia (el backend aún no los almacena).</span>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1 justify-end">
                   <Button
                     type="button"
                     variant="outline"
@@ -1138,16 +1338,11 @@ export function ProductsList() {
                   >
                     Cancelar
                   </Button>
-                  <Button
-                    type="button"
-                    onClick={crearInventario}
-                    disabled={isCreatingInventario || isLoadingCreateData || !nuevoProductoId || !nuevoSedeId}
-                    className="gap-2 bg-gray-900 text-white hover:bg-gray-800"
-                  >
-                    {isCreatingInventario && <Loader2 className="h-4 w-4 animate-spin" />}
-                    Guardar
+                  <Button onClick={crearInventarioDesdeCard} disabled={isCreatingInventario} className="bg-gray-900 text-white hover:bg-gray-800">
+                    {isCreatingInventario && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    Registrar producto
                   </Button>
-                </DialogFooter>
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -1194,6 +1389,17 @@ export function ProductsList() {
                   className="mt-1"
                 />
                 <p className="text-xs text-gray-500 mt-1">Edición local en UI; no guarda en backend.</p>
+              </div>
+              <div>
+                <label className="text-sm text-gray-700">Stock</label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={editingStock}
+                  onChange={(e) => setEditingStock(e.target.value)}
+                  disabled={editingLoading}
+                  className="mt-1"
+                />
               </div>
             </div>
             <DialogFooter>

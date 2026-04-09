@@ -12,6 +12,14 @@ export type ElectronicInvoiceResult = {
   sedeId?: string | null;
 };
 
+export type ElectronicInvoiceStatusResult = {
+  status: string | null;
+  data: unknown;
+  invoiceId?: string | null;
+  saleId?: string | null;
+  provider?: string | null;
+};
+
 const normalizeBaseUrl = (value: string): string =>
   value.endsWith("/") ? value.slice(0, -1) : value;
 
@@ -132,5 +140,86 @@ export async function emitElectronicInvoice({
     data: body,
     message,
     sedeId: resolvedSedeId,
+  };
+}
+
+export async function fetchElectronicInvoiceStatus({
+  saleId,
+  invoiceId,
+  token,
+  sedeId,
+  signal,
+}: {
+  saleId?: string | null;
+  invoiceId?: string | null;
+  token?: string | null;
+  sedeId?: string | null;
+  signal?: AbortSignal;
+}): Promise<ElectronicInvoiceStatusResult> {
+  const targetSaleId = saleId?.trim();
+  const targetInvoiceId = invoiceId?.trim();
+
+  if (!targetSaleId && !targetInvoiceId) {
+    throw new Error(
+      "Falta sale_id o invoice_id para consultar estado de factura electrónica",
+    );
+  }
+
+  const authToken = resolveToken(token);
+  if (!authToken) {
+    throw new Error("No se encontró token de autenticación para FE");
+  }
+
+  const resolvedSedeId = resolveSedeId(sedeId);
+  const baseUrl = normalizeBaseUrl(API_BASE_URL);
+  const path = targetSaleId
+    ? `/api/billing/sales/${encodeURIComponent(targetSaleId)}/electronic/status`
+    : `/api/billing/invoices/${encodeURIComponent(targetInvoiceId as string)}/electronic/status`;
+
+  const headers: HeadersInit = {
+    Authorization: `Bearer ${authToken}`,
+    Accept: "application/json",
+  };
+
+  if (resolvedSedeId) {
+    headers["X-Sede-Id"] = resolvedSedeId;
+  }
+
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "GET",
+    headers,
+    signal,
+  });
+
+  const body = await parseResponseBody(response);
+  if (!response.ok) {
+    const message =
+      (body && (body.detail || body.message || body.error)) ||
+      `Error ${response.status}: No fue posible consultar estado de factura electrónica`;
+    throw new Error(message);
+  }
+
+  const electronic = (body && (body.electronic_invoice || body)) || null;
+  const status =
+    (electronic && (electronic.status as string | null | undefined)) ||
+    (body && (body.status as string | null | undefined)) ||
+    null;
+
+  return {
+    status: status ?? null,
+    data: electronic,
+    invoiceId:
+      (electronic && (electronic.invoice_id as string | null | undefined)) ||
+      (body && (body.invoice_id as string | null | undefined)) ||
+      targetInvoiceId ||
+      null,
+    saleId:
+      (electronic && (electronic.sale_id as string | null | undefined)) ||
+      (body && (body.sale_id as string | null | undefined)) ||
+      targetSaleId ||
+      null,
+    provider:
+      (electronic && (electronic.provider as string | null | undefined)) ||
+      null,
   };
 }

@@ -164,11 +164,11 @@ export function ProductsHeaderFilters({
           {rightSlot}
           {onOpenConfig && (
             <Button
-              variant="outline"
-              className="border-gray-300 text-gray-800"
+              variant="default"
+              className="bg-black text-white hover:bg-gray-900"
               onClick={onOpenConfig}
             >
-              <Settings2 className="mr-2 h-4 w-4" />
+              <Settings2 className="mr-2 h-4 w-4 text-white" />
               Configuración de productos
             </Button>
           )}
