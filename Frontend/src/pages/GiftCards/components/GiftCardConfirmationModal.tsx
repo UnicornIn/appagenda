@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Mail, Printer } from "lucide-react";
+import { Mail, Printer, X } from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import {
   Dialog,
@@ -126,74 +126,92 @@ export function GiftCardConfirmationModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl border-0 bg-white p-0 shadow-2xl">
-        <div className="bg-gradient-to-r from-gray-900 via-gray-800 to-black px-6 py-6 text-white">
+      <DialogContent
+        showCloseButton={false}
+        className="max-w-xl overflow-hidden rounded-xl border border-gray-300 bg-white p-0 shadow-xl"
+      >
+        <div className="flex items-start justify-between border-b border-gray-200 px-5 py-4">
           <DialogHeader className="text-left">
-            <DialogTitle className="text-2xl font-semibold">Gift Card creada exitosamente</DialogTitle>
-            <DialogDescription className="text-gray-200">
+            <DialogTitle className="text-2xl font-bold text-gray-900">Gift Card creada exitosamente</DialogTitle>
+            <DialogDescription className="text-sm text-gray-600">
               El código fue emitido y ya se encuentra disponible para uso.
             </DialogDescription>
           </DialogHeader>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-9 w-9 p-0 text-gray-600 hover:bg-gray-100"
+            onClick={() => onOpenChange(false)}
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Cerrar</span>
+          </Button>
         </div>
 
         {giftCard ? (
-          <div className="space-y-5 px-6 py-6">
-            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-4 text-center">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-600">Código</p>
+          <div className="space-y-4 px-5 py-4">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-4 text-center">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Código</p>
               <p className="mt-1 text-3xl font-bold text-gray-900">{giftCard.codigo}</p>
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-                <p className="text-xs text-gray-500">Estado</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Estado</p>
                 <div className="mt-1">
                   <GiftCardStatusBadge status={giftCard.estado} />
                 </div>
               </div>
 
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-                <p className="text-xs text-gray-500">Valor</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Valor</p>
                 <p className="mt-1 text-sm font-semibold text-gray-900">
                   {formatMoney(Number(giftCard.valor || 0), currency)}
                 </p>
               </div>
 
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-                <p className="text-xs text-gray-500">Beneficiario</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Beneficiario</p>
                 <p className="mt-1 text-sm font-semibold text-gray-900">
                   {giftCard.beneficiario_nombre || giftCard.comprador_nombre || "Sin beneficiario"}
                 </p>
               </div>
 
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-                <p className="text-xs text-gray-500">Nombre Sede</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Nombre Sede</p>
                 <p className="mt-1 text-sm font-semibold text-gray-900">{resolvedSedeName}</p>
               </div>
 
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-                <p className="text-xs text-gray-500">Saldo</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Saldo</p>
                 <p className="mt-1 text-sm font-semibold text-gray-900">
                   {formatMoney(Number(giftCard.saldo_disponible || 0), currency)}
                 </p>
               </div>
 
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-                <p className="text-xs text-gray-500">Fecha emisión</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha emisión</p>
                 <p className="mt-1 text-sm font-semibold text-gray-900">
                   {formatGiftCardDate(giftCard.fecha_emision || giftCard.created_at)}
                 </p>
               </div>
 
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-                <p className="text-xs text-gray-500">Vigencia</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Vigencia</p>
                 <p className="mt-1 text-sm font-semibold text-gray-900">{validityLabel}</p>
               </div>
             </div>
           </div>
         ) : null}
 
-        <DialogFooter className="border-t border-gray-100 bg-gray-50 px-6 py-4">
-          <Button type="button" variant="outline" onClick={handlePrint}>
+        <DialogFooter className="border-t border-gray-200 bg-white px-5 py-4">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handlePrint}
+            className="border-gray-300 text-gray-700 hover:bg-gray-100"
+          >
             <Printer className="mr-2 h-4 w-4" />
             Imprimir
           </Button>

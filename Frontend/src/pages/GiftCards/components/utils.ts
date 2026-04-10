@@ -99,17 +99,17 @@ export function getStatusLabel(status: GiftCardStatus): string {
 export function getStatusClasses(status: GiftCardStatus): string {
   switch (status) {
     case "activa":
-      return "bg-emerald-100 text-emerald-700 border-emerald-200";
+      return "bg-emerald-50 text-emerald-700 border-emerald-200";
     case "usada":
-      return "bg-gray-100 text-gray-700 border-gray-200";
+      return "bg-gray-100 text-gray-700 border-gray-300";
     case "cancelada":
-      return "bg-red-100 text-red-700 border-red-200";
+      return "bg-red-50 text-red-700 border-red-200";
     case "vencida":
-      return "bg-emerald-100 text-emerald-700 border-emerald-200";
+      return "bg-emerald-50 text-emerald-700 border-emerald-200";
     case "parcialmente_usada":
-      return "bg-gray-100 text-gray-700 border-gray-200";
+      return "bg-gray-100 text-gray-700 border-gray-300";
     default:
-      return "bg-gray-100 text-gray-700 border-gray-200";
+      return "bg-gray-100 text-gray-700 border-gray-300";
   }
 }
 

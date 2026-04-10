@@ -14,6 +14,7 @@ import { PageHeader } from "../../components/Layout/PageHeader";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Toaster } from "../../components/ui/toaster";
+import { Card, CardContent } from "../../components/ui/card";
 import { useAuth } from "../../components/Auth/AuthContext";
 import { toast } from "../../hooks/use-toast";
 import { sedeService } from "../PageSuperAdmin/Sedes/sedeService";
@@ -38,6 +39,12 @@ const STATUS_OPTIONS: Array<{ label: string; value: StatusFilter }> = [
   { label: "Usada", value: "usada" },
   { label: "Cancelada", value: "cancelada" },
 ];
+
+const FILTER_LABEL_CLASS = "mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600";
+const FILTER_CONTROL_CLASS =
+  "h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-gray-500";
+const INPUT_CONTROL_CLASS =
+  "h-10 border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus-visible:ring-gray-500";
 
 export default function GiftCardsPage() {
   const { user, isLoading: authLoading } = useAuth();
@@ -320,17 +327,17 @@ export default function GiftCardsPage() {
 
   return (
     <>
-      <div className="flex h-screen bg-[#f4f5f8]">
+      <div className="flex h-screen bg-gray-50">
         <Sidebar />
 
         <main className="flex-1 overflow-auto">
-          <div className="mx-auto w-full max-w-[1180px] space-y-4 px-4 py-5 md:px-6 md:py-6">
+          <div className="w-full space-y-6 p-8">
             <PageHeader
               title="Gift Cards"
               subtitle="Gestión de tarjetas de regalo emitidas y saldo disponible"
               actions={
                 <Button
-                  className="h-10 bg-black text-white hover:bg-zinc-800"
+                  className="bg-black text-white hover:bg-gray-800"
                   onClick={() => setCreateModalOpen(true)}
                   disabled={!selectedSedeId}
                 >
@@ -348,15 +355,15 @@ export default function GiftCardsPage() {
               isRefreshing={isFetching}
             />
 
-            <section className="rounded-xl border border-gray-200 bg-white px-4 py-3">
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+            <section className="rounded-xl border border-gray-300 bg-white px-5 py-4 shadow-sm">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
                 {isSuperAdmin ? (
                   <div className="lg:col-span-3">
-                    <label className="mb-1 block text-xs font-medium text-gray-600">Sede</label>
+                    <label className={FILTER_LABEL_CLASS}>Sede</label>
                     <select
                       value={selectedSedeId}
                       onChange={(event) => setSelectedSedeId(event.target.value)}
-                      className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700"
+                      className={FILTER_CONTROL_CLASS}
                       disabled={isLoadingSedes}
                     >
                       <option value="">Selecciona una sede</option>
@@ -369,31 +376,32 @@ export default function GiftCardsPage() {
                   </div>
                 ) : (
                   <div className="lg:col-span-3">
-                    <label className="mb-1 block text-xs font-medium text-gray-600">Sede</label>
-                    <Input value={selectedSedeName} readOnly className="bg-gray-50" />
+                    <label className={FILTER_LABEL_CLASS}>Sede</label>
+                    <Input
+                      value={selectedSedeName}
+                      readOnly
+                      className={`${INPUT_CONTROL_CLASS} bg-gray-50`}
+                    />
                   </div>
                 )}
 
                 <div className="lg:col-span-3">
-                  <label className="mb-1 block text-xs font-medium text-gray-600">Filtrar</label>
-                  <div className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3">
-                    <span className="text-sm text-gray-500">Todos</span>
-                    <select
-                      value={statusFilter}
-                      onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-                      className="w-full bg-transparent text-sm text-gray-700 outline-none"
-                    >
-                      {STATUS_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <label className={FILTER_LABEL_CLASS}>Estado</label>
+                  <select
+                    value={statusFilter}
+                    onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+                    className={FILTER_CONTROL_CLASS}
+                  >
+                    {STATUS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="lg:col-span-6">
-                  <label className="mb-1 block text-xs font-medium text-gray-600">Buscar</label>
+                  <label className={FILTER_LABEL_CLASS}>Buscar</label>
                   <div className="flex items-center gap-2">
                     <div className="relative flex-1">
                       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -401,16 +409,17 @@ export default function GiftCardsPage() {
                         value={searchInput}
                         onChange={(event) => setSearchInput(event.target.value)}
                         placeholder="Buscar..."
-                        className="h-10 pl-9"
+                        className={`${INPUT_CONTROL_CLASS} pl-9`}
                       />
                     </div>
-                    <button
+                    <Button
                       type="button"
-                      className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-600 hover:bg-gray-50"
+                      variant="outline"
+                      className="h-10 border-gray-300 text-gray-700 hover:bg-gray-100"
                     >
                       <SlidersHorizontal className="h-4 w-4" />
                       Filtrar
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -422,7 +431,7 @@ export default function GiftCardsPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="mt-2"
+                  className="mt-2 border-red-300 text-red-700 hover:bg-red-100"
                   onClick={() => loadGiftCards(currentPage || 1, { preserveInitial: true })}
                 >
                   Reintentar
@@ -431,10 +440,12 @@ export default function GiftCardsPage() {
             ) : null}
 
             {isInitialLoading && giftCards.length === 0 ? (
-              <div className="flex items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-16 text-gray-600">
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                Cargando Gift Cards...
-              </div>
+              <Card className="border-gray-300 shadow-sm">
+                <CardContent className="flex items-center justify-center py-16 text-gray-600">
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Cargando Gift Cards...
+                </CardContent>
+              </Card>
             ) : (
               <GiftCardsTable
                 giftCards={filteredGiftCards}
@@ -446,14 +457,14 @@ export default function GiftCardsPage() {
             )}
 
             {totalPages > 1 ? (
-              <div className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-end">
+              <div className="flex flex-col gap-2 rounded-xl border border-gray-300 bg-white px-5 py-4 text-sm shadow-sm sm:flex-row sm:items-center sm:justify-end">
                 <div className="flex items-center gap-1.5">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => goToPage(currentPage - 1)}
                     disabled={currentPage === 1 || isFetching}
-                    className="h-8 px-2"
+                    className="h-8 border-gray-300 px-2 text-gray-700 hover:bg-gray-100"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
@@ -468,7 +479,7 @@ export default function GiftCardsPage() {
                         className={`h-8 min-w-8 rounded-md border px-2 text-xs font-medium transition-colors ${
                           item === currentPage
                             ? "border-black bg-black text-white"
-                            : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                            : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
                         }`}
                       >
                         {item}
@@ -485,7 +496,7 @@ export default function GiftCardsPage() {
                     size="sm"
                     onClick={() => goToPage(currentPage + 1)}
                     disabled={currentPage >= totalPages || isFetching}
-                    className="h-8 px-2"
+                    className="h-8 border-gray-300 px-2 text-gray-700 hover:bg-gray-100"
                   >
                     <ChevronRight className="h-4 w-4" />
                   </Button>
