@@ -39,20 +39,20 @@ export function GiftCardsSummaryCards({
   ];
 
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
       {metrics.map((metric) => {
         const Icon = metric.icon;
 
         return (
-          <Card key={metric.title} className="border border-gray-200 bg-white shadow-sm">
-            <CardContent className="p-4">
-              <div className="mb-3 flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-gray-50">
-                  {isRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" /> : <Icon className={`h-3.5 w-3.5 ${metric.iconStyles}`} />}
+          <Card key={metric.title} className="border-gray-300 transition-colors hover:border-gray-400">
+            <CardContent className="pt-6">
+              <div className="mb-2 flex items-center gap-2">
+                <div className="rounded-lg border border-gray-300 p-2">
+                  {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin text-gray-500" /> : <Icon className={`h-4 w-4 ${metric.iconStyles}`} />}
                 </div>
-                <p className="text-sm font-medium text-gray-600">{metric.title}</p>
+                <p className="text-sm font-medium text-gray-700">{metric.title}</p>
               </div>
-              <p className="text-3xl font-bold leading-none tracking-tight text-gray-900">{metric.value}</p>
+              <p className="text-2xl font-bold text-black">{metric.value}</p>
             </CardContent>
           </Card>
         );

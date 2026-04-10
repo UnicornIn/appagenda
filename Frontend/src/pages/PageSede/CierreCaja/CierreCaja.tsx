@@ -310,6 +310,7 @@ const PRIMARY_BUTTON_CLASS = "bg-black text-white hover:bg-gray-800";
 const OUTLINE_BUTTON_CLASS = "border-gray-300 text-gray-800 hover:bg-gray-100";
 const INFO_PANEL_CLASS = "rounded-lg border border-gray-300 bg-gray-50 p-3 text-sm text-gray-600";
 const BADGE_BASE_CLASS = "inline-flex rounded-full border px-2 py-1 text-xs font-medium";
+const FORM_GRID_CLASS = "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4";
 
 export default function CierreCajaPage() {
   const { user } = useAuth();
@@ -1949,33 +1950,38 @@ export default function CierreCajaPage() {
                   <CardHeader className="border-b border-gray-200 pb-3">
                     <CardTitle className="text-xl font-semibold text-gray-900">Abrir caja</CardTitle>
                   </CardHeader>
-                  <CardContent className="grid grid-cols-1 gap-4 pt-6 md:grid-cols-5">
-                    <div>
-                      <label className={FIELD_LABEL_CLASS}>Fecha de apertura</label>
-                      <Input type="date" value={aperturaFecha} onChange={(e) => setAperturaFecha(e.target.value)} className={INPUT_CLASS} />
+                  <CardContent className="space-y-4 pt-6">
+                    <div className={FORM_GRID_CLASS}>
+                      <div>
+                        <label className={FIELD_LABEL_CLASS}>Fecha de apertura</label>
+                        <Input type="date" value={aperturaFecha} onChange={(e) => setAperturaFecha(e.target.value)} className={INPUT_CLASS} />
+                      </div>
+                      <div>
+                        <label className={FIELD_LABEL_CLASS}>Monto inicial</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={aperturaMonto}
+                          onChange={(e) => setAperturaMonto(e.target.value)}
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className={FIELD_LABEL_CLASS}>Observaciones</label>
+                        <Input value={aperturaNota} onChange={(e) => setAperturaNota(e.target.value)} className={INPUT_CLASS} placeholder="Opcional" />
+                      </div>
                     </div>
-                    <div>
-                      <label className={FIELD_LABEL_CLASS}>Monto inicial</label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={aperturaMonto}
-                        onChange={(e) => setAperturaMonto(e.target.value)}
-                        className={INPUT_CLASS}
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className={FIELD_LABEL_CLASS}>Observaciones</label>
-                      <Input value={aperturaNota} onChange={(e) => setAperturaNota(e.target.value)} className={INPUT_CLASS} placeholder="Opcional" />
-                    </div>
-                    <div className="flex flex-col justify-end gap-3">
-                      <div className={INFO_PANEL_CLASS}>
-                        El monto inicial se registra como efectivo de apertura.
+
+                    <div className="flex flex-col gap-3 border-t border-gray-200 pt-4 md:flex-row md:items-center md:justify-between">
+                      <div className="md:max-w-[70%]">
+                        <div className={INFO_PANEL_CLASS}>
+                          El monto inicial se registra como efectivo de apertura.
+                        </div>
                       </div>
                       <Button
                         onClick={handleApertura}
                         disabled={loadingAction || !aperturaMonto.trim()}
-                        className={`w-full ${PRIMARY_BUTTON_CLASS}`}
+                        className={`w-full md:w-auto md:min-w-[180px] ${PRIMARY_BUTTON_CLASS}`}
                       >
                         {loadingAction && activeAction === "apertura" ? (
                           <>
@@ -1994,40 +2000,45 @@ export default function CierreCajaPage() {
                   <CardHeader className="border-b border-gray-200 pb-3">
                     <CardTitle className="text-xl font-semibold text-gray-900">Cierre de caja</CardTitle>
                   </CardHeader>
-                  <CardContent className="grid grid-cols-1 gap-4 pt-6 md:grid-cols-4">
-                    <div>
-                      <label className={FIELD_LABEL_CLASS}>Fecha de cierre</label>
-                      <Input type="date" value={cierreFecha} onChange={(e) => setCierreFecha(e.target.value)} className={INPUT_CLASS} />
+                  <CardContent className="space-y-4 pt-6">
+                    <div className={FORM_GRID_CLASS}>
+                      <div>
+                        <label className={FIELD_LABEL_CLASS}>Fecha de cierre</label>
+                        <Input type="date" value={cierreFecha} onChange={(e) => setCierreFecha(e.target.value)} className={INPUT_CLASS} />
+                      </div>
+                      <div>
+                        <label className={FIELD_LABEL_CLASS}>Efectivo contado</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={cierreEfectivoContado}
+                          onChange={(e) => setCierreEfectivoContado(e.target.value)}
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className={FIELD_LABEL_CLASS}>Observaciones</label>
+                        <Input value={cierreNota} onChange={(e) => setCierreNota(e.target.value)} className={INPUT_CLASS} placeholder="Opcional" />
+                      </div>
                     </div>
-                    <div>
-                      <label className={FIELD_LABEL_CLASS}>Efectivo contado</label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={cierreEfectivoContado}
-                        onChange={(e) => setCierreEfectivoContado(e.target.value)}
-                        className={INPUT_CLASS}
-                      />
-                    </div>
-                    <div>
-                      <label className={FIELD_LABEL_CLASS}>Observaciones</label>
-                      <Input value={cierreNota} onChange={(e) => setCierreNota(e.target.value)} className={INPUT_CLASS} placeholder="Opcional" />
-                    </div>
-                    <div className="flex flex-col justify-end gap-3">
-                      <div className={INFO_PANEL_CLASS}>
-                        <div className="flex items-center justify-between gap-3">
-                          <span>Diferencia</span>
-                          <span
-                            className={`font-semibold ${
-                              cierreDiferencia === null
-                                ? "text-gray-700"
-                                : cierreDiferencia > 0
-                                  ? "text-green-700"
-                                  : "text-gray-900"
-                            }`}
-                          >
-                            {cierreDiferencia === null ? "--" : formatMoney(cierreDiferencia)}
-                          </span>
+
+                    <div className="flex flex-col gap-3 border-t border-gray-200 pt-4 md:flex-row md:items-center md:justify-between">
+                      <div className="md:max-w-[70%]">
+                        <div className={INFO_PANEL_CLASS}>
+                          <div className="flex items-center justify-between gap-3">
+                            <span>Diferencia</span>
+                            <span
+                              className={`font-semibold ${
+                                cierreDiferencia === null
+                                  ? "text-gray-700"
+                                  : cierreDiferencia > 0
+                                    ? "text-green-700"
+                                    : "text-gray-900"
+                              }`}
+                            >
+                              {cierreDiferencia === null ? "--" : formatMoney(cierreDiferencia)}
+                            </span>
+                          </div>
                         </div>
                       </div>
                       <Button
@@ -2035,7 +2046,7 @@ export default function CierreCajaPage() {
                         disabled={
                           loadingAction || loadingEfectivoEnCaja || efectivoEnCaja === null || !cierreEfectivoContado.trim()
                         }
-                        className={`w-full ${PRIMARY_BUTTON_CLASS}`}
+                        className={`w-full md:w-auto md:min-w-[180px] ${PRIMARY_BUTTON_CLASS}`}
                       >
                         {loadingAction && activeAction === "cierre" ? (
                           <>
@@ -2121,8 +2132,8 @@ export default function CierreCajaPage() {
                 </CardHeader>
                 <CardContent className="space-y-4 pt-6">
                     <div className="space-y-4">
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <div>
+                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                      <div className="lg:col-span-2">
                           <label className={FIELD_LABEL_CLASS}>Concepto</label>
                           <Input
                             value={egresoMotivo}
@@ -2145,7 +2156,7 @@ export default function CierreCajaPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                         <div>
                           <label className={FIELD_LABEL_CLASS}>Método de pago</label>
                           <select
@@ -2181,7 +2192,7 @@ export default function CierreCajaPage() {
                       </div>
 
                       {isEditingEgreso ? (
-                        <div>
+                        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
                           <label className={FIELD_LABEL_CLASS}>
                             Motivo de edición (obligatorio para auditoría)
                           </label>
@@ -2234,11 +2245,11 @@ export default function CierreCajaPage() {
                     {editingIngresoId ? (
                       <p className="text-sm text-gray-500">Estás editando un ingreso existente.</p>
                     ) : null}
-                  </CardHeader>
-                  <CardContent className="space-y-4 pt-6">
+                </CardHeader>
+                <CardContent className="space-y-4 pt-6">
                     <div className="space-y-4">
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        <div>
+                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                        <div className="lg:col-span-2">
                           <label className={FIELD_LABEL_CLASS}>Concepto</label>
                           <Input
                             value={ingresoMotivo}
@@ -2261,7 +2272,7 @@ export default function CierreCajaPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                         <div>
                           <label className={FIELD_LABEL_CLASS}>Método de pago</label>
                           <select
@@ -2297,7 +2308,7 @@ export default function CierreCajaPage() {
                       </div>
 
                       {editingIngresoId ? (
-                        <div>
+                        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
                           <label className={FIELD_LABEL_CLASS}>
                             Motivo de edición (obligatorio para auditoría)
                           </label>
