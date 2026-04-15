@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowDownRight,
@@ -45,6 +46,12 @@ import {
   TableRow,
 } from "../../../components/ui/table";
 import { Alert, AlertDescription } from "../../../components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "../../../components/ui/dialog";
 import { Avatar, AvatarFallback } from "../../../components/ui/avatar";
 import {
   DropdownMenu,
@@ -57,6 +64,11 @@ import { inventarioService, type InventarioProducto } from "./inventario";
 import { API_BASE_URL } from "../../../types/config";
 import { cn } from "../../../lib/utils";
 import { APP_ROLES, resolveAppRole } from "../../../lib/access-control";
+import {
+  InventoryDashboardTab,
+  InventoryMovimientosTab,
+  InventoryKardexTab,
+} from "./ProductsInventoryViews";
 
 type CatalogoProducto = {
   id: string;
@@ -105,6 +117,9 @@ const formatMoney = (value?: number) => {
 };
 
 export function ProductsList() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeProductsTab = searchParams.get("tab") || "lista";
+
   const {
     user,
     isAuthenticated,
@@ -145,6 +160,14 @@ export function ProductsList() {
   const [currentPage, setCurrentPage] = useState(1);
   const [historialPeriodo, setHistorialPeriodo] = useState<"7" | "30" | "90">("7");
   const [historialPage, setHistorialPage] = useState(1);
+
+  // New product modal state
+  const [isNuevoProductoModalOpen, setIsNuevoProductoModalOpen] = useState(false);
+  const [nuevaVariante, setNuevaVariante] = useState("");
+  const [nuevaUnidad, setNuevaUnidad] = useState("Unidad");
+  const [nuevoStockIdeal, setNuevoStockIdeal] = useState("20");
+  const [paraVentaCheck, setParaVentaCheck] = useState(true);
+  const [usoInternoCheck, setUsoInternoCheck] = useState(false);
 
   const userRole = resolveAppRole(user?.role);
   const canAdjustStock =
@@ -536,37 +559,17 @@ export function ProductsList() {
 
   const renderEstadoBadge = (producto: InventarioProducto) => {
     const actual = Number(producto.stock_actual ?? 0);
-    const minimo = Number(producto.stock_minimo ?? 0);
-
     if (actual <= 0) {
       return (
-        <Badge
-          variant="outline"
-          className="border-gray-400 bg-gray-200 text-gray-900"
-        >
+        <span className="text-xs font-medium px-2 py-0.5 rounded bg-red-50 text-red-600">
           Sin stock
-        </Badge>
+        </span>
       );
     }
-
-    if (actual <= minimo) {
-      return (
-        <Badge
-          variant="outline"
-          className="border-gray-300 bg-gray-100 text-gray-800"
-        >
-          Crítico
-        </Badge>
-      );
-    }
-
     return (
-      <Badge
-        variant="outline"
-        className="border-gray-300 bg-gray-100 text-gray-700"
-      >
-        Entrada
-      </Badge>
+      <span className="text-xs font-medium px-2 py-0.5 rounded bg-gray-100 text-gray-600">
+        Activo
+      </span>
     );
   };
 
@@ -621,9 +624,49 @@ export function ProductsList() {
   );
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex flex-col h-screen bg-gray-50">
       <Sidebar />
       <main className="flex-1 overflow-auto">
+        {/* Products sub-navigation */}
+        <div className="border-b border-gray-200 bg-white px-8 pt-1">
+          <nav className="flex gap-0">
+            {(
+              [
+                { id: "lista", label: "Productos" },
+                { id: "dashboard", label: "Dashboard" },
+                { id: "movimientos", label: "Movimientos" },
+                { id: "kardex", label: "Kardex" },
+              ] as { id: string; label: string }[]
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setSearchParams({ tab: tab.id })}
+                className={cn(
+                  "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap",
+                  activeProductsTab === tab.id
+                    ? "border-gray-900 text-gray-900"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        {activeProductsTab !== "lista" ? (
+          <div className="p-8">
+            {activeProductsTab === "dashboard" && (
+              <InventoryDashboardTab productos={productos} sedeLabel={sedeLabel} />
+            )}
+            {activeProductsTab === "movimientos" && (
+              <InventoryMovimientosTab productos={productos} sedeLabel={sedeLabel} />
+            )}
+            {activeProductsTab === "kardex" && (
+              <InventoryKardexTab productos={productos} />
+            )}
+          </div>
+        ) : (
         <div className="p-8 space-y-6">
           {error ? (
             <Alert variant="destructive" className="border-gray-300 bg-gray-50 text-gray-800">
@@ -644,11 +687,11 @@ export function ProductsList() {
             actions={
               canCreateInventory ? (
                 <Button
-                  onClick={scrollToCrearProducto}
+                  onClick={() => setIsNuevoProductoModalOpen(true)}
                   className="bg-black text-white hover:bg-gray-800"
                 >
                   <Plus className="mr-2 h-4 w-4" />
-                  Crear producto
+                  Nuevo producto
                 </Button>
               ) : null
             }
@@ -736,37 +779,41 @@ export function ProductsList() {
               <Table>
                 <TableHeader className="bg-gray-50">
                   <TableRow>
-                    <TableHead className="w-[140px] px-4 py-3 text-xs font-semibold text-gray-700">
+                    <TableHead className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
                       Producto
                     </TableHead>
-                    <TableHead className="px-4 py-3 text-xs font-semibold text-gray-700">
+                    <TableHead className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
                       Línea
                     </TableHead>
-                    <TableHead className="px-4 py-3 text-xs font-semibold text-gray-700">
+                    <TableHead className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
                       SKU
                     </TableHead>
-                    <TableHead className="px-4 py-3 text-right text-xs font-semibold text-gray-700">
-                      Stock actual
+                    <TableHead className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400 text-center">
+                      Stock
                     </TableHead>
-                    <TableHead className="px-4 py-3 text-right text-xs font-semibold text-gray-700">
+                    <TableHead className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400 text-center">
+                      Mín
+                    </TableHead>
+                    <TableHead className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400 text-center">
                       Ventas
                     </TableHead>
-                    <TableHead className="px-4 py-3 text-right text-xs font-semibold text-gray-700">
+                    <TableHead className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400 text-center">
                       Precio
                     </TableHead>
-                    <TableHead className="px-4 py-3 text-xs font-semibold text-gray-700">
+                    <TableHead className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400 text-center">
+                      Costo
+                    </TableHead>
+                    <TableHead className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
                       Estado
                     </TableHead>
-                    <TableHead className="px-4 py-3 text-right text-xs font-semibold text-gray-700">
-                      Acciones
-                    </TableHead>
+                    <TableHead className="w-10 px-4 py-3" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
                       <TableCell
-                        colSpan={8}
+                        colSpan={10}
                         className="px-4 py-8 text-center text-sm text-gray-500"
                       >
                         <div className="flex items-center justify-center gap-2">
@@ -778,7 +825,7 @@ export function ProductsList() {
                   ) : paginatedProductos.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={8}
+                        colSpan={10}
                         className="px-4 py-10 text-center text-sm text-gray-500"
                       >
                         No hay productos para mostrar con los filtros actuales
@@ -786,124 +833,91 @@ export function ProductsList() {
                     </TableRow>
                   ) : (
                     paginatedProductos.map((producto) => {
+                      const actual = Number(producto.stock_actual ?? 0);
+                      const minimo = Number(producto.stock_minimo ?? 0);
+                      const dotCls =
+                        actual <= 0
+                          ? "bg-gray-400"
+                          : actual <= minimo
+                          ? "bg-red-500"
+                          : actual <= minimo * 1.5
+                          ? "bg-amber-500"
+                          : "bg-emerald-500";
+                      const numCls =
+                        actual <= 0
+                          ? "text-gray-400"
+                          : actual <= minimo
+                          ? "text-red-600"
+                          : actual <= minimo * 1.5
+                          ? "text-amber-600"
+                          : "text-emerald-600";
                       return (
-                        <TableRow
-                          key={producto._id}
-                          className="hover:bg-gray-50"
-                        >
+                        <TableRow key={producto._id} className="hover:bg-gray-50">
                           <TableCell className="px-4 py-3">
-                            <div className="flex items-center gap-3">
-                              <Avatar className="h-9 w-9 border border-gray-200 bg-gray-100">
-                                <AvatarFallback className="bg-white text-gray-600">
-                                  <Package className="h-5 w-5" />
-                                </AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <div className="font-semibold text-gray-900">
-                                  {producto.producto_nombre ||
-                                    producto.nombre ||
-                                    "Producto"}
-                                </div>
-                                <div className="text-xs text-gray-500">
-                                  {producto.producto_codigo || "—"}
-                                </div>
+                            <div>
+                              <div className="font-semibold text-sm text-gray-900">
+                                {producto.producto_nombre || producto.nombre || "Producto"}
+                              </div>
+                              <div className="text-xs text-gray-400 mt-0.5">
+                                {producto.sku || producto.producto_tipo || "—"}
                               </div>
                             </div>
                           </TableCell>
                           <TableCell className="px-4 py-3">
-                            <Badge
-                              variant="outline"
-                              className="border-gray-300 bg-gray-50 text-gray-700"
-                            >
+                            <span className="text-xs font-medium px-2 py-0.5 rounded bg-gray-100 text-gray-600">
                               {producto.categoria || "—"}
-                            </Badge>
+                            </span>
                           </TableCell>
-                          <TableCell className="px-4 py-3">
+                          <TableCell className="px-4 py-3 font-mono text-xs text-gray-400">
                             {producto.producto_codigo || "—"}
                           </TableCell>
-                          <TableCell className="px-4 py-3 text-right font-semibold text-gray-900">
-                            {producto.stock_actual ?? 0}
+                          <TableCell className="px-4 py-3 text-center">
+                            <span className={cn("inline-flex items-center gap-1.5 text-sm font-semibold", numCls)}>
+                              <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", dotCls)} />
+                              {actual}
+                            </span>
                           </TableCell>
-                          <TableCell className="px-4 py-3 text-right text-gray-700">
-                            {typeof producto.ventas === "number"
-                              ? producto.ventas
-                              : "—"}
+                          <TableCell className="px-4 py-3 text-center text-sm text-gray-400">
+                            {minimo}
                           </TableCell>
-                          <TableCell className="px-4 py-3 text-right text-gray-700">
+                          <TableCell className="px-4 py-3 text-center text-sm text-gray-700">
+                            {typeof producto.ventas === "number" ? producto.ventas : "—"}
+                          </TableCell>
+                          <TableCell className="px-4 py-3 text-center text-sm text-gray-800">
                             {producto.precio ? formatMoney(producto.precio) : "—"}
+                          </TableCell>
+                          <TableCell className="px-4 py-3 text-center text-sm text-gray-400">
+                            {producto.costo ? formatMoney(producto.costo) : "—"}
                           </TableCell>
                           <TableCell className="px-4 py-3">
                             {renderEstadoBadge(producto)}
                           </TableCell>
-                          <TableCell className="px-4 py-3 text-right">
-                            {canAdjustStock ? (
-                              productoEditando === producto._id ? (
-                                <div className="flex items-center justify-end gap-2">
-                                  <Input
-                                    type="number"
-                                    value={stockTemporal}
-                                    onChange={(e) => setStockTemporal(e.target.value)}
-                                    className="w-24"
-                                    min={0}
-                                  />
-                                  <Button
-                                    size="sm"
-                                    onClick={() => guardarStock(producto)}
-                                    disabled={guardandoStock === producto._id}
+                          <TableCell className="px-4 py-3 text-center">
+                            {canAdjustStock && (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button className="text-gray-400 hover:text-gray-700 transition-colors p-1 rounded">
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="bg-white">
+                                  <DropdownMenuItem
+                                    onSelect={(e) => { e.preventDefault(); void ajustarStockRapido(producto, 1); }}
                                   >
-                                    {guardandoStock === producto._id ? (
-                                      <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                      "Guardar"
-                                    )}
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={resetEdicionStock}
-                                    className="text-gray-600"
+                                    <ArrowUpRight className="mr-2 h-4 w-4" /> Entrada rápida
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onSelect={(e) => { e.preventDefault(); void ajustarStockRapido(producto, -1); }}
                                   >
-                                    <X className="mr-1 h-4 w-4" />
-                                    Cancelar
-                                  </Button>
-                                </div>
-                              ) : (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8">
-                                      <Pencil className="h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end" className="bg-white">
-                                    <DropdownMenuItem
-                                      onSelect={(event) => {
-                                        event.preventDefault();
-                                        void ajustarStockRapido(producto, 1);
-                                      }}
-                                    >
-                                      <ArrowUpRight className="mr-2 h-4 w-4" /> Entrada rápida
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onSelect={(event) => {
-                                        event.preventDefault();
-                                        void ajustarStockRapido(producto, -1);
-                                      }}
-                                    >
-                                      <ArrowDownRight className="mr-2 h-4 w-4" /> Salida rápida
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onSelect={(event) => {
-                                        event.preventDefault();
-                                        iniciarEdicionStock(producto);
-                                      }}
-                                    >
-                                      Editar stock
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )
-                            ) : (
-                              <span className="text-xs text-gray-500">Solo lectura</span>
+                                    <ArrowDownRight className="mr-2 h-4 w-4" /> Salida rápida
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onSelect={(e) => { e.preventDefault(); iniciarEdicionStock(producto); }}
+                                  >
+                                    Editar stock
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             )}
                           </TableCell>
                         </TableRow>
@@ -946,7 +960,196 @@ export function ProductsList() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          {/* ─── Nuevo producto Dialog ─────────────────────────────── */}
+          <Dialog open={isNuevoProductoModalOpen} onOpenChange={setIsNuevoProductoModalOpen}>
+            <DialogContent className="w-full max-w-[500px] bg-white border-gray-200 text-gray-900">
+              <DialogHeader>
+                <DialogTitle className="text-lg font-bold text-gray-900">Crear producto</DialogTitle>
+                <p className="text-xs text-gray-400 -mt-1">Registra un nuevo producto en el inventario.</p>
+              </DialogHeader>
+              <div className="space-y-3 pt-1">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Nombre del producto</label>
+                  <Input
+                    value={nuevoNombreManual}
+                    onChange={(e) => setNuevoNombreManual(e.target.value)}
+                    placeholder="Ej: Acondicionador Línea Men"
+                    className="border-gray-200 bg-white text-sm"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Marca</label>
+                    <Select value={lineaFormulario} onValueChange={setLineaFormulario}>
+                      <SelectTrigger className="border-gray-200 bg-white text-sm">
+                        <SelectValue placeholder="Seleccionar marca" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white border-gray-200">
+                        <SelectItem value="rizos_felices">Rizos Felices</SelectItem>
+                        <SelectItem value="loreal">L'Oréal</SelectItem>
+                        <SelectItem value="wella">Wella</SelectItem>
+                        {lineasDisponibles.map((l) => (
+                          <SelectItem key={l.id} value={l.id}>{l.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Categoría</label>
+                    <Select value={tipoProducto} onValueChange={setTipoProducto}>
+                      <SelectTrigger className="border-gray-200 bg-white text-sm">
+                        <SelectValue placeholder="Seleccionar" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white border-gray-200">
+                        <SelectItem value="MEN">MEN</SelectItem>
+                        <SelectItem value="SPECIAL">SPECIAL</SelectItem>
+                        <SelectItem value="ACCESORIO">ACCESORIO</SelectItem>
+                        <SelectItem value="USO SALON">USO SALON</SelectItem>
+                        <SelectItem value="USO 2 SALON">USO 2 SALON</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Descripción (opcional)</label>
+                  <Input placeholder="Descripción del producto" className="border-gray-200 bg-white text-sm" />
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">SKU</label>
+                    <Input
+                      value={nuevoSkuManual}
+                      onChange={(e) => setNuevoSkuManual(e.target.value)}
+                      placeholder="Auto"
+                      className="border-gray-200 bg-white text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Unidad</label>
+                    <Select value={nuevaUnidad} onValueChange={setNuevaUnidad}>
+                      <SelectTrigger className="border-gray-200 bg-white text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white border-gray-200">
+                        <SelectItem value="Unidad">Unidad</SelectItem>
+                        <SelectItem value="ML">ML</SelectItem>
+                        <SelectItem value="GR">GR</SelectItem>
+                        <SelectItem value="Litro">Litro</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Variante</label>
+                    <Input
+                      value={nuevaVariante}
+                      onChange={(e) => setNuevaVariante(e.target.value)}
+                      placeholder="Ej: 250 ML"
+                      className="border-gray-200 bg-white text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Precio de compra</label>
+                    <Input
+                      value={costoReferencia}
+                      onChange={(e) => setCostoReferencia(e.target.value)}
+                      placeholder="$0"
+                      className="border-gray-200 bg-white text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Precio de venta</label>
+                    <Input
+                      value={precioReferencia}
+                      onChange={(e) => setPrecioReferencia(e.target.value)}
+                      placeholder="$0"
+                      className="border-gray-200 bg-white text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Stock inicial</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={nuevoStockInicial}
+                      onChange={(e) => setNuevoStockInicial(e.target.value)}
+                      placeholder="0"
+                      className="border-gray-200 bg-white text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Stock mínimo</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={nuevoStockMinimo}
+                      onChange={(e) => setNuevoStockMinimo(e.target.value)}
+                      placeholder="5"
+                      className="border-gray-200 bg-white text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Stock ideal</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={nuevoStockIdeal}
+                      onChange={(e) => setNuevoStockIdeal(e.target.value)}
+                      placeholder="20"
+                      className="border-gray-200 bg-white text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-5 pt-1">
+                  <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={paraVentaCheck}
+                      onChange={(e) => setParaVentaCheck(e.target.checked)}
+                      className="accent-gray-900"
+                    />
+                    Para venta
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={usoInternoCheck}
+                      onChange={(e) => setUsoInternoCheck(e.target.checked)}
+                      className="accent-gray-900"
+                    />
+                    Uso interno
+                  </label>
+                </div>
+                {catalogoError && (
+                  <p className="text-xs text-red-600">{catalogoError}</p>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-gray-100 mt-2">
+                <Button
+                  variant="outline"
+                  className="border-gray-200 text-gray-600 text-sm"
+                  onClick={() => setIsNuevoProductoModalOpen(false)}
+                  disabled={isCreatingInventario}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  className="bg-gray-900 text-white hover:bg-gray-800 text-sm"
+                  onClick={() => { setCreacionModo("manual"); void crearInventario(); }}
+                  disabled={isCreatingInventario}
+                >
+                  {isCreatingInventario && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Registrar producto
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* ── legacy inline form (kept for fallback, hidden) ── */}
+          <div className="hidden">
             <Card
               id="crear-producto-panel"
               className="border-gray-200 bg-white shadow-sm"
@@ -1280,6 +1483,7 @@ export function ProductsList() {
             </Card>
           </div>
         </div>
+        )}
       </main>
     </div>
   );

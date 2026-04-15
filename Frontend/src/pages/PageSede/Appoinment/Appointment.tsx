@@ -1700,7 +1700,7 @@ const CalendarScheduler: React.FC = () => {
   }, [citas, appointments, estilistas, profesionales, refreshTrigger, user, selectedSede]);
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-white to-gray-50/30">
+    <div className="flex flex-col h-screen bg-gradient-to-br from-white to-gray-50/30">
       <Sidebar />
 
       <div className="flex-1 lg:ml-0 flex flex-col overflow-hidden">

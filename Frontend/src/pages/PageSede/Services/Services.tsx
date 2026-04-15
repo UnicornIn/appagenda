@@ -160,7 +160,7 @@ export default function ServicesPage() {
   // Mostrar carga mientras se verifica la autenticación
   if (authLoading || isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gray-50">
         <div className="flex items-center gap-3">
           <Loader className="h-6 w-6 animate-spin text-blue-600" />
           <span className="text-lg text-gray-600">
@@ -174,7 +174,7 @@ export default function ServicesPage() {
   // Si no hay usuario autenticado
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="text-red-600 text-lg mb-4">No autenticado</div>
           <div className="text-gray-600">Por favor inicia sesión para acceder a esta página</div>
@@ -184,7 +184,7 @@ export default function ServicesPage() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-50">
       <Sidebar />
 
       <main className="flex-1 overflow-y-auto">

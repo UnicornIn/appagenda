@@ -18,6 +18,7 @@ import {
   getSedes,
   type VentasDashboardResponse,
   type VentasMetricas,
+  type ChurnCliente,
   type Sede,
   type PeriodOption
 } from "./analyticsApi";
@@ -50,6 +51,10 @@ import {
   resolveCurrencyLocale,
 } from "../../../lib/currency";
 import { DEFAULT_PERIOD } from "../../../lib/period";
+import {
+  facturaService,
+  type FacturaConverted,
+} from "../Sales-invoiced/facturas";
 
 interface DateRange {
   start_date: string;
@@ -76,18 +81,152 @@ const createEmptyMetricas = (): VentasMetricas => ({
 });
 
 const normalizeSedeId = (value: string | null | undefined) => String(value ?? "").trim();
+const SALES_PAYMENT_METHODS = [
+  "efectivo",
+  "transferencia",
+  "tarjeta",
+  "tarjeta_credito",
+  "tarjeta_debito",
+  "addi",
+  "sin_pago",
+  "otros",
+] as const;
+
+const toSafeNumber = (value: unknown): number => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
+};
+
+const normalizeItemType = (value: unknown): string => {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+};
+
+const roundCurrencyMetric = (value: number): number =>
+  Number.isFinite(value) ? Math.round(value * 100) / 100 : 0;
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return "Error desconocido";
+};
+
+const buildDateSeries = (range: DateRange): Date[] => {
+  if (!range.start_date || !range.end_date) return [];
+
+  const start = new Date(`${range.start_date}T00:00:00`);
+  const end = new Date(`${range.end_date}T00:00:00`);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    return [];
+  }
+
+  const series: Date[] = [];
+  const cursor = new Date(start);
+
+  while (cursor <= end) {
+    series.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return series;
+};
+
+const formatChartLabel = (date: Date, totalDays: number): string => {
+  if (totalDays <= 7) {
+    const label = date.toLocaleDateString("es-CO", { weekday: "short" });
+    return label.replace(".", "");
+  }
+
+  return date.toLocaleDateString("es-CO", {
+    day: "2-digit",
+    month: "short",
+  });
+};
+
+const buildRealMetricasFromFacturas = (
+  facturas: FacturaConverted[],
+): Record<string, VentasMetricas> => {
+  const metricasPorMoneda: Record<string, VentasMetricas> = {};
+
+  facturas.forEach((factura) => {
+    const moneda = normalizeCurrencyCode(factura.moneda || "COP");
+    if (!metricasPorMoneda[moneda]) {
+      metricasPorMoneda[moneda] = createEmptyMetricas();
+    }
+
+    const metricas = metricasPorMoneda[moneda];
+    const totalVenta = Math.max(
+      toSafeNumber(factura.total),
+      toSafeNumber(factura.desglose_pagos?.total),
+    );
+
+    metricas.ventas_totales += totalVenta;
+    metricas.cantidad_ventas += 1;
+
+    (factura.items || []).forEach((item) => {
+      const subtotal = toSafeNumber(item?.subtotal);
+      const tipo = normalizeItemType(item?.tipo);
+
+      if (tipo === "servicio") {
+        metricas.ventas_servicios += subtotal;
+      } else if (tipo === "producto") {
+        metricas.ventas_productos += subtotal;
+      }
+    });
+
+    const desglose = factura.desglose_pagos as Record<string, unknown> | undefined;
+    if (!desglose) return;
+
+    SALES_PAYMENT_METHODS.forEach((metodo) => {
+      metricas.metodos_pago[metodo] =
+        (metricas.metodos_pago[metodo] || 0) + toSafeNumber(desglose[metodo]);
+    });
+  });
+
+  Object.values(metricasPorMoneda).forEach((metricas) => {
+    metricas.ventas_totales = roundCurrencyMetric(metricas.ventas_totales);
+    metricas.ventas_servicios = roundCurrencyMetric(metricas.ventas_servicios);
+    metricas.ventas_productos = roundCurrencyMetric(metricas.ventas_productos);
+    metricas.ticket_promedio =
+      metricas.cantidad_ventas > 0
+        ? roundCurrencyMetric(metricas.ventas_totales / metricas.cantidad_ventas)
+        : 0;
+    metricas.crecimiento_ventas = "0%";
+
+    SALES_PAYMENT_METHODS.forEach((metodo) => {
+      metricas.metodos_pago[metodo] = roundCurrencyMetric(metricas.metodos_pago[metodo] || 0);
+    });
+  });
+
+  return metricasPorMoneda;
+};
 
 export default function DashboardPage() {
   const { user, isAuthenticated, activeSedeId, setActiveSedeId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [loadingSedes, setLoadingSedes] = useState(true);
   const [dashboardData, setDashboardData] = useState<VentasDashboardResponse | null>(null);
+  const [realMetricasByCurrency, setRealMetricasByCurrency] = useState<Record<string, VentasMetricas> | null>(null);
   const [sedes, setSedes] = useState<Sede[]>([]);
   const [, setPeriods] = useState<PeriodOption[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState(DEFAULT_PERIOD);
   const [selectedSede, setSelectedSede] = useState<string>("");
   // const [showChurnList, setShowChurnList] = useState(false); // Módulo churn oculto
-  const [churnData, setChurnData] = useState<any[]>([]);
+  const [churnData, setChurnData] = useState<ChurnCliente[]>([]);
   const [error, setError] = useState<string | null>(null);
   
   // Moneda base del usuario/sesión (normalizada)
@@ -333,8 +472,174 @@ export default function DashboardPage() {
     return aggregatedByCurrency;
   };
 
+  const buildInvoiceRange = (): DateRange => {
+    const today = new Date();
+    const todayYmd = toLocalYMD(today);
+
+    if (selectedPeriod === "custom" && dateRange.start_date && dateRange.end_date) {
+      return {
+        start_date: dateRange.start_date,
+        end_date: dateRange.end_date,
+      };
+    }
+
+    if (selectedPeriod === "last_7_days") {
+      const start = new Date(today);
+      start.setDate(start.getDate() - 6);
+      return {
+        start_date: toLocalYMD(start),
+        end_date: todayYmd,
+      };
+    }
+
+    if (selectedPeriod === "last_30_days") {
+      const start = new Date(today);
+      start.setDate(start.getDate() - 29);
+      return {
+        start_date: toLocalYMD(start),
+        end_date: todayYmd,
+      };
+    }
+
+    if (selectedPeriod === "month") {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      return {
+        start_date: toLocalYMD(start),
+        end_date: todayYmd,
+      };
+    }
+
+    return {
+      start_date: todayYmd,
+      end_date: todayYmd,
+    };
+  };
+
+  const updateChartStateFromMetricas = (
+    metricasPorMoneda: Record<string, VentasMetricas>,
+    facturas: FacturaConverted[],
+    range: DateRange,
+  ) => {
+    const { metricas, moneda } = resolveMetricasByCurrency(metricasPorMoneda);
+
+    if (!metricas) {
+      processChartDataWithFallback();
+      return;
+    }
+
+    const totalsByDate = new Map<string, number>();
+    facturas
+      .filter((factura) => normalizeCurrencyCode(factura.moneda) === moneda)
+      .forEach((factura) => {
+        const sourceDate = factura.fecha_pago || factura.fecha_comprobante;
+        if (!sourceDate) return;
+
+        const parsedDate = new Date(sourceDate);
+        if (Number.isNaN(parsedDate.getTime())) return;
+
+        const dateKey = toLocalYMD(parsedDate);
+        totalsByDate.set(dateKey, (totalsByDate.get(dateKey) || 0) + toSafeNumber(factura.total));
+      });
+
+    const dateSeries = buildDateSeries(range);
+    const chartData =
+      dateSeries.length > 0
+        ? dateSeries.map((date) => {
+            const key = toLocalYMD(date);
+            return {
+              day: formatChartLabel(date, dateSeries.length),
+              value: roundCurrencyMetric(totalsByDate.get(key) || 0),
+            };
+          })
+        : [];
+
+    setSalesChartData(chartData);
+
+    const serviceVsProduct = [
+      {
+        name: "Servicios",
+        value: metricas.ventas_servicios || 0,
+        color: "oklch(0.3 0 0)",
+      },
+      {
+        name: "Productos",
+        value: metricas.ventas_productos || 0,
+        color: "oklch(0.7 0 0)",
+      },
+    ].filter((item) => item.value > 0);
+
+    setSalesDistributionData(
+      serviceVsProduct.length > 0
+        ? serviceVsProduct
+        : [
+            { name: "Servicios", value: 0, color: "oklch(0.3 0 0)" },
+            { name: "Productos", value: 0, color: "oklch(0.7 0 0)" },
+          ],
+    );
+
+    const paymentMethods = [
+      {
+        name: "Efectivo",
+        value: metricas.metodos_pago?.efectivo || 0,
+        color: "oklch(0.9 0 0)",
+      },
+      {
+        name: "Transferencia",
+        value: metricas.metodos_pago?.transferencia || 0,
+        color: "oklch(0.7 0 0)",
+      },
+      {
+        name: "Tarjeta de Crédito",
+        value: metricas.metodos_pago?.tarjeta_credito || 0,
+        color: "oklch(0.5 0 0)",
+      },
+      {
+        name: "Tarjeta de Débito",
+        value: metricas.metodos_pago?.tarjeta_debito || 0,
+        color: "oklch(0.45 0 0)",
+      },
+      {
+        name: "Addi",
+        value: metricas.metodos_pago?.addi || 0,
+        color: "oklch(0.4 0 0)",
+      },
+      {
+        name: "Tarjeta",
+        value: metricas.metodos_pago?.tarjeta || 0,
+        color: "oklch(0.35 0 0)",
+      },
+      {
+        name: "Sin Pago",
+        value: metricas.metodos_pago?.sin_pago || 0,
+        color: "oklch(0.3 0 0)",
+      },
+    ].filter((item) => item.value > 0);
+
+    setPaymentMethodData(paymentMethods);
+  };
+
+  const loadRealMetricsFromFacturas = async (sedeId: string): Promise<boolean> => {
+    try {
+      const invoiceRange = buildInvoiceRange();
+      const facturas = await facturaService.getVentasBySedeAllPages(
+        sedeId,
+        invoiceRange.start_date,
+        invoiceRange.end_date,
+      );
+      const metricasPorMoneda = buildRealMetricasFromFacturas(facturas);
+      setRealMetricasByCurrency(metricasPorMoneda);
+      updateChartStateFromMetricas(metricasPorMoneda, facturas, invoiceRange);
+      return true;
+    } catch (facturasError) {
+      console.warn("No se pudieron cargar ventas reales desde facturación:", facturasError);
+      setRealMetricasByCurrency(null);
+      return false;
+    }
+  };
+
   const loadGlobalDashboardData = async () => {
     if (!user?.access_token) return;
+    setRealMetricasByCurrency(null);
 
     const sedesIds = sedes.map((sede) => normalizeSedeId(sede.sede_id)).filter(Boolean);
     if (sedesIds.length === 0) {
@@ -401,6 +706,7 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       setError(null);
+      setRealMetricasByCurrency(null);
       console.log('Cargando dashboard de ventas para sede:', selectedSede, 'período:', selectedPeriod, 'moneda:', monedaUsuario);
 
       if (selectedSede === "global") {
@@ -421,6 +727,7 @@ export default function DashboardPage() {
       });
 
       console.log('📥 Respuesta de la API:', data);
+      const hasRealMetrics = await loadRealMetricsFromFacturas(selectedSede);
 
       // Verificar que la respuesta sea exitosa y tenga la estructura esperada
       if (!data || !data.success) {
@@ -431,10 +738,14 @@ export default function DashboardPage() {
         console.warn('La respuesta no tiene metricas_por_moneda:', data);
         // Puede que la estructura sea diferente, intentar con una estructura por defecto
         setDashboardData(data);
-        processChartDataWithFallback(data);
+        if (!hasRealMetrics) {
+          processChartDataWithFallback();
+        }
       } else {
         setDashboardData(data);
-        processChartData(data);
+        if (!hasRealMetrics) {
+          processChartData(data);
+        }
       }
 
       // Cargar datos de churn
@@ -444,9 +755,9 @@ export default function DashboardPage() {
         await loadChurnData(undefined, undefined, selectedSede);
       }
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error cargando dashboard de ventas:", error);
-      setError(`Error al cargar datos: ${error.message}`);
+      setError(`Error al cargar datos: ${getErrorMessage(error)}`);
       setDashboardData(null);
     } finally {
       setLoading(false);
@@ -501,7 +812,7 @@ export default function DashboardPage() {
         console.warn('La respuesta de churn no tiene array de clientes:', data);
         setChurnData([]);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error cargando churn:", error);
       setChurnData([]);
     }
@@ -512,7 +823,7 @@ export default function DashboardPage() {
       // Verificar que los datos existan
       if (!data?.metricas_por_moneda) {
         console.error('Datos incompletos para procesar gráficos:', data);
-        processChartDataWithFallback(data);
+        processChartDataWithFallback();
         return;
       }
 
@@ -520,7 +831,7 @@ export default function DashboardPage() {
 
       if (!metricas) {
         console.error('No hay métricas disponibles para ninguna moneda:', data.metricas_por_moneda);
-        processChartDataWithFallback(data);
+        processChartDataWithFallback();
         return;
       }
 
@@ -608,7 +919,7 @@ export default function DashboardPage() {
     }
   };
 
-  const processChartDataWithFallback = (_?: any) => {
+  const processChartDataWithFallback = () => {
     // Establecer valores por defecto cuando no hay datos
     setSalesChartData([]);
     setSalesDistributionData([
@@ -689,7 +1000,11 @@ export default function DashboardPage() {
   };
 
   const getActiveDashboardCurrency = (): string => {
-    const { moneda } = resolveMetricasByCurrency(dashboardData?.metricas_por_moneda);
+    const metricasSource =
+      realMetricasByCurrency !== null
+        ? realMetricasByCurrency
+        : dashboardData?.metricas_por_moneda;
+    const { moneda } = resolveMetricasByCurrency(metricasSource);
     return moneda;
   };
 
@@ -865,8 +1180,12 @@ export default function DashboardPage() {
   // Función para obtener métricas de forma segura
   const getMetricas = () => {
     const fallbackCurrency = getActiveDashboardCurrency();
+    const metricasSource =
+      realMetricasByCurrency !== null
+        ? realMetricasByCurrency
+        : dashboardData?.metricas_por_moneda;
 
-    if (!dashboardData?.metricas_por_moneda) {
+    if (!metricasSource || Object.keys(metricasSource).length === 0) {
       return {
         ventas_totales: 0,
         cantidad_ventas: 0,
@@ -887,7 +1206,7 @@ export default function DashboardPage() {
       };
     }
 
-    const { metricas, moneda } = resolveMetricasByCurrency(dashboardData.metricas_por_moneda);
+    const { metricas, moneda } = resolveMetricasByCurrency(metricasSource);
     
     // Si no hay ninguna métrica, crear una vacía
     if (!metricas) {
@@ -926,7 +1245,7 @@ export default function DashboardPage() {
 
   if (!isAuthenticated) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex flex-col h-screen items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold">Acceso no autorizado</h2>
           <p className="mt-2 text-gray-600">Por favor inicia sesión para ver el dashboard.</p>
@@ -937,7 +1256,7 @@ export default function DashboardPage() {
 
   if (loadingSedes) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex flex-col h-screen items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-gray-200 border-t-gray-800 rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-600">Cargando información de la sede...</p>
@@ -948,7 +1267,7 @@ export default function DashboardPage() {
 
   if (!selectedSede) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex flex-col h-screen items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold">Sede no disponible</h2>
           <p className="mt-2 text-gray-600">No se pudo determinar tu sede asignada.</p>
@@ -971,7 +1290,7 @@ export default function DashboardPage() {
 
   if (!isGlobalView && !currentSede) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex flex-col h-screen items-center justify-center">
           <div className="text-center">
             <h2 className="text-2xl font-bold">Sede no encontrada</h2>
             <p className="mt-2 text-gray-600">No se encontró información para la sede {sedeNombreDisplay}</p>
@@ -981,7 +1300,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex flex-col h-screen bg-white">
       <Sidebar />
 
       <main className="flex-1 overflow-y-auto">

@@ -320,7 +320,7 @@ export default function ClientsPage() {
   // Mostrar loading mientras se verifica la autenticación
   if (authLoading || (Boolean(user) && isInitialLoading)) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gray-50">
         <div className="flex items-center gap-3">
           <Loader className="h-6 w-6 animate-spin text-gray-700" />
           <span className="text-lg text-gray-600">
@@ -333,7 +333,7 @@ export default function ClientsPage() {
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="text-red-600 text-lg mb-4">No autenticado</div>
           <div className="text-gray-600">Por favor inicia sesión para acceder a esta página</div>
@@ -343,7 +343,7 @@ export default function ClientsPage() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex flex-col h-screen bg-gray-50">
       <Sidebar />
       <div className="flex-1 overflow-auto">
         {selectedClient ? (
