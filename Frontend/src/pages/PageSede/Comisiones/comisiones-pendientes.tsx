@@ -1,6 +1,9 @@
 // app/comisiones/comisiones-pendientes.tsx
 "use client"
 
+// Resumen de comisiones pendientes para ADMIN_SEDE.
+// El backend ya filtra por la sede del usuario; aquí solo mostramos los totales.
+
 import { useState, useEffect } from "react";
 import { AlertTriangle, DollarSign, Users, Package, Scissors } from "lucide-react";
 import { commissionsService } from "./Api/commissionsService";

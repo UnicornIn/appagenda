@@ -104,6 +104,11 @@ export default function SystemUsersPage() {
     return nombres.join(", ");
   };
 
+  const formatProductCommission = (value: number | null | undefined) => {
+    if (value === null || value === undefined) return "No configurada";
+    return `${value}%`;
+  };
+
   const filteredUsers = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     if (!query) return users;
@@ -286,7 +291,7 @@ export default function SystemUsersPage() {
 
   if (authLoading || isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-white">
         <div className="flex flex-col items-center gap-3">
           <Loader className="h-8 w-8 animate-spin text-gray-900" />
           <span className="text-sm text-gray-600">
@@ -299,7 +304,7 @@ export default function SystemUsersPage() {
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-white">
         <div className="text-center">
           <div className="text-sm text-gray-600 mb-2">No autenticado</div>
           <div className="text-xs text-gray-500">Inicia sesión para acceder</div>
@@ -309,7 +314,7 @@ export default function SystemUsersPage() {
   }
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex flex-col h-screen bg-white">
       <Sidebar />
 
       <div className="flex flex-1 overflow-hidden">
@@ -485,6 +490,12 @@ export default function SystemUsersPage() {
                   <div>
                     <p className="text-gray-500 mb-1">Tipo de usuario</p>
                     <p className="text-gray-900 font-medium">{selectedUser.user_type || "system"}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500 mb-1">Comisión productos</p>
+                    <p className="text-gray-900 font-medium">
+                      {formatProductCommission(selectedUser.comision_productos)}
+                    </p>
                   </div>
                   <div>
                     <p className="text-gray-500 mb-1">Especialidades</p>

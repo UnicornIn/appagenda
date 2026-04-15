@@ -2,17 +2,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
   // Clock,
   CreditCard,
-  LogOut,
-  Menu,
-  Users,
-  X,
 } from "lucide-react";
+import StylistBottomNav from "../../../components/Layout/StylistBottomNav";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import { useEstilistaData } from "./useEstilistaData";
 import { AppointmentsList } from "./appointments-list";
@@ -22,8 +18,6 @@ import BloqueosModal from "../../../components/Quotes/Bloqueos";
 import BottomSheet from "../../../components/ui/bottom-sheet";
 import { getBloqueosProfesional, Bloqueo } from "../../../components/Quotes/bloqueosApi";
 import { formatDateDMY } from "../../../lib/dateFormat";
-import { formatSedeNombre } from "../../../lib/sede";
-import { sedeService, type Sede } from "../../PageSuperAdmin/Sedes/sedeService";
 
 const MONTH_NAMES = [
   "Enero",
@@ -101,11 +95,6 @@ const parseMinutes = (hora: string) => {
 
 const normalizeSedeId = (value: string | null | undefined): string => String(value ?? "").trim();
 
-type SedeOption = {
-  sede_id: string;
-  nombre: string;
-};
-
 /*
 const formatHoyTitulo = (isoDate: string) => {
   const [yearStr, monthStr, dayStr] = isoDate.split("-");
@@ -161,17 +150,17 @@ const obtenerNombresServicios = (cita: any): string => {
 };
 
 export default function VistaEstilistaPage() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { user, activeSedeId, setActiveSedeId, logout } = useAuth();
+  const { user, activeSedeId, setActiveSedeId } = useAuth();
   // const { citas, loading, error, refetchCitas } = useEstilistaData();
-  const { citas, refetchCitas } = useEstilistaData();
+  const {
+    citas,
+    refetchCitas,
+    comisionServiciosPct,
+    comisionProductosPct,
+  } = useEstilistaData();
 
-  const [menuOpen, setMenuOpen] = useState(false);
   const [citaSeleccionada, setCitaSeleccionada] = useState<any>(null);
   const [bloqueos, setBloqueos] = useState<Bloqueo[]>([]);
-  const [sedeOptions, setSedeOptions] = useState<SedeOption[]>([]);
-  const [loadingSedes, setLoadingSedes] = useState(false);
   const [profesionalId, setProfesionalId] = useState<string>("");
   const [refrescarBloqueos, setRefrescarBloqueos] = useState(0);
   const [loadingBloqueos, setLoadingBloqueos] = useState(false);
@@ -206,89 +195,10 @@ export default function VistaEstilistaPage() {
   const selectedSedeId = useMemo(() => {
     const active = normalizeSedeId(activeSedeId);
     if (active) return active;
-
     const current = normalizeSedeId(user?.sede_id);
     if (current) return current;
-
     return allowedSedeIds[0] || "";
   }, [activeSedeId, user?.sede_id, allowedSedeIds]);
-
-  const selectedSedeName = useMemo(() => {
-    const current = sedeOptions.find((option) => option.sede_id === selectedSedeId);
-    if (current?.nombre) return current.nombre;
-    return selectedSedeId || "Sin sede";
-  }, [selectedSedeId, sedeOptions]);
-  const shouldShowSedeSelector = sedeOptions.length > 1;
-
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [location.pathname]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [menuOpen]);
-
-  useEffect(() => {
-    const fallbackOptions = allowedSedeIds.map((sedeId) => ({
-      sede_id: sedeId,
-      nombre: sedeId,
-    }));
-
-    if (!user?.access_token || allowedSedeIds.length === 0) {
-      setSedeOptions(fallbackOptions);
-      return;
-    }
-
-    let isMounted = true;
-
-    const loadSedes = async () => {
-      try {
-        setLoadingSedes(true);
-        const data = await sedeService.getSedes(user.access_token);
-        const allowedSet = new Set(allowedSedeIds.map((sedeId) => sedeId.toUpperCase()));
-
-        const optionsFromApi = (Array.isArray(data) ? data : [])
-          .map((sede: Sede) => ({
-            sede_id: normalizeSedeId(sede?.sede_id),
-            nombre: formatSedeNombre(sede?.nombre, sede?.sede_id || "Sede"),
-          }))
-          .filter((sede) => sede.sede_id && allowedSet.has(sede.sede_id.toUpperCase()))
-          .map((sede) => ({ sede_id: sede.sede_id, nombre: sede.nombre }));
-
-        const included = new Set(optionsFromApi.map((option) => option.sede_id.toUpperCase()));
-        const merged = [...optionsFromApi];
-
-        allowedSedeIds.forEach((sedeId) => {
-          if (included.has(sedeId.toUpperCase())) return;
-          merged.push({ sede_id: sedeId, nombre: sedeId });
-        });
-
-        if (isMounted) {
-          setSedeOptions(merged.length > 0 ? merged : fallbackOptions);
-        }
-      } catch (error) {
-        console.error("Error cargando sedes para perfil de estilista:", error);
-        if (isMounted) {
-          setSedeOptions(fallbackOptions);
-        }
-      } finally {
-        if (isMounted) {
-          setLoadingSedes(false);
-        }
-      }
-    };
-
-    loadSedes();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [allowedSedeIds, user?.access_token]);
 
   useEffect(() => {
     if (!selectedSedeId) return;
@@ -454,44 +364,16 @@ export default function VistaEstilistaPage() {
     setShowCrearBloqueo(true);
   };
 
-  const handleSedeChange = (nextSedeId: string) => {
-    const normalizedSedeId = normalizeSedeId(nextSedeId);
-    if (!normalizedSedeId) return;
-    if (normalizedSedeId === normalizeSedeId(activeSedeId)) return;
-
-    setActiveSedeId(normalizedSedeId);
-    setRefrescarBloqueos((prev) => prev + 1);
-    refetchCitas();
-  };
-
-  const handleLogout = () => {
-    localStorage.clear();
-    sessionStorage.clear();
-    logout();
-    navigate("/login");
-  };
-
   return (
     <>
-      <div className="min-h-screen w-full max-w-[480px] mx-auto overflow-x-hidden bg-gray-50 pb-[max(env(safe-area-inset-bottom),1rem)]">
+      <div className="min-h-screen w-full max-w-[480px] mx-auto overflow-x-hidden bg-gray-50 pb-24">
         <header className="sticky top-0 z-40 border-b border-gray-200 bg-white px-4">
-          <div className="flex h-16 items-center justify-between">
-            <div className="flex min-w-0 items-center">
-              <h1 className="truncate text-2xl font-bold text-gray-900">RF Salon Agent</h1>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setMenuOpen(true)}
-              className="inline-flex h-10 w-10 items-center justify-center text-gray-700"
-              aria-label="Abrir menú"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
+          <div className="flex h-16 items-center">
+            <h1 className="truncate text-2xl font-bold text-gray-900">RF Salon Agent</h1>
           </div>
         </header>
 
-        <main className="space-y-4 px-4 pt-4">
+        <main className="space-y-4 px-4 pt-4 pb-6">
           <section className="rounded-2xl border border-gray-200 bg-white p-4">
             <h2 className="text-sm font-semibold text-gray-900">Resumen rápido del día</h2>
             <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
@@ -594,8 +476,8 @@ export default function VistaEstilistaPage() {
             </p>
 
             <div className="grid grid-cols-7 gap-2 text-sm">
-              {DAY_NAMES.map((day) => (
-                <div key={day} className="text-center text-[11px] font-medium text-gray-500">
+              {DAY_NAMES.map((day, idx) => (
+                <div key={`${day}-${idx}`} className="text-center text-[11px] font-medium text-gray-500">
                   {day}
                 </div>
               ))}
@@ -696,6 +578,8 @@ export default function VistaEstilistaPage() {
               citasHoy={citasHoy.length}
               serviciosCompletadosHoy={citasHoy.filter((cita) => estaCompletada(cita)).length}
               totalVentasHoy={ingresosHoy}
+              comisionServiciosPct={comisionServiciosPct}
+              comisionProductosPct={comisionProductosPct}
               bloqueosHoy={bloqueos.filter((bloqueo) => normalizeFecha(bloqueo.fecha) === todayIso).length}
             />
           </section>
@@ -744,105 +628,8 @@ export default function VistaEstilistaPage() {
         </BottomSheet>
       </div>
 
-      <div
-        className={`fixed inset-0 z-50 transition-all duration-300 ${
-          menuOpen ? "pointer-events-auto" : "pointer-events-none"
-        }`}
-      >
-        <button
-          type="button"
-          onClick={() => setMenuOpen(false)}
-          className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ${
-            menuOpen ? "opacity-100" : "opacity-0"
-          }`}
-          aria-label="Cerrar menú"
-        />
-
-        <aside
-          className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-gray-200 bg-gray-100 shadow-2xl transition-transform duration-300 ${
-            menuOpen ? "translate-x-0" : "-translate-x-full"
-          }`}
-        >
-          <div className="flex h-16 items-center justify-between border-b border-gray-200 bg-white px-4">
-            <h2 className="text-xl font-bold text-gray-900">RF Salon Agent</h2>
-            <button
-              type="button"
-              onClick={() => setMenuOpen(false)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-700"
-              aria-label="Cerrar menú"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-
-          {shouldShowSedeSelector && (
-            <div className="border-b border-gray-200 bg-white p-2.5">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">Sede activa</p>
-              <select
-                value={selectedSedeId}
-                onChange={(e) => handleSedeChange(e.target.value)}
-                className="mt-2 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-gray-900 focus:outline-none"
-                disabled={loadingSedes || sedeOptions.length <= 1}
-              >
-                {sedeOptions.length === 0 && <option value="">Sin sede disponible</option>}
-                {sedeOptions.map((sede) => (
-                  <option key={sede.sede_id} value={sede.sede_id}>
-                    {sede.nombre}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-[11px] text-gray-500">
-                {loadingSedes ? "Cargando sedes..." : `Contexto actual: ${selectedSedeName}`}
-              </p>
-            </div>
-          )}
-
-          <nav className="space-y-1.5 p-2.5">
-            <button
-              type="button"
-              onClick={() => {
-                navigate("/stylist/appointments");
-                setMenuOpen(false);
-              }}
-              className={`inline-flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-medium ${
-                location.pathname === "/stylist/appointments"
-                  ? "bg-gray-900 text-white"
-                  : "text-gray-800"
-              }`}
-            >
-              <Users className="h-5 w-5" />
-              Agenda
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                navigate("/stylist/commissions");
-                setMenuOpen(false);
-              }}
-              className={`inline-flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-medium ${
-                location.pathname === "/stylist/commissions"
-                  ? "bg-gray-900 text-white"
-                  : "text-gray-800"
-              }`}
-            >
-              <CreditCard className="h-5 w-5" />
-              Comisiones
-            </button>
-          </nav>
-
-          <div className="mt-auto border-t border-gray-200 bg-white p-2.5">
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex h-10 w-full items-center justify-start gap-3 rounded-lg px-3 text-sm font-medium text-gray-700"
-            >
-              <LogOut className="h-5 w-5" />
-              Cerrar sesión
-            </button>
-          </div>
-        </aside>
-      </div>
+      {/* Navegación inferior persistente para estilista */}
+      <StylistBottomNav active="agenda" />
     </>
   );
 }

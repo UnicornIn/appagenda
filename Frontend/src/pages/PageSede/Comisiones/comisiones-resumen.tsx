@@ -1,6 +1,9 @@
 // app/comisiones/comisiones-resumen.tsx
 "use client"
 
+// Detalle de comisiones para ADMIN_SEDE:
+// requiere seleccionar estilista, fuerza estado pendiente y usa la primera coincidencia como detalle.
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AlertTriangle, User } from "lucide-react";
 import { commissionsService } from "./Api/commissionsService";

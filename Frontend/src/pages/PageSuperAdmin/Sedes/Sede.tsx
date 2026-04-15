@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Loader } from "lucide-react";
+import { Plus, Loader, AlertCircle } from "lucide-react";
 import { SedesList } from "./sedes-list";
 import { SedeFormModal } from "./sede-form-modal";
 import type { Sede } from "../../../types/sede";
@@ -7,6 +7,8 @@ import { sedeService } from "./sedeService";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import { Sidebar } from "../../../components/Layout/Sidebar";
 import { PageHeader } from "../../../components/Layout/PageHeader";
+import { Button } from "../../../components/ui/button";
+import { Card, CardContent } from "../../../components/ui/card";
 
 export default function SedesPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -73,6 +75,8 @@ export default function SedesPage() {
             direccion: sedeData.direccion,
             informacion_adicional: sedeData.informacion_adicional,
             zona_horaria: sedeData.zona_horaria,
+            pais: sedeData.pais ?? selectedSede.pais,
+            moneda: sedeData.moneda ?? selectedSede.moneda,
             telefono: sedeData.telefono,
             email: sedeData.email,
             activa: sedeData.activa
@@ -86,6 +90,8 @@ export default function SedesPage() {
           direccion: sedeData.direccion,
           informacion_adicional: sedeData.informacion_adicional,
           zona_horaria: sedeData.zona_horaria,
+          pais: sedeData.pais,
+          moneda: sedeData.moneda,
           telefono: sedeData.telefono,
           email: sedeData.email
         });
@@ -130,7 +136,7 @@ export default function SedesPage() {
 
   if (authLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex flex-col min-h-screen items-center justify-center">
         <Loader className="h-5 w-5 animate-spin" />
       </div>
     );
@@ -138,9 +144,9 @@ export default function SedesPage() {
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="mb-2">No autenticado</div>
+          <div className="mb-2 text-lg font-semibold text-gray-900">No autenticado</div>
           <div className="text-sm text-gray-600">Inicia sesión para continuar</div>
         </div>
       </div>
@@ -148,41 +154,45 @@ export default function SedesPage() {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex flex-col h-screen bg-gray-50">
       <Sidebar />
-      
-      <main className="flex-1 lg:ml-0 overflow-auto">
-        <div className="w-full min-h-screen overflow-auto lg:mt-0 mt-16">
+
+      <main className="flex-1 overflow-auto">
+        <div className="w-full p-8 pt-24 lg:pt-8">
           {isLoading ? (
-            <div className="flex min-h-screen items-center justify-center">
+            <div className="flex min-h-[calc(100vh-8rem)] items-center justify-center">
               <Loader className="h-5 w-5 animate-spin" />
             </div>
           ) : error ? (
-            <div className="flex min-h-screen items-center justify-center">
-              <div className="text-center">
-                <div className="mb-2">Error</div>
-                <div className="text-sm text-gray-600 mb-4">{error}</div>
-                <button
+            <Card className="mx-auto max-w-xl border-gray-300 shadow-sm">
+              <CardContent className="flex flex-col items-center justify-center py-14 text-center">
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-600">
+                  <AlertCircle className="h-6 w-6" />
+                </div>
+                <h2 className="text-lg font-semibold text-gray-900">Error al cargar sedes</h2>
+                <p className="mt-2 max-w-md text-sm text-gray-600">{error}</p>
+                <Button
                   onClick={handleRetry}
-                  className="px-3 py-1 border border-black text-sm hover:bg-gray-50"
+                  variant="outline"
+                  className="mt-6 border-gray-300 text-gray-800 hover:bg-gray-100"
                 >
                   Reintentar
-                </button>
-              </div>
-            </div>
+                </Button>
+              </CardContent>
+            </Card>
           ) : (
-            <div className="mx-auto max-w-4xl px-4 py-8">
+            <>
               <PageHeader
                 title="Sedes"
                 subtitle={`${sedes.length} sedes en total`}
                 actions={
-                  <button
+                  <Button
                     onClick={handleAddSede}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-gray-900 text-white text-sm hover:bg-gray-800"
+                    className="bg-black text-white hover:bg-gray-800"
                   >
-                    <Plus className="w-4 h-4" />
+                    <Plus className="mr-2 h-4 w-4" />
                     Añadir sede
-                  </button>
+                  </Button>
                 }
               />
 
@@ -202,7 +212,7 @@ export default function SedesPage() {
                 sede={selectedSede}
                 isSaving={isSaving}
               />
-            </div>    
+            </>
           )}
         </div>
       </main>

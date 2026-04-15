@@ -1,4 +1,5 @@
-// src/services/commissionsService.ts
+// Servicio frontend para comisiones en contexto ADMIN_SEDE.
+// Ajusta filtros con la sede del usuario y separa servicios/productos para la UI.
 import { apiClient } from './apiClient';
 import { 
   Commission, 

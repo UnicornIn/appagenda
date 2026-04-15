@@ -207,11 +207,8 @@ export const buildDashboardRequestParams = (
   }
 
   if (period === "today") {
-    const today = toLocalYMD(new Date());
     return {
-      period: "custom",
-      start_date: today,
-      end_date: today,
+      period: "today",
     };
   }
 

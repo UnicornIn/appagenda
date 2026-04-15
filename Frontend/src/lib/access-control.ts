@@ -43,6 +43,7 @@ export const APP_MODULES = {
   SEDE_STYLISTS: "SEDE_STYLISTS",
 
   STYLIST_COMMISSIONS: "STYLIST_COMMISSIONS",
+  STYLIST_REPORTS: "STYLIST_REPORTS",
 } as const;
 
 export type AppModule = (typeof APP_MODULES)[keyof typeof APP_MODULES];
@@ -82,12 +83,14 @@ const SUPER_ADMIN_MODULES: AppModule[] = [
   APP_MODULES.SUPER_COMMISSIONS,
   APP_MODULES.SUPER_CLIENTS,
   APP_MODULES.SUPER_SYSTEM_USERS,
+  APP_MODULES.SUPER_CIERRE_CAJA,
   APP_MODULES.SUPER_GIFT_CARDS,
 ];
 
 const SUPERADMIN_MODULES: AppModule[] = [
   APP_MODULES.SUPER_SYSTEM_USERS,
   APP_MODULES.SUPER_GIFT_CARDS,
+  APP_MODULES.SUPER_CIERRE_CAJA,
 ];
 
 const ADMIN_SEDE_MODULES: AppModule[] = [
@@ -110,6 +113,7 @@ const ESTILISTA_MODULES: AppModule[] = [
   APP_MODULES.AGENDA_HOME,
   APP_MODULES.AGENDA_STYLIST,
   APP_MODULES.STYLIST_COMMISSIONS,
+  APP_MODULES.STYLIST_REPORTS,
 ];
 
 const CALL_CENTER_MODULES: AppModule[] = [
@@ -156,6 +160,7 @@ export const ROUTE_ACCESS_MAP: Record<string, AppModule> = {
   "/sede/dashboard": APP_MODULES.SEDE_DASHBOARD,
   "/sede/sales-invoiced": APP_MODULES.SEDE_SALES_INVOICED,
   "/sede/cierre-caja": APP_MODULES.SEDE_CIERRE_CAJA,
+  // Módulo de comisiones para admin_sede
   "/sede/commissions": APP_MODULES.SEDE_COMMISSIONS,
   "/sede/billing": APP_MODULES.SEDE_BILLING,
   "/sede/gift-cards": APP_MODULES.SEDE_GIFT_CARDS,
@@ -168,6 +173,7 @@ export const ROUTE_ACCESS_MAP: Record<string, AppModule> = {
 
   "/stylist/appointments": APP_MODULES.AGENDA_STYLIST,
   "/stylist/commissions": APP_MODULES.STYLIST_COMMISSIONS,
+  "/stylist/reports": APP_MODULES.STYLIST_REPORTS,
 };
 
 const MODULE_SET = new Set<AppModule>(Object.values(APP_MODULES));

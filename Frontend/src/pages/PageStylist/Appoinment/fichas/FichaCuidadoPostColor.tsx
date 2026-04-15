@@ -6,6 +6,7 @@ import { Cita } from '../../../../types/fichas';
 import { Camera, Loader2, X, Save, CheckCircle, Check } from "lucide-react";
 import { API_BASE_URL } from '../../../../types/config';
 import { getEstilistaDataFromCita, getFichaAuthToken } from './fichaHelpers';
+import { handleTextareaAutoResize } from "../../../../lib/textareaAutosize";
 
 interface FichaCuidadoPostColorProps {
   cita: Cita;
@@ -13,6 +14,8 @@ interface FichaCuidadoPostColorProps {
   onGuardar?: (datos: any) => void;
   onSubmit: (data: any) => void;
   onCancelar?: () => void;
+  fichaId?: string;
+  modoEdicion?: boolean;
 }
 
 const recomendacionesPredeterminadas = [
@@ -26,7 +29,7 @@ const recomendacionesPredeterminadas = [
   "Seguir rutina de cuidado específica"
 ];
 
-export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmit, onCancelar }: FichaCuidadoPostColorProps) {
+export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmit, onCancelar, fichaId, modoEdicion }: FichaCuidadoPostColorProps) {
   const [formData, setFormData] = useState({
     autorizacion_publicacion: false,
     firma_profesional: false,
@@ -283,8 +286,14 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
       formDataToSend.append('data', JSON.stringify(fichaData));
 
       // 7. Enviar petición
-      const response = await fetch(`${API_BASE_URL}scheduling/quotes/create-ficha`, {
-        method: 'POST',
+      const isEdit = Boolean(fichaId || modoEdicion);
+      const endpoint = isEdit
+        ? `${API_BASE_URL}scheduling/quotes/fichas/${fichaId}`
+        : `${API_BASE_URL}scheduling/quotes/create-ficha`;
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const response = await fetch(endpoint, {
+        method,
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -324,14 +333,18 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
         localStorage.removeItem(`ficha_cuidado_post_color_${cita.cita_id}`);
 
         // Notificar éxito
-        alert(`✅ Ficha de Cuidado Post Color creada exitosamente por ${estilistaData.nombre}`);
+        alert(
+          isEdit
+            ? `✅ Ficha de Cuidado Post Color actualizada por ${estilistaData.nombre}`
+            : `✅ Ficha de Cuidado Post Color creada exitosamente por ${estilistaData.nombre}`
+        );
         onSubmit(data);
       } else {
-        throw new Error(data.message || 'Error al crear la ficha');
+        throw new Error(data.message || (isEdit ? 'Error al actualizar la ficha' : 'Error al crear la ficha'));
       }
 
     } catch (error) {
-      console.error('❌ Error al crear ficha:', error);
+      console.error('❌ Error al guardar ficha:', error);
       alert(error instanceof Error ? error.message : 'Error al guardar la ficha');
     } finally {
       setLoading(false);
@@ -498,9 +511,10 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
       <div>
         <label className="block text-sm font-medium mb-2">Observaciones Personalizadas</label>
         <textarea 
-          className="w-full p-3 border rounded-lg h-24"
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[140px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
           value={formData.observaciones_personalizadas}
           onChange={(e) => handleInputChange('observaciones_personalizadas', e.target.value)}
+          onInput={handleTextareaAutoResize}
           placeholder="Agrega observaciones específicas para este cliente..."
         />
       </div>
@@ -509,9 +523,10 @@ export function FichaCuidadoPostColor({ cita, datosIniciales, onGuardar, onSubmi
       <div>
         <label className="block text-sm font-medium mb-2">Tenga en cuenta</label>
         <textarea 
-          className="w-full p-3 border rounded-lg h-20"
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[140px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
           value={formData.tenga_en_cuenta}
           onChange={(e) => handleInputChange('tenga_en_cuenta', e.target.value)}
+          onInput={handleTextareaAutoResize}
           placeholder="Información adicional importante que el cliente debe considerar..."
         />
       </div>

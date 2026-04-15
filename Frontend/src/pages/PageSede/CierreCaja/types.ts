@@ -15,6 +15,7 @@ export type CashEgreso = {
   metodo_pago?: string;
   tipo?: string;
   concepto?: string;
+   motivo_edicion?: string;
 };
 
 export type CashIngreso = {
@@ -22,10 +23,13 @@ export type CashIngreso = {
   sede_id?: string;
   monto: number;
   motivo: string;
+  // Algunos endpoints devuelven "concepto" como sinónimo de motivo
+  concepto?: string;
   tipo?: string;
   metodo_pago?: string;
   fecha: string;
   creado_en?: string;
+  motivo_edicion?: string;
 };
 
 export type CashCierre = {

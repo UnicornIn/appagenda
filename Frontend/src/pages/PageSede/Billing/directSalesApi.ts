@@ -75,6 +75,7 @@ export interface CreateDirectSaleInput {
   token: string;
   sedeId: string;
   total: number;
+  deliveryCost?: number;
   paymentMethod: PaymentMethod;
   giftCardCode?: string;
   items: DirectSaleLineItem[];
@@ -292,11 +293,14 @@ function buildCreateSalePayload(
   const sellerName = typeof input.seller?.nombre === "string" ? input.seller.nombre.trim() : "";
   const sellerProfessionalId =
     typeof input.seller?.profesionalId === "string" ? input.seller.profesionalId.trim() : "";
+  const deliveryCost = toNumeric(input.deliveryCost);
   const payload: Record<string, unknown> = {
     sede_id: input.sedeId,
     productos: input.items.map((item) => ({
       producto_id: item.productId,
       cantidad: Math.trunc(item.quantity),
+      precio_unitario: roundToTwo(item.unitPrice),
+      nombre: item.name,
     })),
     metodo_pago: normalizeDirectSalePaymentMethod(input.paymentMethod),
     abono: 0,
@@ -320,6 +324,10 @@ function buildCreateSalePayload(
 
   if (sellerProfessionalId.length > 0) {
     payload.profesional_id = sellerProfessionalId;
+  }
+
+  if (deliveryCost !== null && deliveryCost >= 0) {
+    payload.domicilio = roundToTwo(deliveryCost);
   }
 
   if (includeModernFields) {

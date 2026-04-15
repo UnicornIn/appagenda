@@ -15,6 +15,7 @@ interface ApiEstilista {
   }>;
   activo: boolean;
   comision: number | null;
+  comision_productos?: number | null;
   profesional_id: string;
   rol: string;
   sede_id: string;
@@ -31,6 +32,14 @@ interface UpdateEstilistaResponse {
   msg: string;
   profesional: ApiEstilista;
 }
+
+const normalizeCommission = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  if (parsed < 0 || parsed > 100) return null;
+  return Math.round(parsed * 100) / 100;
+};
 
 const formatApiErrorDetail = (detail: unknown): string => {
   if (typeof detail === "string") {
@@ -135,6 +144,7 @@ export const estilistaService = {
       franquicia_id: null,
       created_by: estilista.created_by,
       comision: estilista.comision,
+      comision_productos: normalizeCommission(estilista.comision_productos),
       comisiones_por_categoria:
         estilista && typeof estilista.comisiones_por_categoria === "object"
             ? (estilista.comisiones_por_categoria as Record<string, number>)
@@ -154,8 +164,9 @@ export const estilistaService = {
       nombre: estilistaData.nombre.trim(),
       email: estilistaData.email.trim(),
       sede_id: estilistaData.sede_id,
-      especialidades: estilistaData.especialidades || [],
+      especialidades: true,
       comision: estilistaData.comision,
+      comision_productos: normalizeCommission(estilistaData.comision_productos) ?? undefined,
       telefono: estilistaData.telefono,
       password: estilistaData.password,
       activo: estilistaData.activo !== undefined ? estilistaData.activo : true
@@ -216,7 +227,7 @@ export const estilistaService = {
           _id: result.estilista_mongo_id || `temp-${Date.now()}`,
           nombre: requestData.nombre,
           email: requestData.email,
-          especialidades: requestData.especialidades,
+          especialidades: Array.isArray(requestData.especialidades) ? requestData.especialidades : [],
           servicios_no_presta: [],
           servicios_presta: [],
           activo: requestData.activo,
@@ -227,9 +238,12 @@ export const estilistaService = {
           franquicia_id: null,
           created_by: 'system',
           comision: requestData.comision,
+          comision_productos: normalizeCommission(estilistaData.comision_productos) ?? null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          especialidades_detalle: requestData.especialidades.map(id => ({ id, nombre: id }))
+          especialidades_detalle: Array.isArray(requestData.especialidades)
+            ? requestData.especialidades.map((id: string) => ({ id, nombre: id }))
+            : [],
         };
         
         return estilistaBasico;
@@ -326,13 +340,21 @@ export const estilistaService = {
       nombre: estilistaData.nombre?.trim(),
       email: estilistaData.email?.trim(),
       sede_id: estilistaData.sede_id,
-      especialidades: estilistaData.especialidades || [],
-      activo: estilistaData.activo
+      especialidades: true,
+      activo: estilistaData.activo ?? true,
+      password:
+        typeof estilistaData.password === "string" && estilistaData.password.trim()
+          ? estilistaData.password.trim()
+          : "Temporal123!",
     };
 
     // Solo enviar comision si tiene valor
     if (estilistaData.comision !== undefined) {
       requestData.comision = estilistaData.comision;
+    }
+
+    if (estilistaData.comision_productos !== undefined) {
+      requestData.comision_productos = normalizeCommission(estilistaData.comision_productos);
     }
 
     if (typeof estilistaData.telefono === "string") {
@@ -361,7 +383,12 @@ export const estilistaService = {
 
     const result: UpdateEstilistaResponse = await response.json();
     console.log('✅ Respuesta del backend al actualizar:', result);
-    
+
+    // Si el backend no envía el objeto profesional, reconsultar para evitar undefined.
+    if (!result.profesional) {
+      return this.getEstilistaById(token, profesionalId);
+    }
+
     const especialidadesArray = result.profesional.especialidades ? 
       (result.profesional.servicios_presta?.map(servicio => servicio.nombre) || []) : 
       [];
@@ -387,6 +414,7 @@ export const estilistaService = {
       franquicia_id: null,
       created_by: result.profesional.created_by,
       comision: result.profesional.comision,
+      comision_productos: normalizeCommission(result.profesional.comision_productos),
       created_at: result.profesional.created_at,
       updated_at: result.profesional.updated_at,
       especialidades_detalle: especialidadesDetalle
@@ -511,6 +539,7 @@ export const estilistaService = {
       franquicia_id: null,
       created_by: data.created_by,
       comision: data.comision,
+      comision_productos: normalizeCommission(data.comision_productos),
       comisiones_por_categoria:
         data && typeof data.comisiones_por_categoria === "object"
           ? (data.comisiones_por_categoria as Record<string, number>)

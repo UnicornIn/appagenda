@@ -4,6 +4,7 @@ export interface Factura {
   fecha_pago: string;
   local: string;
   sede_id: string;
+  venta_id?: string;
   moneda: string;
   tipo_comision: string;
   cliente_id: string;
@@ -20,6 +21,7 @@ export interface Factura {
   profesional_nombre: string;
   metodo_pago: string;
   facturado_por: string;
+  vendido_por?: string;
   estado: string;
   // Campos opcionales para detalle
   items?: Array<{
@@ -51,4 +53,6 @@ export interface Factura {
     tarjeta_debito?: number;
     addi?: number;
   };
+  electronic_invoice_status?: string;
+  electronic_invoice_id?: string;
 }

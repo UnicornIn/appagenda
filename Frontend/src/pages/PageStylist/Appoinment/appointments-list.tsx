@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock, PlayCircle, Ban, Trash2, X, UserX, CheckCircle, Tag, Pencil } from "lucide-react";
+import { Clock, PlayCircle, Ban, Trash2, X, UserX, CheckCircle, Tag, Pencil, FileText } from "lucide-react";
 import { Cita } from '../../../types/fichas';
 import { Bloqueo, deleteBloqueo } from '../../../components/Quotes/bloqueosApi';
 import { useState } from "react";
@@ -70,7 +70,6 @@ export function AppointmentsList({
   const [bloqueoEditando, setBloqueoEditando] = useState<Bloqueo | null>(null);
   const [mostrarModalEdicion, setMostrarModalEdicion] = useState(false);
   const [eliminando, setEliminando] = useState(false);
-
   const getAuthToken = () => {
     return localStorage.getItem('access_token') || 
            sessionStorage.getItem('access_token') || 
@@ -137,57 +136,72 @@ export function AppointmentsList({
   const getEstadoCita = (cita: Cita) => {
     if (cita.estado) {
       const estadoNormalizado = cita.estado.toLowerCase().trim();
-      
+
       switch (estadoNormalizado) {
-        case "pendiente":
-        case "reservada":
-        case "reservada/pendiente":
-        case "confirmada":
-          return { 
-            estado: cita.estado,
-            color: "text-gray-700", 
-            icon: Clock,
-            borderColor: "border-gray-300"
-          };
-        
-        case "en proceso":
-        case "en_proceso":
-        case "en curso":
-          return { 
-            estado: "En Proceso", 
-            color: "text-gray-800", 
-            icon: PlayCircle,
-            borderColor: "border-gray-400"
-          };
-        
         case "cancelada":
         case "cancelado":
-          return { 
-            estado: "Cancelada", 
-            color: "text-red-700", 
+          return {
+            estado: "Cancelada",
+            color: "text-red-700",
             icon: X,
-            borderColor: "border-red-300 bg-red-50"
+            borderColor: "border-red-200 bg-red-50"
           };
-        
+
+        case "facturada":
+        case "facturado":
+          return {
+            estado: "Facturada",
+            color: "text-gray-700",
+            icon: Tag,
+            borderColor: "border-gray-200 bg-gray-50"
+          };
+
         case "no asistio":
         case "no_asistio":
         case "no asistió":
-          return { 
-            estado: "No Asistió", 
-            color: "text-gray-500", 
+          return {
+            estado: "No Asistió",
+            color: "text-yellow-700",
             icon: UserX,
-            borderColor: "border-gray-300"
+            borderColor: "border-yellow-200 bg-yellow-50"
           };
-        
+
         case "finalizada":
         case "finalizado":
         case "completada":
         case "completado":
-          return { 
-            estado: "Finalizada", 
-            color: "text-gray-700", 
+        case "terminada":
+        case "terminado":
+        case "realizada":
+        case "realizado":
+          return {
+            estado: "Finalizada",
+            color: "text-orange-700",
             icon: CheckCircle,
-            borderColor: "border-gray-400"
+            borderColor: "border-orange-200 bg-orange-50"
+          };
+
+        case "en proceso":
+        case "en_proceso":
+        case "en curso":
+          return {
+            estado: "En proceso",
+            color: "text-green-800",
+            icon: PlayCircle,
+            borderColor: "border-green-200 bg-green-50"
+          };
+
+        case "pendiente":
+        case "reservada":
+        case "reservada/pendiente":
+        case "confirmada":
+        case "agendada":
+        case "agendado":
+          return {
+            estado: "Agendada/Confirmada",
+            color: "text-green-700",
+            icon: Clock,
+            borderColor: "border-green-200 bg-green-50"
           };
       }
     }
@@ -207,32 +221,32 @@ export function AppointmentsList({
       
       if (ahora < inicioCita) {
         return { 
-          estado: "Pendiente", 
-          color: "text-gray-700", 
+          estado: "Agendada/Confirmada", 
+          color: "text-green-700", 
           icon: Clock,
-          borderColor: "border-gray-300"
+          borderColor: "border-green-200 bg-green-50"
         };
       } else if (ahora >= inicioCita && ahora <= finCita) {
         return { 
-          estado: "En Proceso", 
-          color: "text-gray-800", 
+          estado: "En proceso", 
+          color: "text-green-800", 
           icon: PlayCircle,
-          borderColor: "border-gray-400"
+          borderColor: "border-green-200 bg-green-50"
         };
       } else {
         return { 
           estado: "Finalizada", 
-          color: "text-gray-700", 
+          color: "text-orange-700", 
           icon: CheckCircle,
-          borderColor: "border-gray-400"
+          borderColor: "border-orange-200 bg-orange-50"
         };
       }
     } catch (error) {
       return { 
-        estado: "Pendiente", 
-        color: "text-gray-700", 
+        estado: "Agendada/Confirmada", 
+        color: "text-green-700", 
         icon: Clock,
-        borderColor: "border-gray-300"
+        borderColor: "border-green-200 bg-green-50"
       };
     }
   };
@@ -295,6 +309,18 @@ export function AppointmentsList({
           const emailCliente =
             appointment.cliente?.email ||
             ((appointment as any).cliente_email ?? "");
+          const baseNotaRaw =
+            (appointment as any).notas_call_center ||
+            (appointment as any).nota_call_center ||
+            (appointment as any).notasCallCenter ||
+            appointment.comentario ||
+            (appointment as any).comentarios ||
+            (appointment as any).notas ||
+            (appointment as any).nota ||
+            (appointment as any).observaciones ||
+            "";
+          const baseNota = baseNotaRaw?.toString().trim();
+          const notaCita = baseNota || "";
           
           // 🔥 CAMBIO CRÍTICO: Usar helper para obtener TODOS los servicios
           const nombresServicios = obtenerNombresServicios(appointment);
@@ -362,6 +388,16 @@ export function AppointmentsList({
                       </div>
                     )}
                   </div>
+
+                  {notaCita ? (
+                    <div className="mb-2 flex items-start gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                      <FileText className="mt-[1px] h-3.5 w-3.5 text-gray-500 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-800">Nota call center</p>
+                        <p className="whitespace-pre-wrap break-words text-xs text-gray-700">{notaCita}</p>
+                      </div>
+                    </div>
+                  ) : null}
                   
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div

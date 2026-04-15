@@ -45,6 +45,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
     email: "",
     sede_id: "",
     comision: "",
+    comision_productos: "",
     especialidades: [] as string[],
     password: "",
     activo: true
@@ -149,7 +150,11 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
         email: estilista.email || "",
         sede_id: estilista.sede_id || "",
         comision: estilista.comision !== null && estilista.comision !== undefined ? estilista.comision.toString() : "",
-        especialidades: estilista.especialidades || [],
+        comision_productos:
+          estilista.comision_productos !== null && estilista.comision_productos !== undefined
+            ? estilista.comision_productos.toString()
+            : "",
+        especialidades: Array.isArray(estilista.especialidades) ? estilista.especialidades : [],
         password: "", // No mostrar password en edición
         activo: estilista.activo !== undefined ? estilista.activo : true
       })
@@ -159,6 +164,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
         email: "",
         sede_id: "",
         comision: "",
+        comision_productos: "",
         especialidades: [],
         password: "",
         activo: true
@@ -225,7 +231,7 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
     console.log('🎯 Especialidades válidas a guardar:', especialidadesValidas);
 
     // ✅ PREPARAR DATOS CON VALIDACIÓN EXTRA - Asegurar que especialidades siempre esté definido
-    const saveData: Partial<Estilista> & { password?: string } = {
+    const saveData: Partial<Estilista> & { password?: string; especialidades: string[] } = {
       nombre: formData.nombre.trim(),
       email: formData.email.trim(),
       sede_id: formData.sede_id,
@@ -245,11 +251,23 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
       saveData.comision = null;
     }
 
+    if (formData.comision_productos.trim() !== "") {
+      const comisionProdNum = Number(formData.comision_productos);
+      if (!isNaN(comisionProdNum) && comisionProdNum >= 0 && comisionProdNum <= 100) {
+        saveData.comision_productos = comisionProdNum;
+      } else {
+        alert("La comisión por productos debe estar entre 0 y 100.");
+        return;
+      }
+    } else {
+      saveData.comision_productos = null;
+    }
+
     console.log('🔍 === DATOS PARA GUARDAR ===');
     console.log('📤 saveData:', saveData);
     console.log('🎯 Especialidades:', saveData.especialidades);
     console.log('📋 Tipo de especialidades:', typeof saveData.especialidades);
-    console.log('🔢 Cantidad de especialidades:', (saveData.especialidades || []).length); // ✅ Ahora es seguro porque siempre está definido
+    console.log('🔢 Cantidad de especialidades:', saveData.especialidades.length);
 
     // Solo incluir password si es un nuevo estilista y tiene valor
     if (!estilista && formData.password.trim()) {
@@ -329,6 +347,14 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
     }
     
     setFormData({ ...formData, comision: cleanedValue });
+  }
+
+  const handleComisionProductosChange = (value: string) => {
+    const cleanedValue = value.replace(/[^\d.]/g, '');
+    const parts = cleanedValue.split('.');
+    if (parts.length > 2) return;
+    if (parts[1] && parts[1].length > 2) return;
+    setFormData({ ...formData, comision_productos: cleanedValue });
   }
 
   const getSedeNombre = () => {
@@ -440,6 +466,21 @@ export function EstilistaFormModal({ isOpen, onClose, onSave, estilista, isSavin
             />
             <p className="text-xs text-gray-900 mt-1">
               Dejar vacío si no aplica comisión. Máximo 2 decimales.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Comisión por productos (%)</label>
+            <input
+              type="text"
+              value={formData.comision_productos}
+              onChange={(e) => handleComisionProductosChange(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
+              placeholder="Ej: 10 (opcional)"
+              disabled={isSaving}
+            />
+            <p className="text-xs text-gray-900 mt-1">
+              Opcional. Valor entre 0 y 100. Si se deja vacío se usará la configuración del producto/sede.
             </p>
           </div>
 

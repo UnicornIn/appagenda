@@ -1,5 +1,8 @@
 "use client"
 
+// Filtros del módulo de Comisiones (ADMIN_SEDE).
+// No pide sede porque la sede activa viene del token; solo arma filtros de profesional, tipo y fechas.
+
 import { useState, useEffect } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select"
 import { Calendar } from "lucide-react";

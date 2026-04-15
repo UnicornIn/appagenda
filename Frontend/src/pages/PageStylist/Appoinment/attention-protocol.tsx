@@ -10,6 +10,7 @@ import { FichaAsesoriaCorte } from './fichas/FichaAsesoriaCorte'
 import { FichaCuidadoPostColor } from './fichas/FichaCuidadoPostColor'
 import { FichaValoracionPruebaColor } from './fichas/FichaValoracionPruebaColor'
 import { API_BASE_URL } from '../../../types/config'
+// import { getFichaAuthToken } from './fichas/fichaHelpers'
 // Añadir al inicio del archivo, junto con los otros imports
 import { Ban } from "lucide-react";  // <-- AÑADIR ESTE
 import BloqueosModal from "../../../components/Quotes/Bloqueos";  // <-- AÑADIR ESTE (ajusta la ruta)
@@ -88,6 +89,9 @@ export function AttentionProtocol({
   const [loadingFinalizar, setLoadingFinalizar] = useState(false)
   const [detalleFicha, setDetalleFicha] = useState<FichaServidor | null>(null)
   const [mostrarModalBloqueos, setMostrarModalBloqueos] = useState(false);
+  const [fichaEnEdicion, setFichaEnEdicion] = useState<FichaServidor | null>(null);
+  // Edición de fichas deshabilitada temporalmente
+  // const [loadingFichaEdicionId, setLoadingFichaEdicionId] = useState<string | null>(null);
   const [fechaSeleccionadaParaBloqueo, setFechaSeleccionadaParaBloqueo] = useState<string>("");
   const [totalProductos, setTotalProductos] = useState(0);
   const [, setCitaConProductos] = useState<any>(citaSeleccionada);
@@ -388,6 +392,8 @@ export function AttentionProtocol({
 
     return response.statusText || "Error desconocido";
   };
+  // Referencia explícita para evitar que TypeScript marque la helper como no usada
+  void extractBackendErrorMessage;
 
   /* const toIdString = (value: unknown): string => {
     if (typeof value === "string") return value.trim();
@@ -1076,6 +1082,64 @@ export function AttentionProtocol({
     setMostrarModalBloqueos(false);
     setFechaSeleccionadaParaBloqueo("");
   };
+
+  const extraerDatosInicialesFicha = (ficha: FichaServidor | null, tipo: TipoFicha | null) => {
+    if (!ficha || !tipo) return null;
+    const base = ficha.contenido?.datos_especificos || ficha.contenido || {};
+
+    if (tipo === "VALORACION_PRUEBA_COLOR") {
+      return {
+        autorizacion_publicacion: base.autorizacion_publicacion ?? false,
+        firma_profesional: base.firma_profesional ?? false,
+        servicio_valorado: base.servicio_valorado || "",
+        acuerdos: base.acuerdos || "",
+        recomendaciones: base.recomendaciones || "",
+        observaciones_adicionales: base.observaciones_adicionales || "",
+        foto_estado_actual: [],
+        foto_expectativa: [],
+      };
+    }
+
+    if (tipo === "DIAGNOSTICO_RIZOTIPO") {
+      return {
+        ...base,
+        foto_antes: [],
+        foto_despues: [],
+      };
+    }
+
+    if (tipo === "COLOR") {
+      const respuestas = ficha.contenido?.respuestas || base.respuestas;
+      return {
+        ...base,
+        descripcion: base.descripcion || base.descripcion_servicio || "",
+        observaciones: base.observaciones || base.observaciones_generales || "",
+        respuestas: respuestas || base.respuestas || [],
+        foto_antes: [],
+        foto_despues: [],
+      };
+    }
+
+    if (tipo === "ASESORIA_CORTE") {
+      return {
+        ...base,
+        foto_antes: [],
+        foto_despues: [],
+      };
+    }
+
+    if (tipo === "CUIDADO_POST_COLOR") {
+      return {
+        ...base,
+        foto_antes: [],
+        foto_despues: [],
+      };
+    }
+
+    return base;
+  };
+
+  // Edición/carga remota de fichas deshabilitada en esta vista
   // Guardar ficha automáticamente
   const guardarFicha = (tipo: TipoFicha, datos: any) => {
     if (!citaSeleccionada) return;
@@ -1195,6 +1259,7 @@ export function AttentionProtocol({
                 {detalleFicha.servicio_nombre} • {formatFecha(detalleFicha.fecha_ficha)}
               </p>
             </div>
+            {/* Edición de fichas deshabilitada para auditoría */}
           </div>
 
           {/* Resumen destacado */}
@@ -1716,6 +1781,7 @@ export function AttentionProtocol({
                       <Eye className="h-3 w-3 mr-1" /> {/* REDUCIDO de h-4 w-4 mr-2 */}
                       Ver Detalles
                     </Button>
+                    {/* Botón de edición de fichas deshabilitado */}
                   </div>
                 </div>
               );
@@ -2084,6 +2150,16 @@ export function AttentionProtocol({
       citaSeleccionada?.cliente?.email ||
       citaSeleccionada?.cliente_email ||
       "";
+    const notaCita = (
+      citaSeleccionada?.comentario ||
+      (citaSeleccionada as any)?.comentarios ||
+      (citaSeleccionada as any)?.notas ||
+      (citaSeleccionada as any)?.nota ||
+      (citaSeleccionada as any)?.observaciones ||
+      ""
+    )
+      .toString()
+      .trim();
 
     // Extraer productos de la cita si existen
     const productosCita = citaSeleccionada?.productos || [];
@@ -2115,6 +2191,18 @@ export function AttentionProtocol({
             <span className="font-medium">{estadoInfo.estado}</span>
           </div>
         </div>
+
+        {notaCita && (
+          <div className="mb-4 flex items-start justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800">
+            <div className="flex min-w-0 items-start gap-2">
+              <FileText className="mt-[2px] h-4 w-4 text-gray-600 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-gray-900">Notas de la cita</p>
+                <p className="whitespace-pre-line break-words leading-5 text-gray-800">{notaCita}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {fichasCitaActual.length > 0 && (
           <div className="mb-3 p-2 bg-gray-50 border border-gray-200 rounded">
@@ -2321,11 +2409,15 @@ export function AttentionProtocol({
 
   if (citaSeleccionada && tipoFichaSeleccionada) {
     const datosGuardados = cargarFichaGuardada(tipoFichaSeleccionada);
+    const datosDesdeFicha = extraerDatosInicialesFicha(fichaEnEdicion, tipoFichaSeleccionada);
+    const datosIniciales = datosDesdeFicha || datosGuardados;
 
     const fichaProps = {
       cita: citaSeleccionada,
-      datosIniciales: datosGuardados,
+      datosIniciales,
       onGuardar: (datos: any) => guardarFicha(tipoFichaSeleccionada, datos),
+      fichaId: fichaEnEdicion?.id,
+      modoEdicion: Boolean(fichaEnEdicion),
       onSubmit: (_: any) => {
         const citaId = getCitaId(citaSeleccionada);
         const clienteIdActual = citaSeleccionada?.cliente?.cliente_id || citaSeleccionada?.cliente_id;
@@ -2341,11 +2433,13 @@ export function AttentionProtocol({
           fetchFichasCliente(clienteIdActual);
         }
 
+        setFichaEnEdicion(null);
         setTipoFichaSeleccionada(null);
         setVistaActual("fichas");
         scrollBottomSheetToTop();
       },
       onCancelar: () => {
+        setFichaEnEdicion(null);
         setTipoFichaSeleccionada(null);
         setVistaActual("fichas");
         scrollBottomSheetToTop();

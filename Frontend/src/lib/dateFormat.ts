@@ -11,6 +11,12 @@ const BACKEND_DATE_KEYS = new Set([
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
+const LONG_DATE_FORMATTER_ES = new Intl.DateTimeFormat("es-CO", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+
 export const toDMY = (date: Date): string => {
   return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()}`;
 };
@@ -63,13 +69,22 @@ export const formatDateDMY = (
   return toDMY(date);
 };
 
+export const formatLongDateEs = (
+  input?: string | number | Date,
+  fallback: string = "-"
+): string => {
+  const date = parseDateToDate(input);
+  if (!date) return fallback;
+  return LONG_DATE_FORMATTER_ES.format(date);
+};
+
 export const toBackendDate = (input?: string | number | Date): string => {
   if (input === undefined || input === null) return "";
   const raw = String(input).trim();
   if (!raw) return "";
 
   const date = parseDateToDate(raw);
-  return date ? toDMY(date) : raw;
+  return date ? toLocalYMD(date) : raw;
 };
 
 export const normalizeBackendDateParams = <T extends Record<string, any> | undefined>(
