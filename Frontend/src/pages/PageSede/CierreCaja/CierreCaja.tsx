@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { Sidebar } from "../../../components/Layout/Sidebar";
+import { PageHeader } from "../../../components/Layout/PageHeader";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 // import { Textarea } from "../../../components/ui/textarea";
@@ -12,6 +13,11 @@ import type { CashCierre, CashEgreso, CashIngreso, CashResumen, CashReporteRaw }
 import { formatDateDMY, parseDateToDate, toBackendDate } from "../../../lib/dateFormat";
 import { toast } from "../../../hooks/use-toast";
 import { useAuth } from "../../../components/Auth/AuthContext";
+import { giftcardsService } from "../../GiftCards/giftcardsService";
+import type { GiftCard } from "../../GiftCards/types";
+import { getSedes } from "../../../components/Branch/sedesApi";
+import { formatSedeNombre } from "../../../lib/sede";
+import { persistSedeContext } from "../../../lib/sede-context";
 import {
   CASH_EXPENSE_TYPE_OPTIONS,
   CASH_INCOME_TYPE_OPTIONS,
@@ -107,6 +113,8 @@ const pickNumber = (source: any, keys: string[]): number | undefined => {
 };
 
 const unwrapData = (data: any) => data?.data ?? data?.result ?? data;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 const pickArray = (...candidates: any[]): any[] => {
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) return candidate;
@@ -114,7 +122,7 @@ const pickArray = (...candidates: any[]): any[] => {
   return [];
 };
 
-const formatDate = (dateString?: string) => formatDateDMY(dateString);
+  const formatDate = (dateString?: string) => formatDateDMY(dateString);
 const hasClockTime = (value?: string) => {
   if (!value) return false;
   return /\d{2}:\d{2}/.test(value);
@@ -156,13 +164,14 @@ const formatTimeLabel = (value?: string) => {
     .toUpperCase();
 };
 
-const formatTableTime = (value?: string) => {
+const formatTableDate = (value?: string) => {
   const parsed = parseBackendDateTime(value);
   if (!parsed) return "--";
 
-  const hours = String(parsed.getHours()).padStart(2, "0");
-  const minutes = String(parsed.getMinutes()).padStart(2, "0");
-  return `${hours}.${minutes}`;
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const year = parsed.getFullYear();
+  return `${day}/${month}/${year}`;
 };
 
 const formatHeaderDate = (value?: string) => {
@@ -183,9 +192,223 @@ const normalizePaymentMethod = (value?: string) => getCashPaymentMethodLabel(val
 
 const normalizePaymentMethodKey = (value?: string) => {
   return String(value || "otros")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, "_");
+    .replace(/[\s-]+/g, "_");
+};
+
+const TOTAL_INCOME_KEYS = [
+  "total_general",
+  "grand_total",
+  "ingresos_total",
+  "total_ingresos",
+  "ventas_totales",
+  "total_vendido",
+  "ingresos",
+];
+
+const TOTAL_OTHER_METHODS_KEYS = [
+  "total",
+  "total_general",
+  "otros_metodos_total",
+  "total_otros_metodos",
+];
+
+const TOTAL_CASH_EXPENSE_KEYS = [
+  "total_efectivo",
+  "egresos_efectivo",
+  "cash_total",
+  "total",
+];
+
+const EXPECTED_CASH_KEYS = [
+  "efectivo_esperado",
+  "efectivo_en_caja",
+  "efectivo_total",
+  "saldo",
+  "balance",
+];
+
+// El backend hoy usa algunas llaves reales como `giftcard` y `link_de_pago`
+// dentro de `ingresos_otros_metodos`, así que aquí aliasamos esos nombres
+// además de las variantes documentadas para no perder montos.
+const PAYMENT_METHOD_ALIASES = {
+  efectivo: ["efectivo", "cash"],
+  tarjetas: [
+    "tarjeta",
+    "tarjetas",
+    "tarjeta_credito",
+    "tarjeta_debito",
+    "credit_card",
+    "debit_card",
+    "card",
+    "cards",
+    "pos",
+    "dataphone",
+  ],
+  transferencias: ["transferencia", "transferencias", "bank_transfer", "transfer"],
+  linkPagos: ["link_de_pago", "link_de_pagos", "link_pago", "link_pagos", "payment_link", "paylink"],
+  creditoEmpleados: [
+    "credito_empleados",
+    "credito_empleado",
+    "employee_credit",
+    "employee_credits",
+    "descuento_por_nomina",
+    "decuento_por_nomina",
+  ],
+  abonos: ["abono", "abonos"],
+  giftCards: ["giftcard", "gift_card", "giftcards", "gift_cards"],
+  addi: ["addi"],
+} as const;
+
+const getObjectAmount = (value: unknown): number => {
+  if (isRecord(value)) {
+    return (
+      pickNumber(value, ["total", "monto", "valor", "amount", "importe"]) ?? 0
+    );
+  }
+
+  return toNumber(value);
+};
+
+const sumRecordAmounts = (
+  source: unknown,
+  ignoredKeys: string[] = [],
+): number => {
+  if (!isRecord(source)) return 0;
+
+  const ignored = new Set(ignoredKeys.map((key) => normalizePaymentMethodKey(key)));
+
+  return Object.entries(source).reduce((sum, [rawKey, rawValue]) => {
+    const key = normalizePaymentMethodKey(rawKey);
+    if (!key || ignored.has(key)) {
+      return sum;
+    }
+
+    return sum + getObjectAmount(rawValue);
+  }, 0);
+};
+
+const getAmountByAliases = (source: unknown, aliases: readonly string[]): number => {
+  if (!isRecord(source)) return 0;
+
+  const aliasSet = new Set(aliases.map((alias) => normalizePaymentMethodKey(alias)));
+
+  return Object.entries(source).reduce((sum, [rawKey, rawValue]) => {
+    const key = normalizePaymentMethodKey(rawKey);
+    if (!aliasSet.has(key)) {
+      return sum;
+    }
+
+    return sum + getObjectAmount(rawValue);
+  }, 0);
+};
+
+const matchesAlias = (value: string, aliases: readonly string[]) => {
+  return aliases.some((alias) => normalizePaymentMethodKey(alias) === value);
+};
+
+const getCashReportNodes = (data: any) => {
+  const root = unwrapData(data) || {};
+  const dataNode = unwrapData(root?.data) || root?.data || {};
+  const resultNode = unwrapData(root?.result) || root?.result || {};
+  const summary =
+    unwrapData(root?.resumen) ||
+    unwrapData(root?.summary) ||
+    root?.resumen ||
+    root?.summary ||
+    root;
+  const periodTotals =
+    root?.totales ?? summary?.totales ?? dataNode?.totales ?? resultNode?.totales ?? {};
+  const ingresosEfectivo =
+    summary?.ingresos_efectivo ??
+    root?.ingresos_efectivo ??
+    dataNode?.ingresos_efectivo ??
+    resultNode?.ingresos_efectivo ??
+    {};
+  const ingresosOtrosMetodos =
+    summary?.ingresos_otros_metodos ??
+    root?.ingresos_otros_metodos ??
+    dataNode?.ingresos_otros_metodos ??
+    resultNode?.ingresos_otros_metodos ??
+    {};
+  const egresos =
+    summary?.egresos ??
+    root?.egresos ??
+    dataNode?.egresos ??
+    resultNode?.egresos ??
+    {};
+
+  return { root, summary, dataNode, resultNode, periodTotals, ingresosEfectivo, ingresosOtrosMetodos, egresos };
+};
+
+const extractCashReportMetrics = (data: any) => {
+  const { root, summary, dataNode, resultNode, periodTotals, ingresosEfectivo, ingresosOtrosMetodos, egresos } =
+    getCashReportNodes(data);
+
+  const efectivo =
+    pickNumber(ingresosEfectivo, ["total", "efectivo_total", "total_efectivo"]) ?? 0;
+  const otrosMetodosTotal =
+    pickNumber(ingresosOtrosMetodos, TOTAL_OTHER_METHODS_KEYS) ??
+    sumRecordAmounts(ingresosOtrosMetodos, TOTAL_OTHER_METHODS_KEYS);
+  const totalRecibido =
+    pickNumber(periodTotals, TOTAL_INCOME_KEYS) ??
+    pickNumber(summary, TOTAL_INCOME_KEYS) ??
+    pickNumber(root, TOTAL_INCOME_KEYS) ??
+    (efectivo + otrosMetodosTotal);
+  const abonos = getAmountByAliases(ingresosOtrosMetodos, PAYMENT_METHOD_ALIASES.abonos);
+  const tarjetas = getAmountByAliases(ingresosOtrosMetodos, PAYMENT_METHOD_ALIASES.tarjetas);
+  const transferencias = getAmountByAliases(
+    ingresosOtrosMetodos,
+    PAYMENT_METHOD_ALIASES.transferencias,
+  );
+  const linkPagos = getAmountByAliases(ingresosOtrosMetodos, PAYMENT_METHOD_ALIASES.linkPagos);
+  const creditoEmpleados = getAmountByAliases(
+    ingresosOtrosMetodos,
+    PAYMENT_METHOD_ALIASES.creditoEmpleados,
+  );
+  const giftCards = getAmountByAliases(ingresosOtrosMetodos, PAYMENT_METHOD_ALIASES.giftCards);
+  const addi = getAmountByAliases(ingresosOtrosMetodos, PAYMENT_METHOD_ALIASES.addi);
+  const egresosEfectivo =
+    pickNumber(egresos, TOTAL_CASH_EXPENSE_KEYS) ??
+    pickNumber(summary, TOTAL_CASH_EXPENSE_KEYS) ??
+    pickNumber(root, TOTAL_CASH_EXPENSE_KEYS) ??
+    0;
+  const efectivoEsperado =
+    pickNumber(root, EXPECTED_CASH_KEYS) ??
+    pickNumber(summary, EXPECTED_CASH_KEYS) ??
+    pickNumber(dataNode, EXPECTED_CASH_KEYS) ??
+    pickNumber(resultNode, EXPECTED_CASH_KEYS);
+
+  return {
+    totalRecibido,
+    abonos,
+    egresosEfectivo,
+    efectivoEsperado,
+    paymentMethods: {
+      efectivo,
+      tarjetas,
+      transferencias,
+      linkPagos,
+      creditoEmpleados,
+      giftCards,
+      addi,
+    },
+  };
+};
+
+const parseGiftcardPaymentMethod = (notes?: string) => {
+  if (!notes) return "otros";
+  const match = notes.match(/metodo\s+de\s+pago\s*:\s*([a-zA-Z_]+)/i);
+  return match?.[1]?.toLowerCase() || "otros";
+};
+
+const extractGiftcardCode = (value?: string) => {
+  if (!value) return undefined;
+  const match = value.match(/gift\s*card\s*([a-zA-Z0-9-]+)/i);
+  return match?.[1]?.toUpperCase();
 };
 
 const toTimestamp = (value?: string) => {
@@ -256,6 +479,43 @@ const mergeCashRecords = <T extends { id: string; fecha?: string; creado_en?: st
   });
 };
 
+const normalizeGiftcardIngresos = (giftcards: GiftCard[], start: string, end: string): CashIngreso[] => {
+  return giftcards
+    .filter((giftcard) => isWithinDateRange(giftcard.fecha_emision || giftcard.created_at, start, end))
+    .map((giftcard, index) => {
+      const parsedMetodo = parseGiftcardPaymentMethod((giftcard as any)?.notas || "");
+      return {
+        id: `giftcard-${giftcard.codigo || giftcard._id || index}`,
+        sede_id: giftcard.sede_id,
+        monto: toNumber(giftcard.valor ?? (giftcard as any)?.saldo_disponible ?? 0),
+        motivo: giftcard.codigo ? `Venta Gift Card ${giftcard.codigo}` : "Venta Gift Card",
+        concepto: giftcard.codigo ? `Venta Gift Card ${giftcard.codigo}` : "Venta Gift Card",
+        tipo: "giftcard",
+        metodo_pago: parsedMetodo,
+        fecha: giftcard.fecha_emision ?? giftcard.created_at ?? getToday(),
+        creado_en: giftcard.created_at ?? giftcard.fecha_emision,
+      };
+    })
+    .filter((ingreso) => ingreso.monto > 0);
+};
+
+const SECTION_CARD_CLASS = "border-gray-300 bg-white shadow-sm";
+const METRIC_CARD_CLASS = "border-gray-300 bg-white transition-colors hover:border-gray-400";
+const TABLE_WRAPPER_CLASS = "overflow-x-auto rounded-lg border border-gray-300";
+const TABLE_HEAD_CLASS = "bg-gray-50 text-left text-sm font-medium text-gray-700";
+const TABLE_HEAD_CELL_CLASS = "px-4 py-3";
+const TABLE_CELL_CLASS = "px-4 py-3";
+const FIELD_LABEL_CLASS = "mb-2 block text-sm font-medium text-gray-700";
+const INPUT_CLASS =
+  "h-10 rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus-visible:border-gray-500 focus-visible:ring-1 focus-visible:ring-gray-500";
+const SELECT_CLASS =
+  "flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-gray-500";
+const PRIMARY_BUTTON_CLASS = "bg-black text-white hover:bg-gray-800";
+const OUTLINE_BUTTON_CLASS = "border-gray-300 text-gray-800 hover:bg-gray-100";
+const INFO_PANEL_CLASS = "rounded-lg border border-gray-300 bg-gray-50 p-3 text-sm text-gray-600";
+const BADGE_BASE_CLASS = "inline-flex rounded-full border px-2 py-1 text-xs font-medium";
+const FORM_GRID_CLASS = "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4";
+
 export default function CierreCajaPage() {
   const { user } = useAuth();
   const [moneda, setMoneda] = useState("COP");
@@ -273,7 +533,7 @@ export default function CierreCajaPage() {
     end_date: today,
   });
 
-  const [resumen, setResumen] = useState<CashResumen>({
+  const [, setResumen] = useState<CashResumen>({
     ingresos: 0,
     egresos: 0,
     balance: 0,
@@ -282,11 +542,13 @@ export default function CierreCajaPage() {
   const [ingresos, setIngresos] = useState<CashIngreso[]>([]);
   const [egresos, setEgresos] = useState<CashEgreso[]>([]);
   const [cierres, setCierres] = useState<CashCierre[]>([]);
+  const [giftcardIngresos, setGiftcardIngresos] = useState<CashIngreso[]>([]);
 
   const [loadingResumen, setLoadingResumen] = useState(false);
   const [loadingIngresos, setLoadingIngresos] = useState(false);
   const [loadingEgresos, setLoadingEgresos] = useState(false);
   const [loadingCierres, setLoadingCierres] = useState(false);
+  const [loadingGiftcards, setLoadingGiftcards] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
   const [activeAction, setActiveAction] = useState<"ingreso" | "egreso" | "apertura" | "cierre" | null>(null);
 
@@ -300,23 +562,62 @@ export default function CierreCajaPage() {
   const [ingresoMetodoPago, setIngresoMetodoPago] = useState<string>(DEFAULT_CASH_PAYMENT_METHOD);
   const [ingresoTipo, setIngresoTipo] = useState<string>(DEFAULT_CASH_INCOME_TYPE);
   const [ingresoMotivo, setIngresoMotivo] = useState("");
+  const [ingresoMotivoEdicion, setIngresoMotivoEdicion] = useState("");
   const [ingresoFecha, setIngresoFecha] = useState(getToday());
+  const [editingIngresoId, setEditingIngresoId] = useState<string | null>(null);
 
   const [egresoMonto, setEgresoMonto] = useState("");
   const [egresoMotivo, setEgresoMotivo] = useState("");
+  const [egresoMotivoEdicion, setEgresoMotivoEdicion] = useState("");
   const [egresoFecha, setEgresoFecha] = useState(getToday());
   const [egresoMetodoPago, setEgresoMetodoPago] = useState<string>(DEFAULT_CASH_PAYMENT_METHOD);
   const [egresoTipo, setEgresoTipo] = useState<string>(DEFAULT_CASH_EXPENSE_TYPE);
+  const [editingEgresoId, setEditingEgresoId] = useState<string | null>(null);
+  const isEditingEgreso = Boolean(editingEgresoId);
 
   const [efectivoEnCaja, setEfectivoEnCaja] = useState<number | null>(null);
   const [loadingEfectivoEnCaja, setLoadingEfectivoEnCaja] = useState(false);
 
   const [aperturaMonto, setAperturaMonto] = useState("");
   const [aperturaNota, setAperturaNota] = useState("");
+  const [aperturaFecha, setAperturaFecha] = useState(getToday());
 
   const [cierreNota, setCierreNota] = useState("");
   const [cierreFecha, setCierreFecha] = useState(getToday());
   const [cierreEfectivoContado, setCierreEfectivoContado] = useState("");
+  const [sedesOptions, setSedesOptions] = useState<Array<{ id: string; nombre: string }>>([]);
+  const [loadingSedes, setLoadingSedes] = useState(false);
+
+  const normalizedRole = useMemo(() => String(user?.role || "").toLowerCase(), [user?.role]);
+  const canEditMovimientos = useMemo(
+    () => ["admin_sede", "adminsede", "admin", "super_admin", "superadmin"].includes(normalizedRole),
+    [normalizedRole]
+  );
+  const isSuperAdmin = useMemo(
+    () => normalizedRole === "super_admin" || normalizedRole === "superadmin",
+    [normalizedRole]
+  );
+
+  const applySedeSelection = useCallback(
+    (nextSedeId: string, nextSedeNombre?: string | null) => {
+      const resolvedId = String(nextSedeId || "").trim();
+      if (!resolvedId) return;
+
+      const resolvedName = formatSedeNombre(nextSedeNombre, resolvedId);
+
+      setSedeId(resolvedId);
+      setSedeNombre(resolvedName);
+
+      persistSedeContext({ activeSedeId: resolvedId });
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("beaux-sede_id", resolvedId);
+        localStorage.setItem("beaux-sede_id", resolvedId);
+        sessionStorage.setItem("beaux-nombre_local", resolvedName);
+        localStorage.setItem("beaux-nombre_local", resolvedName);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     const resolvedSedeId = String(
@@ -342,6 +643,65 @@ export default function CierreCajaPage() {
     setSedeNombre(resolvedSedeNombre || null);
     setMoneda((resolvedMoneda || "COP").toUpperCase());
   }, [user?.sede_id, user?.nombre_local, user?.moneda]);
+
+  useEffect(() => {
+    if (!isSuperAdmin || !user?.access_token) return;
+
+    let isMounted = true;
+
+    const loadSedes = async () => {
+      try {
+        setLoadingSedes(true);
+        const sedes = await getSedes(user.access_token);
+        const mapped =
+          (Array.isArray(sedes) ? sedes : [])
+            .map((sede) => {
+              const id = String(
+                (sede as any).sede_id || (sede as any).unique_id || (sede as any)._id || ""
+              ).trim();
+              if (!id) return null;
+              return { id, nombre: formatSedeNombre((sede as any).nombre, id) };
+            })
+            .filter(Boolean) as Array<{ id: string; nombre: string }>;
+
+        if (!isMounted) return;
+
+        const hasCurrent = sedeId
+          ? mapped.some((item) => item.id === sedeId)
+          : false;
+        const nextOptions = hasCurrent || !sedeId
+          ? mapped
+          : [{ id: sedeId as string, nombre: sedeNombre || sedeId }, ...mapped];
+
+        setSedesOptions(nextOptions);
+
+        if (!sedeId && nextOptions.length > 0) {
+          applySedeSelection(nextOptions[0].id, nextOptions[0].nombre);
+        }
+      } catch (err) {
+        if (isMounted) {
+          setSedesOptions([]);
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingSedes(false);
+        }
+      }
+    };
+
+    void loadSedes();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isSuperAdmin, user?.access_token, applySedeSelection, sedeId, sedeNombre]);
+
+  const handleSedeChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const value = String(event.target.value || "").trim();
+    if (!value) return;
+    const option = sedesOptions.find((item) => item.id === value);
+    applySedeSelection(value, option?.nombre || value);
+  };
 
   const handlePeriodChange = (newPeriod: HeaderPeriod) => {
     if (newPeriod === "custom") {
@@ -388,10 +748,6 @@ export default function CierreCajaPage() {
     return `${formatDate(fechaDesde)} - ${formatDate(fechaHasta)}`;
   }, [fechaDesde, fechaHasta]);
 
-  const egresosTotal = useMemo(() => {
-    return egresos.reduce((sum, egreso) => sum + (egreso.monto || 0), 0);
-  }, [egresos]);
-
   const cierreDiferencia = useMemo(() => {
     if (efectivoEnCaja === null || !cierreEfectivoContado.trim()) {
       return null;
@@ -422,32 +778,33 @@ export default function CierreCajaPage() {
     const root = unwrapData(data) || {};
     const summary = root?.resumen ?? root?.summary ?? root;
     const periodTotals = root?.totales;
+    const metrics = extractCashReportMetrics(data);
 
     const ingresos =
+      metrics.totalRecibido ??
       pickNumber(periodTotals, ["ingresos", "total_ingresos", "ventas", "total_ventas"]) ??
-      pickNumber(root?.ingresos_efectivo, ["total"]) ??
       pickNumber(summary, [
         "ingresos_total",
         "total_ingresos",
         "ventas_totales",
         "total_ventas",
         "ingresos",
-        "efectivo_total",
-        "efectivo_dia",
-        "total",
-      ]) ?? 0;
+      ]) ??
+      0;
 
     const egresos =
+      metrics.egresosEfectivo ??
       pickNumber(periodTotals, ["egresos", "total_egresos"]) ??
-      pickNumber(root?.egresos, ["total"]) ??
       pickNumber(summary, [
         "egresos_total",
         "total_egresos",
         "egresos",
         "gastos",
-      ]) ?? 0;
+      ]) ??
+      0;
 
     const balance =
+      metrics.efectivoEsperado ??
       pickNumber(periodTotals, ["neto", "balance", "saldo"]) ??
       pickNumber(summary, ["balance", "saldo", "neto", "total_balance"]) ??
       (ingresos - egresos);
@@ -682,7 +1039,7 @@ export default function CierreCajaPage() {
             fecha: start,
           });
           setResumen(normalizeResumen(efectivo));
-          setReportePeriodo(null);
+          setReportePeriodo(efectivo);
         } catch (innerErr) {
           setResumen({ ingresos: 0, egresos: 0, balance: 0, moneda: monedaSede });
           setReportePeriodo(null);
@@ -778,6 +1135,39 @@ export default function CierreCajaPage() {
     }
   };
 
+  const loadGiftcardVentas = async () => {
+    if (!sedeId) return;
+    const { start, end } = normalizeDateRange(fechaDesde, fechaHasta);
+    if (!start || !end) return;
+
+    const token = String(
+      user?.access_token ||
+        user?.token ||
+        sessionStorage.getItem("access_token") ||
+        localStorage.getItem("access_token") ||
+        ""
+    ).trim();
+    if (!token) {
+      setGiftcardIngresos([]);
+      return;
+    }
+
+    setLoadingGiftcards(true);
+    try {
+      const response = await giftcardsService.getGiftCardsBySede(token, sedeId, {
+        page: 1,
+        limit: 400,
+      });
+      const lista = Array.isArray(response.giftcards) ? response.giftcards : [];
+      const normalizados = normalizeGiftcardIngresos(lista, start, end);
+      setGiftcardIngresos(normalizados);
+    } catch (err) {
+      setGiftcardIngresos([]);
+    } finally {
+      setLoadingGiftcards(false);
+    }
+  };
+
   const loadCierres = async () => {
     if (!sedeId) return;
     setLoadingCierres(true);
@@ -801,6 +1191,7 @@ export default function CierreCajaPage() {
       loadEgresos(),
       loadCierres(),
       loadEfectivoEnCaja(),
+      loadGiftcardVentas(),
     ]);
   };
 
@@ -820,6 +1211,7 @@ export default function CierreCajaPage() {
     if (!sedeId) return;
 
     const montoValue = toNumber(ingresoMonto);
+    const isEditing = Boolean(editingIngresoId);
     if (!montoValue || montoValue <= 0) {
       setError("El monto del ingreso debe ser mayor a 0");
       return;
@@ -830,38 +1222,112 @@ export default function CierreCajaPage() {
       return;
     }
 
+    const motivoEdicionIngreso = ingresoMotivoEdicion.trim();
+    if (isEditing && !motivoEdicionIngreso) {
+      setError("Debes especificar el motivo de la edición del ingreso para auditoría.");
+      return;
+    }
+
     setLoadingAction(true);
     setActiveAction("ingreso");
     setError(null);
     setSuccess(null);
 
     try {
-      await cashService.createIngreso({
+      const fechaIngresoDMY = formatDateDMY(ingresoFecha);
+
+      const payloadIngreso = {
         sede_id: sedeId,
         monto: montoValue,
         tipo: ingresoTipo,
         metodo_pago: ingresoMetodoPago,
         motivo: ingresoMotivo.trim(),
-        fecha: toBackendDate(ingresoFecha),
+        fecha: fechaIngresoDMY,
         moneda: monedaSede,
+      };
+
+      const responseIngreso = isEditing && editingIngresoId
+        ? await cashService.updateIngreso(editingIngresoId, {
+            ...payloadIngreso,
+            motivo_edicion: motivoEdicionIngreso,
+          })
+        : await cashService.createIngreso(payloadIngreso);
+
+      const ingresoRegistradoId = String(
+        responseIngreso?.ingreso_id || responseIngreso?.id || editingIngresoId || `tmp-ingreso-${Date.now()}`
+      );
+      setIngresos((prev) => {
+        const nuevoIngreso: CashIngreso = {
+          id: ingresoRegistradoId,
+          sede_id: sedeId,
+          monto: montoValue,
+          motivo: ingresoMotivo.trim(),
+          concepto: ingresoMotivo.trim(),
+          tipo: ingresoTipo,
+          metodo_pago: ingresoMetodoPago,
+          fecha: ingresoFecha,
+          creado_en: responseIngreso?.creado_en || new Date().toISOString(),
+          motivo_edicion: isEditing ? motivoEdicionIngreso : undefined,
+        };
+        const filtered = isEditing
+          ? prev.filter((item) => String(item.id) !== String(editingIngresoId))
+          : prev;
+        return [nuevoIngreso, ...filtered];
       });
 
-      setIngresoMonto("");
-      setIngresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
-      setIngresoTipo(DEFAULT_CASH_INCOME_TYPE);
-      setIngresoMotivo("");
-      setIngresoFecha(getToday());
-      setSuccess("Ingreso registrado correctamente");
+      resetIngresoForm();
+      setEditingIngresoId(null);
+      setSuccess(isEditing ? "Ingreso actualizado correctamente" : "Ingreso registrado correctamente");
       toast({
-        title: "Ingreso registrado",
+        title: isEditing ? "Ingreso actualizado" : "Ingreso registrado",
         description: "El ingreso manual se guardó correctamente.",
       });
-      await loadAll();
+      await loadResumen();
+      await loadEfectivoEnCaja();
     } catch (err: any) {
-      setError(err?.message || "No se pudo registrar el ingreso");
+      setError(
+        err?.message ||
+          (isEditing ? "No se pudo actualizar el ingreso" : "No se pudo registrar el ingreso")
+      );
     } finally {
       setLoadingAction(false);
       setActiveAction(null);
+    }
+  };
+
+  const startEditEgreso = (egresoId: string) => {
+    const target = egresos.find((item) => String(item.id) === egresoId);
+    if (!target) return;
+
+    setEditingEgresoId(String(target.id));
+    setEgresoMonto(String(Math.abs(target.monto || 0)));
+    setEgresoMotivo(target.concepto || target.motivo || "");
+    setEgresoMotivoEdicion("");
+    setEgresoMetodoPago(target.metodo_pago || DEFAULT_CASH_PAYMENT_METHOD);
+    setEgresoTipo(target.tipo || DEFAULT_CASH_EXPENSE_TYPE);
+    setEgresoFecha(toBackendDate(target.fecha || target.creado_en || getToday()));
+    setError(null);
+    setSuccess(null);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const startEditIngreso = (ingresoId: string) => {
+    const target = ingresos.find((item) => String(item.id) === ingresoId);
+    if (!target) return;
+
+    setEditingIngresoId(String(target.id));
+    setIngresoMonto(String(Math.abs(target.monto || 0)));
+    setIngresoMotivo(target.concepto || target.motivo || "");
+    setIngresoMotivoEdicion("");
+    setIngresoMetodoPago(target.metodo_pago || DEFAULT_CASH_PAYMENT_METHOD);
+    setIngresoTipo(target.tipo || DEFAULT_CASH_INCOME_TYPE);
+    setIngresoFecha(toBackendDate(target.fecha || target.creado_en || getToday()));
+    setError(null);
+    setSuccess(null);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
@@ -870,6 +1336,9 @@ export default function CierreCajaPage() {
 
     const montoValue = toNumber(egresoMonto);
     const motivo = egresoMotivo.trim();
+    const motivoEdicion = egresoMotivoEdicion.trim();
+    const isEditing = Boolean(editingEgresoId);
+
     if (!montoValue || montoValue <= 0) {
       setError("El monto del egreso debe ser mayor a 0");
       return;
@@ -880,13 +1349,20 @@ export default function CierreCajaPage() {
       return;
     }
 
+    if (isEditing && !motivoEdicion) {
+      setError("Debes especificar el motivo de la edición para trazabilidad.");
+      return;
+    }
+
     setLoadingAction(true);
     setActiveAction("egreso");
     setError(null);
     setSuccess(null);
 
     try {
-      const response = await cashService.createEgreso({
+      const fechaEgresoDMY = formatDateDMY(egresoFecha);
+
+      const payloadBase = {
         sede_id: sedeId,
         monto: montoValue,
         valor: montoValue,
@@ -897,12 +1373,19 @@ export default function CierreCajaPage() {
         nota: motivo,
         tipo: egresoTipo,
         concepto: motivo,
-        fecha: toBackendDate(egresoFecha),
+        fecha: fechaEgresoDMY,
         moneda: monedaSede,
-      });
+      };
+
+      const response = isEditing && editingEgresoId
+        ? await cashService.updateEgreso(editingEgresoId, {
+            ...payloadBase,
+            motivo_edicion: motivoEdicion,
+          })
+        : await cashService.createEgreso(payloadBase);
 
       const egresoRegistradoId = String(
-        response?.egreso_id || response?.id || `tmp-egreso-${Date.now()}`
+        response?.egreso_id || response?.id || editingEgresoId || `tmp-egreso-${Date.now()}`
       );
 
       setEgresos((prev) => {
@@ -916,19 +1399,25 @@ export default function CierreCajaPage() {
           metodo_pago: egresoMetodoPago,
           fecha: egresoFecha,
           creado_en: response?.creado_en || new Date().toISOString(),
+          motivo_edicion: motivoEdicion || undefined,
         };
 
-        return [nuevoEgreso, ...prev.filter((item) => String(item.id) !== egresoRegistradoId)];
+        const filtered = isEditing
+          ? prev.filter((item) => String(item.id) !== String(editingEgresoId))
+          : prev.filter((item) => String(item.id) !== egresoRegistradoId);
+        return [nuevoEgreso, ...filtered];
       });
 
-      setEgresoMonto("");
-      setEgresoMotivo("");
-      setEgresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
-      setEgresoTipo(DEFAULT_CASH_EXPENSE_TYPE);
-      setSuccess("Egreso registrado correctamente");
-      await loadAll();
+      resetEgresoForm();
+      setEditingEgresoId(null);
+      setSuccess(isEditing ? "Egreso actualizado correctamente" : "Egreso registrado correctamente");
+      await loadResumen();
+      await loadEfectivoEnCaja();
     } catch (err: any) {
-      setError(err?.message || "No se pudo registrar el egreso");
+      setError(
+        err?.message ||
+          (isEditing ? "No se pudo actualizar el egreso" : "No se pudo registrar el egreso")
+      );
     } finally {
       setLoadingAction(false);
       setActiveAction(null);
@@ -998,6 +1487,11 @@ export default function CierreCajaPage() {
       return;
     }
 
+    if (!aperturaFecha) {
+      setError("Debes seleccionar la fecha de apertura");
+      return;
+    }
+
     const montoValue = toNumber(aperturaMonto);
     if (!montoValue || montoValue <= 0) {
       setError("El monto inicial debe ser mayor a 0");
@@ -1018,10 +1512,13 @@ export default function CierreCajaPage() {
         notas: aperturaNota.trim() || undefined,
         observaciones: aperturaNota.trim() || undefined,
         moneda: monedaSede,
+        fecha: toBackendDate(aperturaFecha),
+        fecha_apertura: toBackendDate(aperturaFecha),
       });
 
       setAperturaMonto("");
       setAperturaNota("");
+      setAperturaFecha(getToday());
       setSuccess("Caja abierta correctamente");
       toast({
         title: "Caja abierta",
@@ -1086,43 +1583,175 @@ export default function CierreCajaPage() {
   //   }
   // };
 
-  const abonosTotal = useMemo(() => {
-    return ingresos.reduce((sum, ingreso) => {
-      const metodo = String(ingreso.metodo_pago || "").toLowerCase();
-      return metodo === "abonos" ? sum + (ingreso.monto || 0) : sum;
+  const giftcardVentasUnicas = useMemo(() => {
+    if (!giftcardIngresos.length) return [];
+
+    const existingCodes = new Set(
+      ingresos
+        .map((ingreso) =>
+          extractGiftcardCode(
+            `${ingreso.motivo ?? ""} ${ingreso.concepto ?? ""} ${ingreso.id ?? ""}`
+          )
+        )
+        .filter((code): code is string => Boolean(code))
+        .map((code) => code.toUpperCase())
+    );
+
+    return giftcardIngresos.filter((ingreso) => {
+      const code = extractGiftcardCode(
+        `${ingreso.motivo ?? ""} ${ingreso.concepto ?? ""} ${ingreso.id ?? ""}`
+      );
+      if (code && existingCodes.has(code.toUpperCase())) {
+        return false;
+      }
+      return true;
+    });
+  }, [giftcardIngresos, ingresos]);
+
+  const ingresosConGiftcards = useMemo(() => {
+    if (!giftcardVentasUnicas.length) return ingresos;
+    return mergeCashRecords([...ingresos, ...giftcardVentasUnicas]);
+  }, [giftcardVentasUnicas, ingresos]);
+
+  const localPaymentMethodTotals = useMemo(() => {
+    const totals = {
+      efectivo: 0,
+      tarjetas: 0,
+      transferencias: 0,
+      linkPagos: 0,
+      creditoEmpleados: 0,
+      abonos: 0,
+      giftCards: 0,
+      addi: 0,
+    };
+
+    const addIngreso = (bucket: keyof typeof totals, amount: number) => {
+      totals[bucket] = Number((totals[bucket] + amount).toFixed(2));
+    };
+
+    ingresosConGiftcards.forEach((ingreso) => {
+      const methodKey = normalizePaymentMethodKey(ingreso.metodo_pago);
+      const amount = ingreso.monto || 0;
+
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.efectivo)) {
+        addIngreso("efectivo", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.tarjetas)) {
+        addIngreso("tarjetas", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.transferencias)) {
+        addIngreso("transferencias", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.linkPagos)) {
+        addIngreso("linkPagos", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.creditoEmpleados)) {
+        addIngreso("creditoEmpleados", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.abonos) || ingreso.tipo === "abono_cliente") {
+        addIngreso("abonos", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.giftCards) || ingreso.tipo === "giftcard") {
+        addIngreso("giftCards", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.addi)) {
+        addIngreso("addi", amount);
+      }
+    });
+
+    return totals;
+  }, [ingresosConGiftcards]);
+
+  const egresosEfectivoLocal = useMemo(() => {
+    return egresos.reduce((sum, egreso) => {
+      const methodKey = normalizePaymentMethodKey(egreso.metodo_pago);
+      const isCashExpense =
+        !methodKey ||
+        methodKey === "otros" ||
+        matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.efectivo);
+      return isCashExpense ? sum + Math.abs(egreso.monto || 0) : sum;
     }, 0);
-  }, [ingresos]);
+  }, [egresos]);
+
+  const reportMetrics = useMemo(() => extractCashReportMetrics(reportePeriodo), [reportePeriodo]);
+  const hasReportMetrics = reportePeriodo !== null;
+
+  const totalRecibidoDisplay = useMemo(() => {
+    if (hasReportMetrics) {
+      return reportMetrics.totalRecibido;
+    }
+
+    return (
+      localPaymentMethodTotals.efectivo +
+      localPaymentMethodTotals.tarjetas +
+      localPaymentMethodTotals.transferencias +
+      localPaymentMethodTotals.linkPagos +
+      localPaymentMethodTotals.creditoEmpleados +
+      localPaymentMethodTotals.abonos +
+      localPaymentMethodTotals.giftCards +
+      localPaymentMethodTotals.addi
+    );
+  }, [hasReportMetrics, localPaymentMethodTotals, reportMetrics.totalRecibido]);
+
+  const abonosTotal = useMemo(() => {
+    return hasReportMetrics ? reportMetrics.abonos : localPaymentMethodTotals.abonos;
+  }, [hasReportMetrics, localPaymentMethodTotals.abonos, reportMetrics.abonos]);
+
+  const egresosEfectivoDisplay = useMemo(() => {
+    return hasReportMetrics ? reportMetrics.egresosEfectivo : egresosEfectivoLocal;
+  }, [egresosEfectivoLocal, hasReportMetrics, reportMetrics.egresosEfectivo]);
+
+  const efectivoEsperadoDisplay = useMemo(() => {
+    return hasReportMetrics ? reportMetrics.efectivoEsperado ?? efectivoEnCaja : efectivoEnCaja;
+  }, [efectivoEnCaja, hasReportMetrics, reportMetrics.efectivoEsperado]);
 
   type MovimientoDia = {
     id: string;
     tipo: "ingreso" | "egreso";
     etiquetaTipo: string;
     detalle: string;
+    motivoEdicion?: string;
     medio: string;
     monto: number;
-    hora: string;
+    fecha: string;
     timestamp: number;
     orden: number;
+    editable?: boolean;
   };
 
   const movimientosDia = useMemo<MovimientoDia[]>(() => {
-    const ingresosNormalizados: MovimientoDia[] = ingresos.map((ingreso, index) => {
+    const ingresosNormalizados: MovimientoDia[] = ingresosConGiftcards.map((ingreso, index) => {
       const fechaMovimiento = ingreso.creado_en || ingreso.fecha;
       const metodo = String(ingreso.metodo_pago || "").toLowerCase();
+      const isGiftcard = ingreso.tipo === "giftcard" || String(ingreso.id).startsWith("giftcard-");
 
       return {
         id: `ingreso-${ingreso.id}`,
         tipo: "ingreso",
         etiquetaTipo:
-          metodo === "abonos"
-            ? "Abono"
-            : getCashMovementTypeLabel("ingreso", ingreso.tipo, "Ingreso manual"),
-        detalle: ingreso.motivo || "Ingreso manual",
+          isGiftcard
+            ? "Venta Gift Card"
+            : metodo === "abonos"
+              ? "Abono"
+              : getCashMovementTypeLabel("ingreso", ingreso.tipo, "Ingreso manual"),
+        detalle:
+          ingreso.motivo ||
+          ingreso.concepto ||
+          (isGiftcard ? "Venta Gift Card" : "Ingreso manual"),
+        motivoEdicion: ingreso.motivo_edicion,
         medio: normalizePaymentMethod(ingreso.metodo_pago),
         monto: ingreso.monto || 0,
-        hora: formatTableTime(fechaMovimiento),
+        fecha: formatTableDate(fechaMovimiento),
         timestamp: toTimestamp(fechaMovimiento),
         orden: index,
+        editable: !isGiftcard,
       };
     });
 
@@ -1133,9 +1762,10 @@ export default function CierreCajaPage() {
         tipo: "egreso",
         etiquetaTipo: getCashMovementTypeLabel("egreso", egreso.tipo, "Egreso"),
         detalle: egreso.concepto || egreso.motivo || "Egreso",
+        motivoEdicion: egreso.motivo_edicion,
         medio: normalizePaymentMethod(egreso.metodo_pago),
         monto: -Math.abs(egreso.monto || 0),
-        hora: formatTableTime(fechaMovimiento),
+        fecha: formatTableDate(fechaMovimiento),
         timestamp: toTimestamp(fechaMovimiento),
         orden: index,
       };
@@ -1156,7 +1786,7 @@ export default function CierreCajaPage() {
       }
       return a.id.localeCompare(b.id);
     });
-  }, [egresos, ingresos]);
+  }, [egresos, ingresosConGiftcards]);
 
   const movimientosConSaldo = useMemo(() => {
     let saldoAcumulado = 0;
@@ -1170,79 +1800,29 @@ export default function CierreCajaPage() {
   }, [movimientosDia]);
 
   const saldosPorMedio = useMemo(() => {
-    const reportRoot = unwrapData(reportePeriodo) || {};
-    const reportSummary = reportRoot?.resumen ?? reportRoot?.summary ?? reportRoot;
-    const reportIngresosEfectivo = reportSummary?.ingresos_efectivo ?? reportRoot?.ingresos_efectivo ?? {};
-    const reportOtrosMetodos = reportSummary?.ingresos_otros_metodos ?? reportRoot?.ingresos_otros_metodos ?? {};
-    const hasReportMethods =
-      reportOtrosMetodos &&
-      typeof reportOtrosMetodos === "object" &&
-      Object.keys(reportOtrosMetodos).length > 0;
-
-    if (hasReportMethods) {
-      const fromReport = (keys: string[]) =>
-        keys.reduce((sum, key) => sum + toNumber((reportOtrosMetodos as Record<string, unknown>)[key]), 0);
-
-      const efectivo =
-        pickNumber(reportIngresosEfectivo, ["total", "efectivo_total", "total_efectivo"]) ?? 0;
-      const tarjetas = fromReport([
-        "tarjeta_credito",
-        "tarjeta_debito",
-        "tarjeta",
-        "pos",
-      ]);
-      const transferencias = fromReport(["transferencia", "link_de_pago"]);
-      const creditoEmpleados = fromReport([
-        "credito_empleados",
-        "abonos",
-        "descuento_por_nomina",
-        "decuento_por_nomina",
-      ]);
-      const addi = fromReport(["addi"]);
-      const total =
-        pickNumber(reportSummary, ["total_vendido", "ventas_totales", "total_ingresos"]) ??
-        (efectivo + tarjetas + transferencias + creditoEmpleados + addi);
-
-      return {
-        izquierda: [
-          { label: "Efectivo", value: efectivo, trend: true },
-          { label: "Tarjetas", value: tarjetas, trend: true },
-          { label: "Transferencias", value: transferencias, trend: true },
-          { label: "Total", value: total, trend: false, total: true },
-        ],
-        derecha: [
-          { label: "Tarjeta", value: tarjetas, trend: true },
-          { label: "Transferencias", value: transferencias, trend: true },
-          { label: "Crédito empleados", value: creditoEmpleados, trend: false },
-          { label: "Addi", value: addi, trend: false },
-        ],
-      };
-    }
-
-    const totales: Record<string, number> = {};
-    const accumulate = (method: string | undefined, amount: number) => {
-      const key = normalizePaymentMethodKey(method);
-      totales[key] = Number(((totales[key] || 0) + amount).toFixed(2));
-    };
-
-    for (const ingreso of ingresos) {
-      accumulate(ingreso.metodo_pago, ingreso.monto || 0);
-    }
-
-    for (const egreso of egresos) {
-      accumulate(egreso.metodo_pago, -Math.abs(egreso.monto || 0));
-    }
-
-    const sumMethods = (methods: string[]) => {
-      return methods.reduce((sum, method) => sum + (totales[normalizePaymentMethodKey(method)] || 0), 0);
-    };
-
-    const efectivo = sumMethods(["efectivo"]);
-    const tarjetas = sumMethods(["tarjeta_credito", "tarjeta_debito", "tarjeta", "pos"]);
-    const transferencias = sumMethods(["transferencia", "link_de_pago"]);
-    const creditoEmpleados = sumMethods(["credito_empleados", "abonos"]);
-    const addi = sumMethods(["addi"]);
-    const total = efectivo + tarjetas + transferencias + creditoEmpleados + addi;
+    const efectivo = hasReportMetrics
+      ? reportMetrics.paymentMethods.efectivo
+      : localPaymentMethodTotals.efectivo;
+    const tarjetas = hasReportMetrics
+      ? reportMetrics.paymentMethods.tarjetas
+      : localPaymentMethodTotals.tarjetas;
+    const transferencias = hasReportMetrics
+      ? reportMetrics.paymentMethods.transferencias
+      : localPaymentMethodTotals.transferencias;
+    const linkPagos = hasReportMetrics
+      ? reportMetrics.paymentMethods.linkPagos
+      : localPaymentMethodTotals.linkPagos;
+    const creditoEmpleados = hasReportMetrics
+      ? reportMetrics.paymentMethods.creditoEmpleados
+      : localPaymentMethodTotals.creditoEmpleados;
+    const abonos = hasReportMetrics ? reportMetrics.abonos : localPaymentMethodTotals.abonos;
+    const giftcardsMetodo = hasReportMetrics
+      ? reportMetrics.paymentMethods.giftCards
+      : localPaymentMethodTotals.giftCards;
+    const addi = hasReportMetrics
+      ? reportMetrics.paymentMethods.addi
+      : localPaymentMethodTotals.addi;
+    const total = totalRecibidoDisplay;
 
     return {
       izquierda: [
@@ -1252,13 +1832,14 @@ export default function CierreCajaPage() {
         { label: "Total", value: total, trend: false, total: true },
       ],
       derecha: [
-        { label: "Tarjeta", value: tarjetas, trend: true },
-        { label: "Transferencias", value: transferencias, trend: true },
+        { label: "Link de pago", value: linkPagos, trend: true },
         { label: "Crédito empleados", value: creditoEmpleados, trend: false },
+        { label: "Abonos", value: abonos, trend: false },
+        { label: "Gift Cards", value: giftcardsMetodo, trend: false },
         { label: "Addi", value: addi, trend: false },
       ],
     };
-  }, [egresos, ingresos, reportePeriodo]);
+  }, [hasReportMetrics, localPaymentMethodTotals, reportMetrics, totalRecibidoDisplay]);
 
   const reporteResumen = useMemo(() => {
     if (!reportePeriodo) return null;
@@ -1328,17 +1909,21 @@ export default function CierreCajaPage() {
   }, [cierres, movimientosDia]);
 
   const resetIngresoForm = () => {
+    setEditingIngresoId(null);
     setIngresoMonto("");
     setIngresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
     setIngresoTipo(DEFAULT_CASH_INCOME_TYPE);
     setIngresoMotivo("");
+    setIngresoMotivoEdicion("");
     setIngresoFecha(getToday());
     setError(null);
   };
 
   const resetEgresoForm = () => {
+    setEditingEgresoId(null);
     setEgresoMonto("");
     setEgresoMotivo("");
+    setEgresoMotivoEdicion("");
     setEgresoMetodoPago(DEFAULT_CASH_PAYMENT_METHOD);
     setEgresoTipo(DEFAULT_CASH_EXPENSE_TYPE);
     setEgresoFecha(getToday());
@@ -1397,23 +1982,25 @@ export default function CierreCajaPage() {
 
           <div className="space-y-4">
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-800">Fecha de inicio</label>
+              <label className={FIELD_LABEL_CLASS}>Fecha de inicio</label>
               <Input
                 type="date"
                 value={tempDateRange.start_date}
                 onChange={(event) => setTempDateRange((prev) => ({ ...prev, start_date: event.target.value }))}
                 max={tempDateRange.end_date || maxDate}
+                className={INPUT_CLASS}
               />
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-800">Fecha de fin</label>
+              <label className={FIELD_LABEL_CLASS}>Fecha de fin</label>
               <Input
                 type="date"
                 value={tempDateRange.end_date}
                 onChange={(event) => setTempDateRange((prev) => ({ ...prev, end_date: event.target.value }))}
                 min={tempDateRange.start_date}
                 max={maxDate}
+                className={INPUT_CLASS}
               />
             </div>
           </div>
@@ -1426,12 +2013,12 @@ export default function CierreCajaPage() {
           </div>
 
           <div className="mt-6 flex gap-3">
-            <Button className="flex-1 bg-black text-white hover:bg-gray-800" onClick={handleApplyDateRange}>
+            <Button className={`flex-1 ${PRIMARY_BUTTON_CLASS}`} onClick={handleApplyDateRange}>
               Aplicar rango
             </Button>
             <Button
               variant="outline"
-              className="flex-1 border-gray-300 text-gray-800 hover:bg-gray-100"
+              className={`flex-1 ${OUTLINE_BUTTON_CLASS}`}
               onClick={() => setShowDateModal(false)}
             >
               Cancelar
@@ -1443,127 +2030,152 @@ export default function CierreCajaPage() {
   };
 
   return (
-    <div className="flex h-screen bg-[#f1eff6]">
+    <div className="flex flex-col h-screen bg-gray-50">
       <Sidebar />
       <main className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-[1360px] p-3 sm:p-6 lg:p-8">
-          <div className="space-y-4">
+        <div className="p-8">
+          <div className="space-y-6">
             <DateRangeModal />
+            <PageHeader title="Cierre de Caja" />
             {error && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-gray-900">
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {error}
               </div>
             )}
             {success && (
-              <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+              <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
                 {success}
               </div>
             )}
 
-            <section className="space-y-4 rounded-2xl border border-[#d8d4e2] bg-[#f7f5fb] p-4 shadow-sm sm:p-6">
-              <div className="space-y-1 border-b border-[#dfdce8] pb-4">
-                <h1 className="text-4xl font-semibold tracking-tight text-[#2e2d35]">Cierres de caja</h1>
-                <p className="text-xl text-[#656271]">{sedeNombre ? `Caja Sede ${sedeNombre}` : "Caja de la sede"}</p>
-              </div>
-
-              <div className="flex flex-col gap-3 border-b border-[#dfdce8] pb-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-gray-600" />
-                    <span className="text-sm text-gray-600">Período:</span>
+            <Card className={SECTION_CARD_CLASS}>
+              <CardContent className="p-6">
+                <div className="grid gap-4 xl:grid-cols-[minmax(240px,320px)_minmax(0,1fr)_auto] xl:items-end">
+                  <div>
+                    <label className={FIELD_LABEL_CLASS}>Sede</label>
+                    {isSuperAdmin ? (
+                      <select className={SELECT_CLASS} value={sedeId ?? ""} onChange={handleSedeChange}>
+                        <option value="">{loadingSedes ? "Cargando sedes..." : "Selecciona sede"}</option>
+                        {sedesOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="flex h-10 items-center rounded-md border border-gray-300 bg-gray-50 px-3 text-sm text-gray-900 shadow-sm">
+                        {sedeNombre ? `Caja Sede ${sedeNombre}` : "Caja de la sede"}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex flex-wrap gap-1">
-                    {HEADER_PERIOD_OPTIONS.map((option) => (
-                      <Button
-                        key={option.id}
-                        size="sm"
-                        variant={periodoSeleccionado === option.id ? "default" : "outline"}
-                        className={`border-gray-300 text-xs ${
-                          periodoSeleccionado === option.id
-                            ? "bg-black text-white hover:bg-gray-800"
-                            : "text-gray-700 hover:bg-gray-100"
-                        }`}
-                        onClick={() => handlePeriodChange(option.id)}
-                      >
-                        {option.label}
-                      </Button>
-                    ))}
+                  <div>
+                    <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
+                      <Calendar className="h-4 w-4 text-gray-600" />
+                      <span>Período</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {HEADER_PERIOD_OPTIONS.map((option) => (
+                        <Button
+                          key={option.id}
+                          size="sm"
+                          variant={periodoSeleccionado === option.id ? "default" : "outline"}
+                          className={
+                            periodoSeleccionado === option.id
+                              ? PRIMARY_BUTTON_CLASS
+                              : OUTLINE_BUTTON_CLASS
+                          }
+                          onClick={() => handlePeriodChange(option.id)}
+                        >
+                          {option.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 xl:min-w-[250px] xl:justify-self-end">
+                    <p className="text-sm font-medium text-gray-900">{displayDateRange}</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Caja abierta desde: {loadingCierres ? "..." : cajaAbiertaDesde}
+                    </p>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
 
-                <div className="space-y-0.5 lg:text-right">
-                  <p className="text-lg font-semibold text-[#2e2d35]">{displayDateRange}</p>
-                  <p className="text-xs text-[#6d6a77]">Caja abierta desde: {loadingCierres ? "..." : cajaAbiertaDesde}</p>
-                </div>
-              </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <Card className={METRIC_CARD_CLASS}>
+                <CardContent className="p-6">
+                  <p className="text-sm font-medium text-gray-700">Dinero recibido hoy</p>
+                  <p className="mt-2 text-2xl font-bold text-black">
+                    {loadingResumen ? "..." : formatMoney(totalRecibidoDisplay)}
+                  </p>
+                </CardContent>
+              </Card>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <Card className="border-[#d7d4df] bg-white/80 shadow-[0_1px_2px_rgba(17,24,39,0.06)]">
-                  <CardContent className="space-y-2 p-4">
-                    <p className="text-sm text-[#656271]">Dinero recibido hoy</p>
-                    <p className="text-4xl font-semibold text-[#2e2d35]">
-                      {loadingResumen ? "..." : formatMoney(resumen.ingresos || 0)}
-                    </p>
-                  </CardContent>
-                </Card>
+              <Card className={METRIC_CARD_CLASS}>
+                <CardContent className="p-6">
+                  <p className="text-sm font-medium text-gray-700">Abonos recibidos</p>
+                  <p className="mt-2 text-2xl font-bold text-black">
+                    {loadingResumen ? "..." : formatMoney(abonosTotal)}
+                  </p>
+                </CardContent>
+              </Card>
 
-                <Card className="border-[#d7d4df] bg-white/80 shadow-[0_1px_2px_rgba(17,24,39,0.06)]">
-                  <CardContent className="space-y-2 p-4">
-                    <p className="text-sm text-[#656271]">Abonos recibidos</p>
-                    <p className="text-4xl font-semibold text-[#2e2d35]">
-                      {loadingIngresos ? "..." : formatMoney(abonosTotal)}
-                    </p>
-                  </CardContent>
-                </Card>
+              <Card className={METRIC_CARD_CLASS}>
+                <CardContent className="p-6">
+                  <p className="text-sm font-medium text-gray-700">Egresos</p>
+                  <p className="mt-2 text-2xl font-bold text-black">
+                    {loadingResumen ? "..." : formatSignedMoney(-Math.abs(egresosEfectivoDisplay))}
+                  </p>
+                </CardContent>
+              </Card>
 
-                <Card className="border-[#d7d4df] bg-white/80 shadow-[0_1px_2px_rgba(17,24,39,0.06)]">
-                  <CardContent className="space-y-2 p-4">
-                    <p className="text-sm text-[#656271]">Egresos</p>
-                    <p className="text-4xl font-semibold text-[#2e2d35]">
-                      {loadingEgresos ? "..." : formatSignedMoney(-Math.abs(resumen.egresos || egresosTotal))}
-                    </p>
-                  </CardContent>
-                </Card>
+              <Card className={METRIC_CARD_CLASS}>
+                <CardContent className="p-6">
+                  <p className="text-sm font-medium text-gray-700">Efectivo en caja</p>
+                  <p className="mt-2 text-2xl font-bold text-black">
+                    {loadingResumen && efectivoEsperadoDisplay === null
+                      ? "..."
+                      : efectivoEsperadoDisplay === null
+                        ? "--"
+                        : formatMoney(efectivoEsperadoDisplay)}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
 
-                <Card className="border-[#d7d4df] bg-white/80 shadow-[0_1px_2px_rgba(17,24,39,0.06)]">
-                  <CardContent className="space-y-2 p-4">
-                    <p className="text-sm text-[#656271]">Efectivo en caja</p>
-                    <p className="text-4xl font-semibold text-[#2e2d35]">
-                      {loadingEfectivoEnCaja ? "..." : efectivoEnCaja === null ? "--" : formatMoney(efectivoEnCaja)}
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                <CardHeader className="border-b border-[#e3e0ea] pb-3">
-                  <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Saldos por medio de pago</CardTitle>
+              <Card className={SECTION_CARD_CLASS}>
+                <CardHeader className="border-b border-gray-200 pb-3">
+                  <CardTitle className="text-xl font-semibold text-gray-900">Saldos por medio de pago</CardTitle>
                 </CardHeader>
-                <CardContent className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-2 md:gap-4">
-                  <div className="space-y-1 md:border-r md:border-[#e3e0ea] md:pr-4">
+                <CardContent className="grid grid-cols-1 gap-3 pt-6 md:grid-cols-2 md:gap-4">
+                  <div className="space-y-3 md:border-r md:border-gray-200 md:pr-4">
                     {saldosPorMedio.izquierda.map((item) => (
                       <div
                         key={`left-${item.label}`}
-                        className={`flex items-center justify-between gap-3 rounded-md px-2 py-1 ${
-                          item.total ? "bg-[#efedf5]" : ""
+                        className={`flex items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
+                          item.total ? "border-gray-300 bg-gray-50" : "border-gray-200 bg-white"
                         }`}
                       >
-                        <span className={`text-[#3c3946] ${item.total ? "text-2xl font-semibold" : "text-xl"}`}>
+                        <span className={`text-gray-700 ${item.total ? "text-base font-semibold" : "text-sm"}`}>
                           {item.label}
                         </span>
-                        <span className={`font-semibold text-[#2e2d35] ${item.total ? "text-3xl" : "text-2xl"}`}>
+                        <span className={`font-semibold text-gray-900 ${item.total ? "text-lg" : "text-base"}`}>
                           {item.trend ? formatTrendMoney(item.value) : formatMoney(item.value)}
                         </span>
                       </div>
                     ))}
                   </div>
 
-                  <div className="space-y-1">
+                  <div className="space-y-3">
                     {saldosPorMedio.derecha.map((item) => (
-                      <div key={`right-${item.label}`} className="flex items-center justify-between gap-3 rounded-md px-2 py-1">
-                        <span className="text-xl text-[#3c3946]">{item.label}</span>
-                        <span className="text-2xl font-semibold text-[#2e2d35]">
+                      <div
+                        key={`right-${item.label}`}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3"
+                      >
+                        <span className="text-sm text-gray-700">{item.label}</span>
+                        <span className="text-base font-semibold text-gray-900">
                           {item.trend ? formatTrendMoney(item.value) : formatMoney(item.value)}
                         </span>
                       </div>
@@ -1572,136 +2184,154 @@ export default function CierreCajaPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                  <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Abrir caja</CardTitle>
-                </CardHeader>
-                <CardContent className="grid grid-cols-1 gap-3 pt-4 md:grid-cols-4">
-                  <div>
-                    <label className="text-xs font-medium text-[#666370]">Monto inicial</label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={aperturaMonto}
-                      onChange={(e) => setAperturaMonto(e.target.value)}
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="text-xs font-medium text-[#666370]">Observaciones (opcional)</label>
-                    <Input value={aperturaNota} onChange={(e) => setAperturaNota(e.target.value)} />
-                  </div>
-                  <div className="flex flex-col justify-end gap-2">
-                    <div className="rounded-md border border-[#ddd9e6] bg-[#f2f0f7] p-2 text-xs text-[#4b4857]">
-                      El monto inicial se registra como efectivo de apertura.
-                    </div>
-                    <Button
-                      onClick={handleApertura}
-                      disabled={loadingAction || !aperturaMonto.trim()}
-                      className="w-full bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
-                    >
-                      {loadingAction && activeAction === "apertura" ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Abriendo caja...
-                        </>
-                      ) : (
-                        "Abrir caja"
-                      )}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                  <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Cierre de caja</CardTitle>
-                </CardHeader>
-                <CardContent className="grid grid-cols-1 gap-3 pt-4 md:grid-cols-4">
-                  <div>
-                    <label className="text-xs font-medium text-[#666370]">Fecha de cierre</label>
-                    <Input type="date" value={cierreFecha} onChange={(e) => setCierreFecha(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#666370]">Efectivo contado</label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={cierreEfectivoContado}
-                      onChange={(e) => setCierreEfectivoContado(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#666370]">Observaciones (opcional)</label>
-                    <Input value={cierreNota} onChange={(e) => setCierreNota(e.target.value)} />
-                  </div>
-                  <div className="flex flex-col justify-end gap-2">
-                    <div className="rounded-md border border-[#ddd9e6] bg-[#f2f0f7] p-2 text-xs text-[#4b4857]">
-                      <div className="flex items-center justify-between">
-                        <span>Diferencia</span>
-                        <span
-                          className={`font-semibold ${
-                            cierreDiferencia === null
-                              ? "text-[#4b4857]"
-                              : cierreDiferencia > 0
-                                ? "text-emerald-700"
-                                : "text-[#2e2d35]"
-                          }`}
-                        >
-                          {cierreDiferencia === null ? "--" : formatMoney(cierreDiferencia)}
-                        </span>
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <Card className={SECTION_CARD_CLASS}>
+                  <CardHeader className="border-b border-gray-200 pb-3">
+                    <CardTitle className="text-xl font-semibold text-gray-900">Abrir caja</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4 pt-6">
+                    <div className={FORM_GRID_CLASS}>
+                      <div>
+                        <label className={FIELD_LABEL_CLASS}>Fecha de apertura</label>
+                        <Input type="date" value={aperturaFecha} onChange={(e) => setAperturaFecha(e.target.value)} className={INPUT_CLASS} />
+                      </div>
+                      <div>
+                        <label className={FIELD_LABEL_CLASS}>Monto inicial</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={aperturaMonto}
+                          onChange={(e) => setAperturaMonto(e.target.value)}
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className={FIELD_LABEL_CLASS}>Observaciones</label>
+                        <Input value={aperturaNota} onChange={(e) => setAperturaNota(e.target.value)} className={INPUT_CLASS} placeholder="Opcional" />
                       </div>
                     </div>
-                    <Button
-                      onClick={handleCierreCaja}
-                      disabled={
-                        loadingAction || loadingEfectivoEnCaja || efectivoEnCaja === null || !cierreEfectivoContado.trim()
-                      }
-                      className="w-full bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
-                    >
-                      {loadingAction && activeAction === "cierre" ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Cerrando caja...
-                        </>
-                      ) : (
-                        "Cerrar caja"
-                      )}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+
+                    <div className="flex flex-col gap-3 border-t border-gray-200 pt-4 md:flex-row md:items-center md:justify-between">
+                      <div className="md:max-w-[70%]">
+                        <div className={INFO_PANEL_CLASS}>
+                          El monto inicial se registra como efectivo de apertura.
+                        </div>
+                      </div>
+                      <Button
+                        onClick={handleApertura}
+                        disabled={loadingAction || !aperturaMonto.trim()}
+                        className={`w-full md:w-auto md:min-w-[180px] ${PRIMARY_BUTTON_CLASS}`}
+                      >
+                        {loadingAction && activeAction === "apertura" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Abriendo caja...
+                          </>
+                        ) : (
+                          "Abrir caja"
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className={SECTION_CARD_CLASS}>
+                  <CardHeader className="border-b border-gray-200 pb-3">
+                    <CardTitle className="text-xl font-semibold text-gray-900">Cierre de caja</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4 pt-6">
+                    <div className={FORM_GRID_CLASS}>
+                      <div>
+                        <label className={FIELD_LABEL_CLASS}>Fecha de cierre</label>
+                        <Input type="date" value={cierreFecha} onChange={(e) => setCierreFecha(e.target.value)} className={INPUT_CLASS} />
+                      </div>
+                      <div>
+                        <label className={FIELD_LABEL_CLASS}>Efectivo contado</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={cierreEfectivoContado}
+                          onChange={(e) => setCierreEfectivoContado(e.target.value)}
+                          className={INPUT_CLASS}
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className={FIELD_LABEL_CLASS}>Observaciones</label>
+                        <Input value={cierreNota} onChange={(e) => setCierreNota(e.target.value)} className={INPUT_CLASS} placeholder="Opcional" />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3 border-t border-gray-200 pt-4 md:flex-row md:items-center md:justify-between">
+                      <div className="md:max-w-[70%]">
+                        <div className={INFO_PANEL_CLASS}>
+                          <div className="flex items-center justify-between gap-3">
+                            <span>Diferencia</span>
+                            <span
+                              className={`font-semibold ${
+                                cierreDiferencia === null
+                                  ? "text-gray-700"
+                                  : cierreDiferencia > 0
+                                    ? "text-green-700"
+                                    : "text-gray-900"
+                              }`}
+                            >
+                              {cierreDiferencia === null ? "--" : formatMoney(cierreDiferencia)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <Button
+                        onClick={handleCierreCaja}
+                        disabled={
+                          loadingAction || loadingEfectivoEnCaja || efectivoEnCaja === null || !cierreEfectivoContado.trim()
+                        }
+                        className={`w-full md:w-auto md:min-w-[180px] ${PRIMARY_BUTTON_CLASS}`}
+                      >
+                        {loadingAction && activeAction === "cierre" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Cerrando caja...
+                          </>
+                        ) : (
+                          "Cerrar caja"
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
 
               {reporteResumen ? (
-                <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                  <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                    <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Reporte del cierre</CardTitle>
+                <Card className={SECTION_CARD_CLASS}>
+                  <CardHeader className="border-b border-gray-200 pb-3">
+                    <CardTitle className="text-xl font-semibold text-gray-900">Reporte del cierre</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-4 pt-4">
-                    <p className="text-sm text-[#666370]">
+                  <CardContent className="space-y-4 pt-6">
+                    <p className="text-sm text-gray-600">
                       Período: {formatDate(reporteResumen.inicio)} - {formatDate(reporteResumen.fin)}
                     </p>
 
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      <div className="rounded-md border border-[#e2deea] bg-[#f3f1f8] p-3">
-                        <p className="text-xs text-[#666370]">Ingresos</p>
-                        <p className="text-lg font-semibold text-[#2e2d35]">{formatMoney(reporteResumen.ingresos)}</p>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-sm text-gray-600">Ingresos</p>
+                        <p className="mt-1 text-lg font-semibold text-gray-900">{formatMoney(reporteResumen.ingresos)}</p>
                       </div>
-                      <div className="rounded-md border border-[#e2deea] bg-[#f3f1f8] p-3">
-                        <p className="text-xs text-[#666370]">Egresos</p>
-                        <p className="text-lg font-semibold text-[#2e2d35]">{formatSignedMoney(-Math.abs(reporteResumen.egresos))}</p>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-sm text-gray-600">Egresos</p>
+                        <p className="mt-1 text-lg font-semibold text-gray-900">{formatSignedMoney(-Math.abs(reporteResumen.egresos))}</p>
                       </div>
-                      <div className="rounded-md border border-[#e2deea] bg-[#f3f1f8] p-3">
-                        <p className="text-xs text-[#666370]">Neto</p>
-                        <p className="text-lg font-semibold text-[#2e2d35]">{formatMoney(reporteResumen.neto)}</p>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-sm text-gray-600">Neto</p>
+                        <p className="mt-1 text-lg font-semibold text-gray-900">{formatMoney(reporteResumen.neto)}</p>
                       </div>
-                      <div className="rounded-md border border-[#e2deea] bg-[#f3f1f8] p-3">
-                        <p className="text-xs text-[#666370]">Diferencias</p>
-                        <p className="text-lg font-semibold text-[#2e2d35]">{formatMoney(reporteResumen.diferencias)}</p>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-sm text-gray-600">Diferencias</p>
+                        <p className="mt-1 text-lg font-semibold text-gray-900">{formatMoney(reporteResumen.diferencias)}</p>
                       </div>
                     </div>
 
                     {reporteResumen.cierres.length > 0 ? (
-                      <div className="rounded-md border border-[#e2deea] bg-[#f8f7fc] p-3 text-sm text-[#44414f]">
+                      <div className={INFO_PANEL_CLASS}>
                         Último cierre: {String(reporteResumen.cierres[0]?.cierre_id || "--")} | Estado: {" "}
                         {String(reporteResumen.cierres[0]?.estado || "--")}
                       </div>
@@ -1712,7 +2342,7 @@ export default function CierreCajaPage() {
                         type="button"
                         onClick={handleDescargarReporte}
                         disabled={descargandoReporte}
-                        className="bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
+                        className={PRIMARY_BUTTON_CLASS}
                       >
                         {descargandoReporte ? (
                           <>
@@ -1729,42 +2359,49 @@ export default function CierreCajaPage() {
               ) : null}
 
               {showManualCashForms ? (
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                  <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                    <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Registrar egreso</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4 pt-4">
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div>
-                          <label className="text-base text-[#666370]">Concepto</label>
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <Card className={SECTION_CARD_CLASS}>
+                <CardHeader className="border-b border-gray-200 pb-3">
+                  <CardTitle className="text-xl font-semibold text-gray-900">
+                    {isEditingEgreso ? "Editar egreso" : "Registrar egreso"}
+                  </CardTitle>
+                  {isEditingEgreso ? (
+                    <p className="text-sm text-gray-500">Estás editando un egreso existente.</p>
+                  ) : null}
+                </CardHeader>
+                <CardContent className="space-y-4 pt-6">
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                      <div className="lg:col-span-2">
+                          <label className={FIELD_LABEL_CLASS}>Concepto</label>
                           <Input
                             value={egresoMotivo}
                             onChange={(e) => {
                               setEgresoMotivo(e.target.value);
                               if (error && e.target.value.trim()) setError(null);
                             }}
+                            className={INPUT_CLASS}
                           />
                         </div>
                         <div>
-                          <label className="text-base text-[#666370]">Cantidad</label>
+                          <label className={FIELD_LABEL_CLASS}>Cantidad</label>
                           <Input
                             type="number"
                             min="0"
                             value={egresoMonto}
                             onChange={(e) => setEgresoMonto(e.target.value)}
+                            className={INPUT_CLASS}
                           />
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Método de pago</label>
+                          <label className={FIELD_LABEL_CLASS}>Método de pago</label>
                           <select
                             value={egresoMetodoPago}
                             onChange={(e) => setEgresoMetodoPago(e.target.value)}
-                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            className={SELECT_CLASS}
                           >
                             {CASH_PAYMENT_METHOD_OPTIONS.map((option) => (
                               <option key={`egreso-metodo-${option.value}`} value={option.value}>
@@ -1774,11 +2411,11 @@ export default function CierreCajaPage() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Tipo</label>
+                          <label className={FIELD_LABEL_CLASS}>Tipo</label>
                           <select
                             value={egresoTipo}
                             onChange={(e) => setEgresoTipo(e.target.value)}
-                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            className={SELECT_CLASS}
                           >
                             {CASH_EXPENSE_TYPE_OPTIONS.map((option) => (
                               <option key={`egreso-tipo-${option.value}`} value={option.value}>
@@ -1788,62 +2425,99 @@ export default function CierreCajaPage() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Fecha</label>
-                          <Input type="date" value={egresoFecha} onChange={(e) => setEgresoFecha(e.target.value)} />
+                          <label className={FIELD_LABEL_CLASS}>Fecha</label>
+                          <Input type="date" value={egresoFecha} onChange={(e) => setEgresoFecha(e.target.value)} className={INPUT_CLASS} />
                         </div>
                       </div>
+
+                      {isEditingEgreso ? (
+                        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+                          <label className={FIELD_LABEL_CLASS}>
+                            Motivo de edición (obligatorio para auditoría)
+                          </label>
+                          <Input
+                            value={egresoMotivoEdicion}
+                            onChange={(e) => {
+                              setEgresoMotivoEdicion(e.target.value);
+                              if (error && e.target.value.trim()) setError(null);
+                            }}
+                            placeholder="Ej: Corrección de monto, ajuste de método de pago, error de digitación..."
+                            className={INPUT_CLASS}
+                          />
+                        </div>
+                      ) : null}
                     </div>
 
-                    <div className="flex items-center justify-end gap-2 border-t border-[#e4e1eb] pt-3">
-                      <Button variant="outline" onClick={resetEgresoForm} className="min-w-24">
+                    <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4">
+                      <Button variant="outline" onClick={resetEgresoForm} className={`min-w-24 ${OUTLINE_BUTTON_CLASS}`}>
                         Cancelar
                       </Button>
                       <Button
                         onClick={handleCreateEgreso}
-                        disabled={loadingAction || !egresoMotivo.trim()}
-                        className="min-w-24 bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
+                        disabled={
+                          loadingAction ||
+                          !egresoMotivo.trim() ||
+                          (isEditingEgreso && !egresoMotivoEdicion.trim())
+                        }
+                        className={`min-w-24 ${PRIMARY_BUTTON_CLASS}`}
                       >
-                        Guardar
+                        {loadingAction && activeAction === "egreso" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            {isEditingEgreso ? "Actualizando..." : "Guardando..."}
+                          </>
+                        ) : isEditingEgreso ? (
+                          "Actualizar"
+                        ) : (
+                          "Guardar"
+                        )}
                       </Button>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                  <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                    <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Registrar ingreso manual</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4 pt-4">
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div>
-                          <label className="text-base text-[#666370]">Concepto</label>
+                <Card className={SECTION_CARD_CLASS}>
+                  <CardHeader className="border-b border-gray-200 pb-3">
+                    <CardTitle className="text-xl font-semibold text-gray-900">
+                      {editingIngresoId ? "Editar ingreso manual" : "Registrar ingreso manual"}
+                    </CardTitle>
+                    {editingIngresoId ? (
+                      <p className="text-sm text-gray-500">Estás editando un ingreso existente.</p>
+                    ) : null}
+                </CardHeader>
+                <CardContent className="space-y-4 pt-6">
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                        <div className="lg:col-span-2">
+                          <label className={FIELD_LABEL_CLASS}>Concepto</label>
                           <Input
                             value={ingresoMotivo}
                             onChange={(e) => {
                               setIngresoMotivo(e.target.value);
                               if (error && e.target.value.trim()) setError(null);
                             }}
+                            className={INPUT_CLASS}
                           />
                         </div>
                         <div>
-                          <label className="text-base text-[#666370]">Cantidad</label>
+                          <label className={FIELD_LABEL_CLASS}>Cantidad</label>
                           <Input
                             type="number"
                             min="0"
                             value={ingresoMonto}
                             onChange={(e) => setIngresoMonto(e.target.value)}
+                            className={INPUT_CLASS}
                           />
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Método de pago</label>
+                          <label className={FIELD_LABEL_CLASS}>Método de pago</label>
                           <select
                             value={ingresoMetodoPago}
                             onChange={(e) => setIngresoMetodoPago(e.target.value)}
-                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            className={SELECT_CLASS}
                           >
                             {CASH_PAYMENT_METHOD_OPTIONS.map((option) => (
                               <option key={`ingreso-metodo-${option.value}`} value={option.value}>
@@ -1853,11 +2527,11 @@ export default function CierreCajaPage() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Tipo</label>
+                          <label className={FIELD_LABEL_CLASS}>Tipo</label>
                           <select
                             value={ingresoTipo}
                             onChange={(e) => setIngresoTipo(e.target.value)}
-                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            className={SELECT_CLASS}
                           >
                             {CASH_INCOME_TYPE_OPTIONS.map((option) => (
                               <option key={`ingreso-tipo-${option.value}`} value={option.value}>
@@ -1867,81 +2541,144 @@ export default function CierreCajaPage() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-[#666370]">Fecha</label>
-                          <Input type="date" value={ingresoFecha} onChange={(e) => setIngresoFecha(e.target.value)} />
+                          <label className={FIELD_LABEL_CLASS}>Fecha</label>
+                          <Input type="date" value={ingresoFecha} onChange={(e) => setIngresoFecha(e.target.value)} className={INPUT_CLASS} />
                         </div>
                       </div>
+
+                      {editingIngresoId ? (
+                        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+                          <label className={FIELD_LABEL_CLASS}>
+                            Motivo de edición (obligatorio para auditoría)
+                          </label>
+                          <Input
+                            value={ingresoMotivoEdicion}
+                            onChange={(e) => {
+                              setIngresoMotivoEdicion(e.target.value);
+                              if (error && e.target.value.trim()) setError(null);
+                            }}
+                            placeholder="Ej: Corrección de monto, método de pago, error de digitación..."
+                            className={INPUT_CLASS}
+                          />
+                        </div>
+                      ) : null}
                     </div>
 
-                    <div className="flex items-center justify-end gap-2 border-t border-[#e4e1eb] pt-3">
-                      <Button variant="outline" onClick={resetIngresoForm} className="min-w-24">
-                        Cancelar
-                      </Button>
-                      <Button
-                        onClick={handleCreateIngreso}
-                        disabled={loadingAction}
-                        className="min-w-24 bg-[#6b6878] text-white hover:bg-[#5e5b6d]"
-                      >
-                        Guardar
-                      </Button>
-                    </div>
+                      <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4">
+                        <Button variant="outline" onClick={resetIngresoForm} className={`min-w-24 ${OUTLINE_BUTTON_CLASS}`}>
+                          Cancelar
+                        </Button>
+                        <Button
+                          onClick={handleCreateIngreso}
+                          disabled={
+                            loadingAction ||
+                            !ingresoMotivo.trim() ||
+                            (Boolean(editingIngresoId) && !ingresoMotivoEdicion.trim())
+                          }
+                          className={`min-w-24 ${PRIMARY_BUTTON_CLASS}`}
+                        >
+                          {loadingAction && activeAction === "ingreso" ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              {editingIngresoId ? "Actualizando..." : "Guardando..."}
+                            </>
+                          ) : editingIngresoId ? (
+                            "Actualizar"
+                          ) : (
+                            "Guardar"
+                          )}
+                        </Button>
+                      </div>
                   </CardContent>
                 </Card>
               </div>
               ) : null}
 
-              <Card className="border-[#d7d4df] bg-white/80 shadow-none">
-                <CardHeader className="border-b border-[#e3e0ea] pb-2">
-                  <CardTitle className="text-2xl font-semibold text-[#2e2d35]">Movimientos del día</CardTitle>
+              <Card className={SECTION_CARD_CLASS}>
+                <CardHeader className="border-b border-gray-200 pb-3">
+                  <CardTitle className="text-xl font-semibold text-gray-900">Movimientos del día</CardTitle>
                 </CardHeader>
-                <CardContent className="pt-4">
-                  <div className="overflow-x-auto rounded-md border border-[#dcd9e6]">
+                <CardContent className="pt-6">
+                  <div className={TABLE_WRAPPER_CLASS}>
                     <table className="min-w-full text-sm">
-                      <thead className="bg-[#eeebf4] text-left text-sm font-medium text-[#5f5c69]">
+                      <thead className={TABLE_HEAD_CLASS}>
                         <tr>
-                          <th className="px-3 py-2">Hora</th>
-                          <th className="px-3 py-2">Tipo</th>
-                          <th className="px-3 py-2">Concepto</th>
-                          <th className="px-3 py-2">Medio</th>
-                          <th className="px-3 py-2 text-right">Monto</th>
-                          <th className="px-3 py-2 text-right">Efectivo esperado</th>
+                          <th className={TABLE_HEAD_CELL_CLASS}>Fecha</th>
+                          <th className={TABLE_HEAD_CELL_CLASS}>Tipo</th>
+                          <th className={TABLE_HEAD_CELL_CLASS}>Concepto</th>
+                          <th className={TABLE_HEAD_CELL_CLASS}>Motivo edición</th>
+                          <th className={TABLE_HEAD_CELL_CLASS}>Medio</th>
+                          <th className={`${TABLE_HEAD_CELL_CLASS} text-right`}>Monto</th>
+                          <th className={`${TABLE_HEAD_CELL_CLASS} text-right`}>Efectivo esperado</th>
+                          <th className={`${TABLE_HEAD_CELL_CLASS} text-right`}>Acciones</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-[#ece9f2] text-[#3d3a46]">
-                        {loadingIngresos || loadingEgresos ? (
+                      <tbody className="divide-y divide-gray-200 text-gray-700">
+                        {loadingIngresos || loadingEgresos || loadingGiftcards ? (
                           <tr>
-                            <td colSpan={6} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">
                               Cargando movimientos...
                             </td>
                           </tr>
                         ) : movimientosConSaldo.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="px-3 py-6 text-center text-sm text-[#6b6878]">
+                            <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">
                               No hay movimientos registrados para el día.
                             </td>
                           </tr>
                         ) : (
                           movimientosConSaldo.map((movimiento) => (
-                            <tr key={movimiento.id}>
-                              <td className="px-3 py-2 font-medium text-[#2e2d35]">{movimiento.hora}</td>
-                              <td className="px-3 py-2">
-                                <span
-                                  className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${
-                                    movimiento.tipo === "egreso"
-                                      ? "bg-[#e9e6f0] text-[#4c4958]"
-                                      : "bg-[#efedf5] text-[#4f4b5d]"
-                                  }`}
-                                >
-                                  {movimiento.etiquetaTipo}
-                                </span>
+                            <tr key={movimiento.id} className="hover:bg-gray-50">
+                              <td className={`${TABLE_CELL_CLASS} font-medium text-gray-900`}>{movimiento.fecha}</td>
+                              <td className={TABLE_CELL_CLASS}>
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`${BADGE_BASE_CLASS} ${
+                                      movimiento.tipo === "egreso"
+                                        ? "border-red-200 bg-red-100 text-red-700"
+                                        : "border-green-200 bg-green-100 text-green-700"
+                                    }`}
+                                  >
+                                    {movimiento.tipo === "egreso" ? "Egreso" : "Ingreso"}
+                                  </span>
+                                  <span className={`${BADGE_BASE_CLASS} border-gray-300 bg-gray-100 text-gray-700`}>
+                                    {movimiento.etiquetaTipo}
+                                  </span>
+                                </div>
                               </td>
-                              <td className="px-3 py-2">{movimiento.detalle}</td>
-                              <td className="px-3 py-2">{movimiento.medio}</td>
-                              <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
+                              <td className={TABLE_CELL_CLASS}>{movimiento.detalle}</td>
+                              <td className={`${TABLE_CELL_CLASS} text-xs text-gray-600`}>
+                                {movimiento.motivoEdicion ? (
+                                  <span className={`${BADGE_BASE_CLASS} max-w-[220px] border-yellow-200 bg-yellow-50 text-yellow-800`}>
+                                    {movimiento.motivoEdicion}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+                              <td className={TABLE_CELL_CLASS}>{movimiento.medio}</td>
+                              <td className={`${TABLE_CELL_CLASS} text-right font-semibold text-gray-900`}>
                                 {formatSignedMoney(movimiento.monto)}
                               </td>
-                              <td className="px-3 py-2 text-right font-semibold text-[#2e2d35]">
+                              <td className={`${TABLE_CELL_CLASS} text-right font-semibold text-gray-900`}>
                                 {formatMoney(movimiento.saldo_esperado)}
+                              </td>
+                              <td className={`${TABLE_CELL_CLASS} text-right`}>
+                                {canEditMovimientos && movimiento.editable !== false ? (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() =>
+                                      movimiento.tipo === "egreso"
+                                        ? startEditEgreso(movimiento.id.replace(/^egreso-/, ""))
+                                        : startEditIngreso(movimiento.id.replace(/^ingreso-/, ""))
+                                    }
+                                    className={OUTLINE_BUTTON_CLASS}
+                                  >
+                                    Editar
+                                  </Button>
+                                ) : null}
                               </td>
                             </tr>
                           ))
@@ -1951,7 +2688,6 @@ export default function CierreCajaPage() {
                   </div>
                 </CardContent>
               </Card>
-            </section>
           </div>
         </div>
       </main>

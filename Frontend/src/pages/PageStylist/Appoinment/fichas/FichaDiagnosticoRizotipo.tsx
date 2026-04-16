@@ -6,6 +6,7 @@ import { Cita } from '../../../../types/fichas';
 import { Camera, Loader2, X, Save, CheckCircle } from "lucide-react";
 import { API_BASE_URL } from '../../../../types/config';
 import { getEstilistaDataFromCita, getFichaAuthToken } from './fichaHelpers';
+import { handleTextareaAutoResize } from "../../../../lib/textareaAutosize";
 
 interface FichaDiagnosticoRizotipoProps {
   cita: Cita;
@@ -13,6 +14,8 @@ interface FichaDiagnosticoRizotipoProps {
   onGuardar?: (datos: any) => void;
   onSubmit: (data: any) => void;
   onCancelar?: () => void;
+  fichaId?: string;
+  modoEdicion?: boolean;
 }
 
 type TechnicalField =
@@ -197,7 +200,7 @@ const normalizeSelectionValue = (value: unknown): string[] => {
   return [];
 };
 
-export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSubmit, onCancelar }: FichaDiagnosticoRizotipoProps) {
+export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSubmit, onCancelar, fichaId, modoEdicion }: FichaDiagnosticoRizotipoProps) {
   const [formData, setFormData] = useState({
     autorizacion_publicacion: false,
     firma_profesional: false,
@@ -520,9 +523,15 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
       // 5. Agregar el campo 'data' como string JSON
       formDataToSend.append('data', JSON.stringify(fichaData));
 
+      const isEdit = Boolean(fichaId || modoEdicion);
+      const endpoint = isEdit
+        ? `${API_BASE_URL}scheduling/quotes/fichas/${fichaId}`
+        : `${API_BASE_URL}scheduling/quotes/create-ficha`;
+      const method = isEdit ? 'PUT' : 'POST';
+
       // 6. Enviar petición
-      const response = await fetch(`${API_BASE_URL}scheduling/quotes/create-ficha`, {
-        method: 'POST',
+      const response = await fetch(endpoint, {
+        method,
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -562,14 +571,17 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
         localStorage.removeItem(`ficha_diagnostico_rizotipo_${cita.cita_id}`);
 
         // Notificar éxito
-        alert(`✅ Ficha de Diagnóstico Rizotipo creada exitosamente por ${estilistaData.nombre}`);
+        const mensaje = isEdit
+          ? `✅ Ficha de Diagnóstico Rizotipo actualizada por ${estilistaData.nombre}`
+          : `✅ Ficha de Diagnóstico Rizotipo creada exitosamente por ${estilistaData.nombre}`;
+        alert(mensaje);
         onSubmit(data);
       } else {
-        throw new Error(data.message || 'Error al crear la ficha');
+        throw new Error(data.message || (isEdit ? 'Error al actualizar la ficha' : 'Error al crear la ficha'));
       }
 
     } catch (error) {
-      console.error('❌ Error al crear ficha:', error);
+      console.error('❌ Error al guardar ficha:', error);
       alert(error instanceof Error ? error.message : 'Error al guardar la ficha');
     } finally {
       setLoading(false);
@@ -772,9 +784,10 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
         <div>
           <label className="block text-sm font-medium mb-2">Recomendaciones Personalizadas</label>
           <textarea
-            className="w-full p-2 border rounded-lg h-20"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[140px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
             value={formData.recomendaciones_personalizadas}
             onChange={(e) => handleInputChange('recomendaciones_personalizadas', e.target.value)}
+            onInput={handleTextareaAutoResize}
             placeholder="Escribe recomendaciones específicas para el cliente..."
           />
         </div>
@@ -797,11 +810,11 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
 
         <div>
           <label className="block text-sm font-medium mb-2">Técnicas de Estilizado Usadas Hoy</label>
-          <input
-            type="text"
-            className="w-full p-2 border rounded-lg"
+          <textarea
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[120px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
             value={formData.tecnicas_estilizado}
             onChange={(e) => handleInputChange('tecnicas_estilizado', e.target.value)}
+            onInput={handleTextareaAutoResize}
             placeholder="Ej: Plancha, secado, etc."
           />
         </div>
@@ -809,9 +822,10 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
         <div>
           <label className="block text-sm font-medium mb-2">Productos Sugeridos y Usados Hoy</label>
           <textarea
-            className="w-full p-2 border rounded-lg h-20"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[140px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
             value={formData.productos_sugeridos}
             onChange={(e) => handleInputChange('productos_sugeridos', e.target.value)}
+            onInput={handleTextareaAutoResize}
             placeholder="Lista de productos recomendados y utilizados..."
           />
         </div>
@@ -819,9 +833,10 @@ export function FichaDiagnosticoRizotipo({ cita, datosIniciales, onGuardar, onSu
         <div>
           <label className="block text-sm font-medium mb-2">Observaciones Generales</label>
           <textarea
-            className="w-full p-2 border rounded-lg h-20"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed shadow-inner min-h-[140px] resize-none focus:ring-2 focus:ring-gray-900/40 focus:border-gray-900/40"
             value={formData.observaciones_generales}
             onChange={(e) => handleInputChange('observaciones_generales', e.target.value)}
+            onInput={handleTextareaAutoResize}
             placeholder="Observaciones adicionales..."
           />
         </div>

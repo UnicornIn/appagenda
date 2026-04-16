@@ -1,10 +1,12 @@
 // components/Quotes/ClientSearch.tsx
-import React, { useState, useEffect } from 'react';
-import { Search, Plus, User, X } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Search, Plus, User, X, Loader2 } from 'lucide-react';
 import { getClientesPorSede, crearCliente, buscarClientesPorSede, Cliente, CrearClienteRequest } from '../../../../components/Quotes/clientsService';
 import { useAuth } from '../../../../components/Auth/AuthContext';
+import { useClientSmartSearch } from '../../../../hooks/useClientSmartSearch';
+import { toClienteFromPartial, type RankedClient } from '../../../../lib/client-search';
 
-const SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_DEBOUNCE_MS = 200;
 
 interface ClientSearchProps {
   sedeId: string;
@@ -34,10 +36,14 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
   const { user, activeSedeId } = useAuth();
   const [clientSearch, setClientSearch] = useState('');
   const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [cachedClientes, setCachedClientes] = useState<Cliente[]>([]);
   const [showClientModal, setShowClientModal] = useState(false);
   const [loadingClientes, setLoadingClientes] = useState(false);
   const [creatingClient, setCreatingClient] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
+  const searchCacheRef = useRef<Map<string, Cliente[]>>(new Map());
+  const lastQueryRef = useRef<string>("");
   const resolvedSedeId = String(
     sedeId ||
       activeSedeId ||
@@ -82,15 +88,37 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
         return;
       }
 
+      const query = clientSearch.trim();
+
+      if (lastQueryRef.current === query && (searchCacheRef.current.has(query) || clientes.length > 0)) {
+        setLoadingClientes(false);
+        return;
+      }
+      lastQueryRef.current = query;
+
+      // Caché de resultados por query
+      const cached = searchCacheRef.current.get(query);
+      if (cached) {
+        setClientes(cached);
+        setLoadingClientes(false);
+        return;
+      }
+
+      if (query.length > 0 && query.length < 2) {
+        setClientes(cachedClientes);
+        setLoadingClientes(false);
+        return;
+      }
+
       setLoadingClientes(true);
       try {
-        const filtro = clientSearch.trim();
-        const resultados = filtro
-          ? await buscarClientesPorSede(user.access_token, resolvedSedeId, filtro, 25)
+        const resultados = query
+          ? await buscarClientesPorSede(user.access_token, resolvedSedeId, query, 25)
           : await getClientesPorSede(user.access_token, resolvedSedeId, { limite: 25, pagina: 1 });
 
         if (!cancel) {
           setClientes(resultados);
+          searchCacheRef.current.set(query, resultados);
         }
       } catch (error) {
         if (!cancel) setClientes([]);
@@ -105,6 +133,43 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
       clearTimeout(timeoutId);
     };
   }, [clientSearch, resolvedSedeId, user?.access_token]);
+
+  // Cache amplio para búsquedas locales (email incluido)
+  useEffect(() => {
+    let cancel = false;
+    const preload = async () => {
+      if (!user?.access_token || !resolvedSedeId) return;
+      try {
+        const base = await getClientesPorSede(user.access_token, resolvedSedeId, { limite: 150, pagina: 1 });
+        if (!cancel) setCachedClientes(base);
+      } catch (err) {
+        console.warn('No se pudo precargar clientes para búsqueda local:', err);
+      }
+    };
+    preload();
+    return () => {
+      cancel = true;
+    };
+  }, [user?.access_token, resolvedSedeId]);
+
+  const fetchSmartResults = useCallback(async (query: string) => {
+    if (!user?.access_token || !resolvedSedeId || !query.trim()) return [];
+    const res = await buscarClientesPorSede(user.access_token, resolvedSedeId, query, 25);
+    return res.map(toClienteFromPartial);
+  }, [user?.access_token, resolvedSedeId]);
+
+  const normalizedBase = useMemo(
+    () => [...cachedClientes, ...clientes].map(toClienteFromPartial),
+    [cachedClientes, clientes]
+  );
+
+  const { results: smartResults, isLoading: smartLoading } = useClientSmartSearch(clientSearch, {
+    baseClientes: normalizedBase,
+    fetchRemote: fetchSmartResults,
+    maxSuggestions: 8,
+  });
+
+  const suggestions = useMemo(() => smartResults.slice(0, 8), [smartResults]);
 
   // Función para crear nuevo cliente
   const handleCreateClient = async () => {
@@ -172,15 +237,48 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
     }
   };
 
-  const handleSelectClient = (cliente: Cliente) => {
-    onClientSelect(cliente);
-    setClientSearch(cliente.nombre);
+  const toLegacyCliente = useCallback((c: any): Cliente => ({
+    _id: c._id || c.id || c.cliente_id,
+    cliente_id: c.cliente_id || c.id || c._id || "",
+    nombre: c.nombre || "",
+    correo: c.email || c.correo || "",
+    telefono: c.telefono || "",
+    cedula: c.cedula || "",
+    ciudad: c.ciudad || "",
+    fecha_de_nacimiento: c.fecha_de_nacimiento,
+    sede_id: c.sede_id || resolvedSedeId,
+    notas: c.nota || c.notas,
+    fecha_creacion: c.fecha_creacion,
+    notas_historial: c.notas_historial,
+  }), [resolvedSedeId]);
+
+  const handleSelectClient = (cliente: any) => {
+    onClientSelect(toLegacyCliente(cliente));
+    setClientSearch(cliente.nombre || "");
+    setIsFocused(false);
   };
 
   const handleClearClient = () => {
     onClientClear();
     setClientSearch('');
   };
+
+  const highlight = useCallback((text: string, query: string) => {
+    if (!text) return "—";
+    const clean = query.trim();
+    if (!clean) return text;
+    const lowerText = text.toLowerCase();
+    const lowerQuery = clean.toLowerCase();
+    const idx = lowerText.indexOf(lowerQuery);
+    if (idx === -1) return text;
+    return (
+      <>
+        {text.slice(0, idx)}
+        <span className="bg-yellow-100 text-gray-900">{text.slice(idx, idx + clean.length)}</span>
+        {text.slice(idx + clean.length)}
+      </>
+    );
+  }, []);
 
   const formatDateForInput = (dateString?: string) => {
     if (!dateString) return '';
@@ -225,6 +323,8 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
               placeholder="Buscar cliente..." 
               value={clientSearch} 
               onChange={(e) => setClientSearch(e.target.value)}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setTimeout(() => setIsFocused(false), 120)}
               className="w-full border border-gray-300 rounded px-8 py-2 text-sm focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none"
             />
             <button 
@@ -235,26 +335,46 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
             </button>
             
             {/* LISTA DE CLIENTES SUGERIDOS */}
-            {clientSearch && clientes.length > 0 && (
-              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded shadow max-h-48 overflow-y-auto">
-                {clientes.map(cliente => (
-                  <button 
-                    key={cliente.cliente_id}
-                    onClick={() => handleSelectClient(cliente)}
-                    className="w-full text-left px-3 py-2 hover:bg-gray-100 border-b border-gray-200 last:border-b-0 flex items-center gap-2"
-                  >
-                    <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center">
-                      <User className="w-3 h-3 text-gray-600" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-sm font-medium text-gray-900">{cliente.nombre}</div>
-                      <div className="text-xs text-gray-600">
-                        {cliente.telefono && `📞 ${cliente.telefono}`}
-                        {cliente.correo && ` • 📧 ${cliente.correo}`}
+            {clientSearch && isFocused && (
+              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded shadow max-h-52 overflow-y-auto">
+                {smartLoading && (
+                  <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
+                    Buscando clientes...
+                  </div>
+                )}
+
+                {!smartLoading && suggestions.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-gray-500">Sin resultados</div>
+                )}
+
+                {suggestions.map((result: RankedClient) => {
+                  const c = result.cliente;
+                  const email = c.email || (c as any).correo || "";
+                  const cedula = c.cedula || (c as any).numero_documento || (c as any).numeroDocumento || "";
+                  return (
+                    <button 
+                      key={c.cliente_id || c.id}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => handleSelectClient(c)}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-100 border-b border-gray-200 last:border-b-0 flex items-center gap-2"
+                    >
+                      <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center">
+                        <User className="w-3 h-3 text-gray-600" />
                       </div>
-                    </div>
-                  </button>
-                ))}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-900 truncate">{highlight(c.nombre, clientSearch)}</div>
+                        <div className="text-[11px] text-gray-600 flex flex-wrap gap-2 truncate">
+                          <span className="truncate">{highlight(c.telefono || "—", clientSearch)}</span>
+                          <span className="truncate">{highlight(cedula || "—", clientSearch)}</span>
+                          {email && (
+                            <span className="truncate text-gray-500">{highlight(email, clientSearch)}</span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
             )}
             

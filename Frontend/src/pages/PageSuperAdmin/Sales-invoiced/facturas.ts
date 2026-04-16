@@ -26,6 +26,7 @@ export interface FacturaAPI {
   profesional_nombre: string;
   numero_comprobante: string;
   facturado_por: string;
+  vendido_por?: string;
 }
 
 export interface ItemFactura {
@@ -105,6 +106,7 @@ export interface FacturaConverted {
   profesional_nombre: string;
   metodo_pago: string;
   facturado_por: string;
+  vendido_por?: string;
   estado: string;
   items?: ItemFactura[];
   historial_pagos?: HistorialPago[];
@@ -406,7 +408,8 @@ export class FacturaService {
       profesional_id: factura.profesional_id,
       profesional_nombre: factura.profesional_nombre,
       metodo_pago: metodoPago,
-      facturado_por: factura.facturado_por,
+      facturado_por: factura.facturado_por || factura.vendido_por || "Sistema",
+      vendido_por: factura.vendido_por || factura.facturado_por || "Sistema",
       estado: estado,
       items: items,
       historial_pagos: historial,
@@ -548,7 +551,7 @@ export class FacturaService {
         factura.moneda,
         Math.round(factura.total).toString(),
         factura.estado,
-        factura.facturado_por
+        factura.vendido_por || factura.facturado_por
       ]);
 
       // Crear contenido CSV

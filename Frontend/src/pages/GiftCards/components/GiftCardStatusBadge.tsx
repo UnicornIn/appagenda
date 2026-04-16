@@ -10,7 +10,7 @@ export function GiftCardStatusBadge({ status }: GiftCardStatusBadgeProps) {
   return (
     <Badge
       variant="outline"
-      className={`rounded-full border px-3 py-1 text-xs font-semibold ${getStatusClasses(status)}`}
+      className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${getStatusClasses(status)}`}
     >
       {getStatusLabel(status)}
     </Badge>

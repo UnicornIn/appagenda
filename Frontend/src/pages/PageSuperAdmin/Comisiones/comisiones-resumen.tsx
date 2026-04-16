@@ -1,5 +1,8 @@
 "use client"
 
+// Vista de detalle/resumen de comisiones para SUPER_ADMIN:
+// recibe filtros (sede + estilista), fuerza estado pendiente y muestra el primer período encontrado.
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AlertTriangle, User, Building } from "lucide-react";
 import { commissionsService } from "./Api/commissionsService";

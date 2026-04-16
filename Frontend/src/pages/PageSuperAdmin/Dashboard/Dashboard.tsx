@@ -207,10 +207,7 @@ export default function DashboardPage() {
         params.end_date = dateRange.end_date;
         params.period = "custom";
       } else if (selectedPeriod === "today") {
-        const todayLocal = toLocalYMD(new Date());
-        params.period = "custom";
-        params.start_date = todayLocal;
-        params.end_date = todayLocal;
+        params.period = "today";
       } else {
         params.period = selectedPeriod;
       }
@@ -236,10 +233,7 @@ export default function DashboardPage() {
           analyticsParams.start_date = dateRange.start_date;
           analyticsParams.end_date = dateRange.end_date;
         } else if (selectedPeriod === "today") {
-          const todayLocal = toLocalYMD(new Date());
-          analyticsParams.period = "custom";
-          analyticsParams.start_date = todayLocal;
-          analyticsParams.end_date = todayLocal;
+          analyticsParams.period = "today";
         } else {
           analyticsParams.period = selectedPeriod;
         }
@@ -827,7 +821,7 @@ export default function DashboardPage() {
 
   if (!isAuthenticated) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex flex-col h-screen items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900">Acceso no autorizado</h2>
           <p className="mt-2 text-gray-600">Por favor inicia sesión para ver el dashboard.</p>
@@ -837,7 +831,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex flex-col h-screen bg-white">
       <Sidebar />
       <main className="flex-1 overflow-y-auto">
         {/* Loading overlay con delay */}

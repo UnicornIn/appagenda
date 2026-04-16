@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useCallback, useMemo } from "react"
+import { memo, useCallback, useMemo, useState } from "react"
 import {
   Search,
   Plus,
@@ -27,6 +27,7 @@ import type { Cliente } from "../../../types/cliente"
 import type { Sede } from "../Sedes/sedeService"
 import type { ClientesPaginadosMetadata } from "./clientesService"
 import { formatSedeNombre } from "../../../lib/sede"
+import { getLastVisitLabel, type RankedClient } from "../../../lib/client-search"
 
 interface ClientsListProps {
   onSelectClient: (client: Cliente) => void
@@ -45,6 +46,9 @@ interface ClientsListProps {
   onItemsPerPageChange?: (value: number) => void
   itemsPerPage?: number
   isFetching?: boolean
+  smartResults?: RankedClient[]
+  smartLoading?: boolean
+  smartError?: string | null
 }
 
 interface TableColumn {
@@ -150,7 +154,10 @@ function ClientsListComponent({
   onExport,
   onItemsPerPageChange,
   itemsPerPage = 10,
-  isFetching = false
+  isFetching = false,
+  smartResults = [],
+  smartLoading = false,
+  smartError = null,
 }: ClientsListProps) {
   const { user } = useAuth()
   const isSuperAdmin =
@@ -163,6 +170,26 @@ function ClientsListComponent({
   const rangoFin = metadata?.rango_fin ?? ((currentPage - 1) * itemsPerPage + clientes.length)
   const tieneAnterior = metadata?.tiene_anterior ?? currentPage > 1
   const tieneSiguiente = metadata?.tiene_siguiente ?? currentPage < totalPages
+  const [isFocused, setIsFocused] = useState(false)
+  const showSuggestions = isFocused && Boolean(searchValue.trim())
+  const suggestions = useMemo(() => smartResults.slice(0, 8), [smartResults])
+
+  const highlight = useCallback((text: string, query: string) => {
+    if (!text) return "—"
+    const cleanQuery = query.trim()
+    if (!cleanQuery) return text
+    const lowerText = text.toLowerCase()
+    const lowerQuery = cleanQuery.toLowerCase()
+    const index = lowerText.indexOf(lowerQuery)
+    if (index === -1) return text
+    return (
+      <>
+        {text.slice(0, index)}
+        <span className="bg-yellow-100 text-gray-900">{text.slice(index, index + cleanQuery.length)}</span>
+        {text.slice(index + cleanQuery.length)}
+      </>
+    )
+  }, [])
 
   const tableColumns = useMemo<TableColumn[]>(() => {
     const columns: TableColumn[] = [
@@ -246,6 +273,19 @@ function ClientsListComponent({
   const handleSearchChange = useCallback((value: string) => {
     onSearch?.(value)
   }, [onSearch])
+
+  const handleSelectSuggestion = useCallback((cliente: Cliente) => {
+    onSelectClient(cliente)
+    if (cliente.nombre) {
+      onSearch?.(cliente.nombre)
+    }
+    setIsFocused(false)
+  }, [onSearch, onSelectClient])
+
+  const handleFocus = useCallback(() => setIsFocused(true), [])
+  const handleBlur = useCallback(() => {
+    setTimeout(() => setIsFocused(false), 120)
+  }, [])
 
   const handleSedeChange = useCallback((value: string) => {
     onSedeChange?.(value)
@@ -339,8 +379,83 @@ function ClientsListComponent({
               placeholder="Buscar por nombre, email, teléfono o cédula..."
               value={searchValue}
               onChange={(e) => handleSearchChange(e.target.value)}
+              onFocus={handleFocus}
+              onBlur={handleBlur}
               className="pl-10 h-10 bg-white"
             />
+
+            {showSuggestions && (
+              <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-lg border border-gray-200 bg-white shadow-xl">
+                {smartLoading && (
+                  <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
+                    <span>Buscando clientes...</span>
+                  </div>
+                )}
+
+                {!smartLoading && smartError && (
+                  <div className="px-3 py-2 text-xs text-red-600">No se pudo buscar: {smartError}</div>
+                )}
+
+                {!smartLoading && !smartError && suggestions.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-gray-500">Sin resultados</div>
+                )}
+
+                {suggestions.length > 0 && (
+                  <div className="max-h-80 overflow-auto divide-y divide-gray-100">
+                    {suggestions.map((result) => {
+                      const cliente = result.cliente
+                      const avatar =
+                        (cliente as any).foto ||
+                        (cliente as any).foto_url ||
+                        (cliente as any).imagen ||
+                        (cliente as any).image_url
+                      const initial = cliente.nombre?.charAt(0)?.toUpperCase() || "C"
+                      return (
+                        <button
+                          key={cliente.id}
+                          type="button"
+                          className="w-full px-3 py-2 text-left hover:bg-gray-50 active:bg-gray-100 transition-colors"
+                          onMouseDown={(e) => {
+                            e.preventDefault()
+                            handleSelectSuggestion(cliente)
+                          }}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden">
+                              {avatar ? (
+                                <img src={avatar} alt={cliente.nombre} className="h-full w-full object-cover" />
+                              ) : (
+                                <span className="text-sm font-semibold text-gray-700">{initial}</span>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="font-semibold text-gray-900 text-sm truncate">
+                                  {highlight(cliente.nombre, searchValue)}
+                                </div>
+                                <span className="text-[11px] text-gray-500 whitespace-nowrap">
+                                  {getLastVisitLabel(cliente)}
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-600 flex flex-wrap gap-2">
+                                <span className="truncate max-w-[140px]">{highlight(cliente.telefono || "—", searchValue)}</span>
+                                <span className="truncate max-w-[120px]">{highlight(cliente.cedula || "—", searchValue)}</span>
+                                {cliente.email && (
+                                  <span className="truncate max-w-[160px] text-gray-500">
+                                    {highlight(cliente.email, searchValue)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="w-full sm:w-[220px]">

@@ -9,6 +9,7 @@ import type { Cliente } from "../../../types/cliente"
 import { clientesService, type ClientesPaginadosMetadata } from "./clientesService"
 import { useAuth } from "../../../components/Auth/AuthContext"
 import { Loader } from "lucide-react"
+import { useClientSmartSearch } from "../../../hooks/useClientSmartSearch"
 
 const SEARCH_DEBOUNCE_MS = 300
 
@@ -313,9 +314,32 @@ export default function ClientsPage() {
     }
   }, [getAccessToken, selectedClient, loadClientes, metadata?.pagina, searchTerm])
 
+  const fetchSmartResults = useCallback(async (query: string) => {
+    const token = getAccessToken()
+    if (!token || !query.trim()) return []
+
+    const { clientes: fetched } = await clientesService.getClientesPaginados(token, {
+      pagina: 1,
+      limite: 25,
+      filtro: query
+    })
+
+    return fetched.map(asegurarClienteCompleto)
+  }, [getAccessToken])
+
+  const {
+    results: smartResults,
+    isLoading: smartLoading,
+    error: smartError,
+  } = useClientSmartSearch(searchTerm, {
+    baseClientes: clientes,
+    fetchRemote: fetchSmartResults,
+    maxSuggestions: 8,
+  })
+
   if (authLoading || (Boolean(user) && isInitialLoading)) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-white">
         <div className="flex items-center gap-3">
           <Loader className="h-5 w-5 animate-spin text-gray-600" />
           <span className="text-sm text-gray-600">Cargando clientes...</span>
@@ -326,7 +350,7 @@ export default function ClientsPage() {
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-white">
         <div className="text-center">
           <div className="text-sm text-gray-600 mb-2">No autenticado</div>
           <div className="text-xs text-gray-500">Inicia sesión para acceder</div>
@@ -336,7 +360,7 @@ export default function ClientsPage() {
   }
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex flex-col h-screen bg-white">
       <Sidebar />
       <div className="flex-1 overflow-auto">
         {selectedClient ? (
@@ -356,6 +380,9 @@ export default function ClientsPage() {
             onPageChange={handlePageChange}
             onSearch={handleSearch}
             searchValue={searchTerm}
+            smartResults={smartResults}
+            smartLoading={smartLoading}
+            smartError={smartError}
           />
         )}
       </div>

@@ -11,6 +11,7 @@ import { clientesService, type ClientesPaginadosMetadata } from "./clientesServi
 import { sedeService } from "../Sedes/sedeService" // ✅ Cambiado de sedesService a sedeService
 import { useAuth } from "../../../components/Auth/AuthContext"
 import { Loader } from "lucide-react"
+import { useClientSmartSearch } from "../../../hooks/useClientSmartSearch"
 
 const SEARCH_DEBOUNCE_MS = 300
 
@@ -292,10 +293,34 @@ export default function ClientsPage() {
     }
   }, [getAccessToken, selectedClient, loadClientes, metadata?.pagina, searchTerm, selectedSede])
 
+  const fetchSmartResults = useCallback(async (query: string) => {
+    const token = getAccessToken()
+    if (!token || !query.trim()) return []
+
+    const { clientes: fetched } = await clientesService.getClientesPaginados(token, {
+      pagina: 1,
+      limite: 25,
+      filtro: query,
+      sedeId: selectedSede !== "all" ? selectedSede : undefined,
+    })
+
+    return fetched
+  }, [getAccessToken, selectedSede])
+
+  const {
+    results: smartResults,
+    isLoading: smartLoading,
+    error: smartError,
+  } = useClientSmartSearch(searchTerm, {
+    baseClientes: clientes,
+    fetchRemote: fetchSmartResults,
+    maxSuggestions: 8,
+  })
+
   // Mostrar loading mientras se verifica la autenticación
   if (authLoading || (Boolean(user) && isInitialLoading)) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gray-50">
         <div className="flex items-center gap-3">
           <Loader className="h-6 w-6 animate-spin text-gray-700" />
           <span className="text-lg text-gray-600">
@@ -308,7 +333,7 @@ export default function ClientsPage() {
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="text-red-600 text-lg mb-4">No autenticado</div>
           <div className="text-gray-600">Por favor inicia sesión para acceder a esta página</div>
@@ -318,7 +343,7 @@ export default function ClientsPage() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex flex-col h-screen bg-gray-50">
       <Sidebar />
       <div className="flex-1 overflow-auto">
         {selectedClient ? (
@@ -344,6 +369,9 @@ export default function ClientsPage() {
             onItemsPerPageChange={handleItemsPerPageChange}
             itemsPerPage={itemsPorPagina}
             isFetching={isFetching}
+            smartResults={smartResults}
+            smartLoading={smartLoading}
+            smartError={smartError}
           />
         )}
       </div>

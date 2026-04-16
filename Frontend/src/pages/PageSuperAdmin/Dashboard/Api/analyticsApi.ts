@@ -1,6 +1,6 @@
 import { API_BASE_URL } from "../../../../types/config";
 import { formatCurrencyNoDecimals, getStoredCurrency, resolveCurrencyLocale } from "../../../../lib/currency";
-import { toBackendDate, toLocalYMD } from "../../../../lib/dateFormat";
+import { parseDateToDate, toBackendDate, toDMY, toLocalYMD } from "../../../../lib/dateFormat";
 
 // Interfaces para el dashboard de ventas (financiero)
 export interface VentasMetricas {
@@ -162,11 +162,17 @@ export async function getVentasDashboard(
   }
 ): Promise<VentasDashboardResponse> {
   const queryParams = new URLSearchParams();
+  const toSalesDashboardDate = (value?: string) => {
+    if (!value) return "";
+    const parsed = parseDateToDate(value);
+    return parsed ? toDMY(parsed) : value;
+  };
 
   if (params.period) queryParams.append('period', params.period);
   if (params.sede_id) queryParams.append('sede_id', params.sede_id);
-  if (params.start_date) queryParams.append('start_date', toBackendDate(params.start_date));
-  if (params.end_date) queryParams.append('end_date', toBackendDate(params.end_date));
+  // ⚠️ Backend de ventas exige formato DD-MM-YYYY para fechas custom
+  if (params.start_date) queryParams.append('start_date', toSalesDashboardDate(params.start_date));
+  if (params.end_date) queryParams.append('end_date', toSalesDashboardDate(params.end_date));
 
   const url = `${API_BASE_URL}api/sales-dashboard/ventas/dashboard?${queryParams.toString()}`;
   console.log('Fetching ventas dashboard from:', url);

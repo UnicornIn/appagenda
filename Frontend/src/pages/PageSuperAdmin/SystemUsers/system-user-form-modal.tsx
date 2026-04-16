@@ -63,6 +63,7 @@ export function SystemUserFormModal({
     password: "",
     confirm_password: "",
     activo: true,
+    comision_productos: "",
   });
 
   const [sedes, setSedes] = useState<Sede[]>([]);
@@ -76,6 +77,13 @@ export function SystemUserFormModal({
 
   const requiresPrimarySede = formData.role !== "super_admin";
   const canConfigureSedesPermitidas = formData.role === "admin_sede";
+  const formatPercentageInput = (value: string) => {
+    const normalized = value.replace(/,/g, ".").replace(/[^0-9.]/g, "");
+    const [integerPart, decimalPart] = normalized.split(".");
+    const safeInteger = integerPart || "";
+    const safeDecimal = decimalPart ? decimalPart.slice(0, 2) : "";
+    return safeDecimal ? `${safeInteger}.${safeDecimal}` : safeInteger;
+  };
 
   const canSubmit = useMemo(() => {
     const nombre = formData.nombre.trim();
@@ -128,6 +136,10 @@ export function SystemUserFormModal({
         password: "",
         confirm_password: "",
         activo: Boolean(initialUser.activo),
+        comision_productos:
+          typeof initialUser.comision_productos === "number"
+            ? String(initialUser.comision_productos)
+            : "",
       });
     } else {
       setFormData({
@@ -140,6 +152,7 @@ export function SystemUserFormModal({
         password: "",
         confirm_password: "",
         activo: true,
+        comision_productos: "",
       });
     }
     setError(null);
@@ -310,6 +323,17 @@ export function SystemUserFormModal({
       return;
     }
 
+    const rawProductCommission = formData.comision_productos.trim();
+    let comisionProductos: number | null = null;
+    if (rawProductCommission) {
+      const parsed = Number(rawProductCommission);
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+        setError("La comisión por productos debe estar entre 0 y 100.");
+        return;
+      }
+      comisionProductos = Math.round(parsed * 100) / 100;
+    }
+
     const especialidadesValidas = (formData.especialidades || [])
       .map((esp) => esp.trim())
       .filter((esp) => Boolean(esp));
@@ -334,6 +358,7 @@ export function SystemUserFormModal({
       especialidades: especialidadesValidas,
       password: password || undefined,
       activo: formData.activo,
+      comision_productos: comisionProductos,
     };
 
     try {
@@ -405,6 +430,25 @@ export function SystemUserFormModal({
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Comisión por productos (%)</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={formData.comision_productos}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    comision_productos: formatPercentageInput(e.target.value),
+                  }))
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-[oklch(0.65_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.65_0.25_280)]/20"
+                placeholder="Ej: 12.5 (opcional)"
+                disabled={isSaving}
+              />
+              <p className="text-xs text-gray-500 mt-1">Opcional. Valor entre 0 y 100. Dejar vacío para usar las reglas de producto por defecto.</p>
             </div>
 
             {requiresPrimarySede && (

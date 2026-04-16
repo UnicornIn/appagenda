@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react"
 import { X, Loader } from 'lucide-react'
 import type { Sede } from "../../../types/sede"
+import { Button } from "../../../components/ui/button"
+import { Input } from "../../../components/ui/input"
+import { Textarea } from "../../../components/ui/textarea"
 
 interface SedeFormModalProps {
   isOpen: boolean
@@ -17,7 +20,7 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
     nombre: "",
     direccion: "",
     informacion_adicional: "",
-    zona_horaria: "Bogota",
+    zona_horaria: "America/Bogota",
     telefono: "",
     email: "",
     activa: true
@@ -43,7 +46,7 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
           nombre: "",
           direccion: "",
           informacion_adicional: "",
-          zona_horaria: "Bogota",
+          zona_horaria: "America/Bogota",
           telefono: "",
           email: "",
           activa: true
@@ -92,10 +95,6 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
         }
         await onSave(sedeData)
       }
-
-      // Recargar la página después de guardar exitosamente
-      window.location.reload()
-      
     } catch (error) {
       console.error("Error al guardar la sede:", error)
       // No recargar la página si hay error
@@ -106,31 +105,31 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-2xl rounded-lg bg-white p-6">
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-2xl font-bold">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-gray-300 bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-5">
+          <h2 className="text-xl font-semibold text-gray-900">
             {sede ? "Editar sede" : "Añadir sede"}
           </h2>
           <button
             onClick={onClose}
             disabled={isSaving}
-            className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
           >
-            <X className="h-6 w-6" />
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5 p-6">
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
               Nombre de la sede *
             </label>
-            <input
+            <Input
               type="text"
               value={formData.nombre || ""}
               onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
+              className="h-10 border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus-visible:ring-gray-500"
               required
               disabled={isSaving}
               placeholder="Ej: Sede Principal"
@@ -141,11 +140,11 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
             <label className="mb-1 block text-sm font-medium text-gray-700">
               Dirección *
             </label>
-            <input
+            <Input
               type="text"
               value={formData.direccion || ""}
               onChange={(e) => setFormData({ ...formData, direccion: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
+              className="h-10 border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus-visible:ring-gray-500"
               required
               disabled={isSaving}
               placeholder="Ej: Calle 123 #45-67"
@@ -156,26 +155,25 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
             <label className="mb-1 block text-sm font-medium text-gray-700">
               Información adicional
             </label>
-            <textarea
+            <Textarea
               value={formData.informacion_adicional || ""}
               onChange={(e) => setFormData({ ...formData, informacion_adicional: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
-              rows={3}
+              className="min-h-[120px] border-gray-300 text-gray-900 placeholder:text-gray-400 focus-visible:border-gray-500 focus-visible:ring-gray-500"
               disabled={isSaving}
               placeholder="Información adicional sobre la sede..."
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">
                 Teléfono *
               </label>
-              <input
+              <Input
                 type="tel"
                 value={formData.telefono || ""}
                 onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
+                className="h-10 border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus-visible:ring-gray-500"
                 required
                 disabled={isSaving}
                 placeholder="Ej: 6011234567"
@@ -186,11 +184,11 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
               <label className="mb-1 block text-sm font-medium text-gray-700">
                 Email *
               </label>
-              <input
+              <Input
                 type="email"
                 value={formData.email || ""}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
+                className="h-10 border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus-visible:ring-gray-500"
                 required
                 disabled={isSaving}
                 placeholder="Ej: contacto@sede.com"
@@ -203,16 +201,16 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
               Zona horaria *
             </label>
             <select
-              value={formData.zona_horaria || "Bogota"}
+              value={formData.zona_horaria || "America/Bogota"}
               onChange={(e) => setFormData({ ...formData, zona_horaria: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-[oklch(0.55_0.25_280)] focus:outline-none focus:ring-2 focus:ring-[oklch(0.55_0.25_280)]/20"
+              className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-gray-500"
               required
               disabled={isSaving}
             >
-              <option value="Bogota">Bogotá</option>
-              <option value="Madrid">Madrid</option>
-              <option value="New_York">New York</option>
-              <option value="London">London</option>
+              <option value="America/Bogota">Bogotá</option>
+              <option value="Europe/Madrid">Madrid</option>
+              <option value="America/New_York">New York</option>
+              <option value="Europe/London">London</option>
             </select>
           </div>
 
@@ -223,7 +221,7 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
                 id="activa"
                 checked={formData.activa || false}
                 onChange={(e) => setFormData({ ...formData, activa: e.target.checked })}
-                className="h-4 w-4 rounded border-gray-300 text-[oklch(0.55_0.25_280)] focus:ring-[oklch(0.55_0.25_280)]"
+                className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-500"
                 disabled={isSaving}
               />
               <label htmlFor="activa" className="text-sm font-medium text-gray-700">
@@ -233,18 +231,19 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
           )}
 
           <div className="flex justify-end gap-3 pt-4">
-            <button
+            <Button
               type="button"
+              variant="outline"
               onClick={onClose}
               disabled={isSaving}
-              className="rounded-lg border border-gray-300 px-6 py-2 font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+              className="border-gray-300 text-gray-700 hover:bg-gray-100"
             >
               Cancelar
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={isSaving}
-              className="flex items-center gap-2 rounded-lg bg-gray-900 px-6 py-2 font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
+              className="bg-black text-white hover:bg-gray-800"
             >
               {isSaving ? (
                 <>
@@ -254,7 +253,7 @@ export function SedeFormModal({ isOpen, onClose, onSave, sede,  isSaving = false
               ) : (
                 sede ? "Guardar cambios" : "Crear sede"
               )}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

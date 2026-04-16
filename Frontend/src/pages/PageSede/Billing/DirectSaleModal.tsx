@@ -31,6 +31,8 @@ import {
   verifyDirectSaleInBillingReport,
 } from "./directSalesApi";
 import { handleFacturarRequest, type FacturarTipo } from "./facturarApi";
+import { crearCliente, type CrearClienteRequest } from "../../../components/Quotes/clientsService";
+import { rankClientsByRelevance, toClienteFromPartial, type RankedClient, getLastVisitLabel } from "../../../lib/client-search";
 
 interface DirectSaleModalProps {
   isOpen: boolean;
@@ -140,13 +142,29 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   const [products, setProducts] = useState<InventoryProduct[]>([]);
   const [cartByProductId, setCartByProductId] = useState<Record<string, CartItem>>({});
   const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>({});
+  const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState("");
   const [buyerSearch, setBuyerSearch] = useState("");
   const [knownClients, setKnownClients] = useState<GiftCardClientOption[]>([]);
   const [buyerOptions, setBuyerOptions] = useState<GiftCardClientOption[]>([]);
+  const [rankedSuggestions, setRankedSuggestions] = useState<RankedClient[]>([]);
   const [selectedBuyerId, setSelectedBuyerId] = useState("");
   const [isLoadingClients, setIsLoadingClients] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
+  const [isBuyerFocused, setIsBuyerFocused] = useState(false);
+  const [showClientModal, setShowClientModal] = useState(false);
+  const [newClient, setNewClient] = useState<CrearClienteRequest & { notas?: string }>({
+    nombre: "",
+    correo: "",
+    telefono: "",
+    cedula: "",
+    ciudad: "",
+    fecha_de_nacimiento: "",
+    sede_id: "",
+    notas: "",
+  });
+  const [isCreatingClient, setIsCreatingClient] = useState(false);
+  const [createClientError, setCreateClientError] = useState<string | null>(null);
   const [sellerSearch, setSellerSearch] = useState("");
   const [knownSellers, setKnownSellers] = useState<DirectSaleSellerOption[]>([]);
   const [sellerOptions, setSellerOptions] = useState<DirectSaleSellerOption[]>([]);
@@ -154,6 +172,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   const [isLoadingSellers, setIsLoadingSellers] = useState(false);
   const [sellersError, setSellersError] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(DEFAULT_PAYMENT_METHOD);
+  const [deliveryCostInput, setDeliveryCostInput] = useState("0");
   const [giftCardCode, setGiftCardCode] = useState("");
   const [paymentBreakdown, setPaymentBreakdown] = useState<Record<PaymentBreakdownMethod, number>>(
     buildEmptyPaymentBreakdown()
@@ -181,6 +200,17 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     "";
 
   const sedeId = user?.sede_id || sessionStorage.getItem("beaux-sede_id") || "";
+  const resolvedSedeId = useMemo(
+    () =>
+      String(
+        sedeId ||
+          user?.sede_id ||
+          sessionStorage.getItem("beaux-sede_id") ||
+          localStorage.getItem("beaux-sede_id") ||
+          ""
+      ).trim(),
+    [sedeId, user?.sede_id]
+  );
   const currency = String(user?.moneda || sessionStorage.getItem("beaux-moneda") || "USD").toUpperCase();
   const isCopCurrency = currency === "COP";
 
@@ -199,6 +229,14 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     () => cartItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [cartItems]
   );
+  const deliveryCost = useMemo(() => {
+    const parsed = Number.parseFloat(deliveryCostInput);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return 0;
+    }
+    return roundMoney(parsed);
+  }, [deliveryCostInput]);
+  const finalTotal = useMemo(() => roundMoney(cartTotal + deliveryCost), [cartTotal, deliveryCost]);
   const availablePaymentMethodOptions = useMemo(
     () => ALL_PAYMENT_METHOD_OPTIONS.filter((option) => isCopCurrency || option.value !== "addi"),
     [isCopCurrency]
@@ -218,7 +256,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     [availablePaymentBreakdownMethods, paymentBreakdown]
   );
   const hasCustomPaymentBreakdown = paymentBreakdownTotal > 0;
-  const paymentBreakdownDelta = roundMoney(cartTotal - paymentBreakdownTotal);
+  const paymentBreakdownDelta = roundMoney(finalTotal - paymentBreakdownTotal);
   const paymentBreakdownOverpaid = hasCustomPaymentBreakdown && paymentBreakdownDelta < -0.009;
   const paymentBreakdownIncomplete = hasCustomPaymentBreakdown && paymentBreakdownDelta > 0.009;
   const hasGiftCardInBreakdown = (paymentBreakdown.giftcard || 0) > 0;
@@ -247,6 +285,13 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     isClearingSale ||
     isVerifyingReport;
 
+  useEffect(() => {
+    setNewClient((prev) => ({
+      ...prev,
+      sede_id: resolvedSedeId,
+    }));
+  }, [resolvedSedeId]);
+
   const getSellerTypeLabel = (seller: DirectSaleSellerOption): string => {
     if (seller.tipo === "profesional") return "Profesional";
     if (seller.tipo === "recepcionista") return "Recepcionista";
@@ -272,6 +317,19 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     setSelectedBuyerId("");
     setIsLoadingClients(false);
     setClientsError(null);
+    setShowClientModal(false);
+    setNewClient({
+      nombre: "",
+      correo: "",
+      telefono: "",
+      cedula: "",
+      ciudad: "",
+      fecha_de_nacimiento: "",
+      sede_id: resolvedSedeId,
+      notas: "",
+    });
+    setIsCreatingClient(false);
+    setCreateClientError(null);
     setSellerSearch("");
     setKnownSellers([]);
     setSellerOptions([]);
@@ -279,6 +337,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     setIsLoadingSellers(false);
     setSellersError(null);
     setPaymentMethod(DEFAULT_PAYMENT_METHOD);
+    setDeliveryCostInput("0");
     setGiftCardCode("");
     setPaymentBreakdown(buildEmptyPaymentBreakdown());
     setSaleId(null);
@@ -334,6 +393,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
 
     if (!query) {
       setBuyerOptions([]);
+      setRankedSuggestions([]);
       setClientsError(null);
       setIsLoadingClients(false);
       return () => {
@@ -353,11 +413,19 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
 
         if (cancelled || requestId !== latestBuyerSearchRequestRef.current) return;
 
+        const merged = mergeClientOptions(mergeClientOptions([], knownClients), result.clients);
+        setKnownClients(merged);
+        const ranked = rankClientsByRelevance(
+          merged.map(toClienteFromPartial),
+          query,
+          10
+        );
+        setRankedSuggestions(ranked);
         setBuyerOptions(result.clients);
-        setKnownClients((prev) => mergeClientOptions(prev, result.clients));
       } catch (error) {
         if (cancelled || requestId !== latestBuyerSearchRequestRef.current) return;
         setBuyerOptions([]);
+        setRankedSuggestions([]);
         setClientsError(error instanceof Error ? error.message : "No se pudieron cargar clientes");
       } finally {
         if (!cancelled && requestId === latestBuyerSearchRequestRef.current) {
@@ -467,12 +535,20 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
   };
 
   const getQuantityInput = (productId: string): string => quantityInputs[productId] || "1";
+  const getPriceInput = (productId: string, fallback?: number): string =>
+    priceInputs[productId] ?? (fallback !== undefined ? String(fallback) : "");
 
   const parseInputQuantity = (value: string): number => {
     const parsed = Number.parseInt(value, 10);
     if (!Number.isFinite(parsed)) {
       return 0;
     }
+    return parsed;
+  };
+
+  const parseInputPrice = (value: string, fallback: number): number => {
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
     return parsed;
   };
 
@@ -510,7 +586,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
 
   const calculateProductsTotal = (): number => roundMoney(cartTotal);
 
-  const calculateFinalTotal = (): number => roundMoney(cartTotal);
+  const calculateFinalTotal = (): number => roundMoney(cartTotal + deliveryCost);
 
   const handleFacturar = async ({
     id,
@@ -571,6 +647,10 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
         fallbackInventoryId: product.productId,
         currency,
       });
+      const priceValue = parseInputPrice(
+        getPriceInput(product.productId, productDetail.unitPrice),
+        productDetail.unitPrice
+      );
 
       const currentQuantity = cartByProductId[product.productId]?.quantity || 0;
       const nextQuantity = currentQuantity + desiredQuantity;
@@ -590,11 +670,15 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
           name: productDetail.name,
           category: product.category,
           quantity: nextQuantity,
-          unitPrice: productDetail.unitPrice,
+          unitPrice: priceValue,
           stockAvailable: productDetail.stockAvailable,
         },
       }));
 
+      setPriceInputs((prev) => ({
+        ...prev,
+        [product.productId]: getPriceInput(product.productId, productDetail.unitPrice),
+      }));
       setQuantityInputs((prev) => ({ ...prev, [product.productId]: "1" }));
       setSuccess(`"${productDetail.name}" agregado (${desiredQuantity}).`);
     } catch (error) {
@@ -636,6 +720,23 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     }));
   };
 
+  const updateCartItemPrice = (productId: string, raw: string) => {
+    if (isCatalogLocked) {
+      setError("No puedes editar precios después de crear la venta.");
+      return;
+    }
+
+    const current = cartByProductId[productId];
+    if (!current) return;
+
+    const nextPrice = parseInputPrice(raw, current.unitPrice);
+    setPriceInputs((prev) => ({ ...prev, [productId]: raw }));
+    setCartByProductId((prev) => ({
+      ...prev,
+      [productId]: { ...current, unitPrice: nextPrice },
+    }));
+  };
+
   const removeProduct = async (productId: string) => {
     const current = cartByProductId[productId];
     if (!current) {
@@ -667,6 +768,73 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     }
   };
 
+  const handleCreateClient = async () => {
+    if (isClientLocked) {
+      setCreateClientError("No puedes cambiar el cliente una vez creada la venta.");
+      return;
+    }
+
+    const nombre = newClient.nombre?.trim();
+    if (!nombre) {
+      setCreateClientError("El nombre del cliente es requerido.");
+      return;
+    }
+
+    if (!token) {
+      setCreateClientError("No se encontró token de autenticación.");
+      return;
+    }
+
+    const targetSedeId = resolvedSedeId;
+    if (!targetSedeId) {
+      setCreateClientError("No se pudo determinar la sede activa.");
+      return;
+    }
+
+    setIsCreatingClient(true);
+    setCreateClientError(null);
+
+    try {
+      const result = await crearCliente(token, {
+        ...newClient,
+        nombre,
+        sede_id: targetSedeId,
+      });
+
+      const mappedId = String(result?.cliente?.cliente_id || result?.cliente?._id || "").trim();
+      if (!mappedId) {
+        throw new Error("El cliente se creó pero no se recibió el identificador.");
+      }
+
+      const mappedClient: GiftCardClientOption = {
+        id: mappedId,
+        nombre: result.cliente.nombre,
+        email: result.cliente.correo,
+        telefono: result.cliente.telefono,
+      };
+
+      setKnownClients((prev) => mergeClientOptions(prev, [mappedClient]));
+      setBuyerOptions((prev) => mergeClientOptions(prev, [mappedClient]));
+      setSelectedBuyerId(mappedClient.id);
+      setBuyerSearch(mappedClient.nombre);
+      setShowClientModal(false);
+      setNewClient({
+        nombre: "",
+        correo: "",
+        telefono: "",
+        cedula: "",
+        ciudad: "",
+        fecha_de_nacimiento: "",
+        sede_id: targetSedeId,
+        notas: "",
+      });
+    } catch (error) {
+      setCreateClientError(error instanceof Error ? error.message : "No se pudo crear el cliente.");
+    } finally {
+      setIsCreatingClient(false);
+    }
+  };
+
   const clearSale = async () => {
     setActionError(null);
 
@@ -679,6 +847,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
         await deleteAllDirectSaleProducts(token, saleId);
       }
       setCartByProductId({});
+      setDeliveryCostInput("0");
       setSaleId(null);
       setSuccess("Venta limpiada correctamente.");
     } catch (error) {
@@ -716,7 +885,8 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     const created = await createDirectSale({
       token,
       sedeId,
-      total: cartTotal,
+      total: calculateFinalTotal(),
+      deliveryCost,
       paymentMethod: safeInitialPaymentMethod,
       giftCardCode: safeInitialPaymentMethod === "giftcard" ? codigoGiftcard : undefined,
       items: toSaleLineItems(),
@@ -781,7 +951,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
               amount: roundMoney(paymentBreakdown[method] || 0),
             }))
             .filter((payment) => payment.amount > 0)
-        : [{ method: safeMainMethod, amount: roundMoney(cartTotal) }];
+        : [{ method: safeMainMethod, amount: roundMoney(finalTotal) }];
 
       if (plannedPayments.length === 0) {
         setError("Define al menos un pago para continuar.");
@@ -789,12 +959,12 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
       }
 
       const plannedTotal = roundMoney(plannedPayments.reduce((sum, payment) => sum + payment.amount, 0));
-      if (plannedTotal > roundMoney(cartTotal) + 0.009) {
-        setError(`El total de pagos (${formatCurrency(plannedTotal)}) no puede superar la venta (${formatCurrency(cartTotal)}).`);
+      if (plannedTotal > roundMoney(finalTotal) + 0.009) {
+        setError(`El total de pagos (${formatCurrency(plannedTotal)}) no puede superar la venta (${formatCurrency(finalTotal)}).`);
         return;
       }
-      if (plannedTotal < roundMoney(cartTotal) - 0.009) {
-        setError(`Falta asignar ${formatCurrency(roundMoney(cartTotal - plannedTotal))} para completar la venta.`);
+      if (plannedTotal < roundMoney(finalTotal) - 0.009) {
+        setError(`Falta asignar ${formatCurrency(roundMoney(finalTotal - plannedTotal))} para completar la venta.`);
         return;
       }
 
@@ -908,15 +1078,37 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
               Cliente (opcional)
             </label>
 
-            <div className="relative max-w-xl">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <Input
-                value={buyerSearch}
-                onChange={(event) => setBuyerSearch(event.target.value)}
-                placeholder="Buscar cliente por nombre..."
-                className="h-10 pl-9"
+            <div className="max-w-xl flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Input
+                  value={buyerSearch}
+                  onChange={(event) => setBuyerSearch(event.target.value)}
+                  onFocus={() => setIsBuyerFocused(true)}
+                  onBlur={() => setTimeout(() => setIsBuyerFocused(false), 120)}
+                  placeholder="Buscar cliente por nombre..."
+                  className="h-10 pl-9 pr-4"
+                  disabled={isBusy || isClientLocked}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateClientError(null);
+                  setNewClient((prev) => ({
+                    ...prev,
+                    nombre: buyerSearch.trim() || prev.nombre,
+                    sede_id: resolvedSedeId,
+                  }));
+                  setShowClientModal(true);
+                }}
                 disabled={isBusy || isClientLocked}
-              />
+                className="flex h-10 items-center justify-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-300"
+                title="Crear cliente"
+              >
+                <Plus className="mr-1 h-4 w-4" />
+                Crear
+              </button>
             </div>
 
             {selectedBuyer ? (
@@ -944,36 +1136,56 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
               </p>
             )}
 
-            {hasBuyerQuery ? (
+            {hasBuyerQuery && isBuyerFocused ? (
               <div className="mt-2 max-w-xl overflow-hidden rounded-lg border border-gray-200 bg-white">
                 <div className="max-h-56 overflow-y-auto">
-                  {!isLoadingClients && buyerOptions.length === 0 ? (
+                  {isLoadingClients && (
+                    <div className="flex items-center gap-2 px-3 py-3 text-xs text-gray-500">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Cargando clientes...
+                    </div>
+                  )}
+
+                  {!isLoadingClients && rankedSuggestions.length === 0 ? (
                     <p className="px-3 py-3 text-xs text-gray-500">
                       No hay resultados para la búsqueda actual.
                     </p>
                   ) : (
-                    buyerOptions.map((client) => {
-                      const isSelected = client.id === selectedBuyerId;
+                    rankedSuggestions.map((result) => {
+                      const client = result.cliente;
+                      const option = buyerOptions.find((c) => c.id === client.id) || {
+                        id: client.id,
+                        nombre: client.nombre,
+                        email: client.email,
+                        telefono: client.telefono,
+                        cedula: client.cedula,
+                      };
+                      const isSelected = option.id === selectedBuyerId;
 
                       return (
                         <button
-                          key={client.id}
+                          key={option.id}
                           type="button"
-                          onClick={() => setSelectedBuyerId(client.id)}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => setSelectedBuyerId(option.id)}
                           className={`flex w-full items-start justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 ${
                             isSelected ? "bg-gray-100" : "hover:bg-gray-50"
                           }`}
                           disabled={isBusy || isClientLocked}
                         >
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-gray-900">{client.nombre}</p>
-                            <p className="truncate text-xs text-gray-500">
-                              {client.email || client.telefono || "Sin datos de contacto"}
-                            </p>
-                          </div>
-                          {isSelected ? (
-                            <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
-                              Seleccionado
+                          <p className="truncate text-sm font-medium text-gray-900">{client.nombre}</p>
+                          <p className="truncate text-xs text-gray-700">
+                            {client.telefono || "—"} • {client.cedula || "—"}
+                          </p>
+                          {client.email ? (
+                            <p className="truncate text-[11px] text-gray-600">{client.email}</p>
+                          ) : null}
+                          <p className="text-[11px] text-gray-500">{getLastVisitLabel(client)}</p>
+                        </div>
+                        {isSelected ? (
+                          <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                            Seleccionado
                             </span>
                           ) : null}
                         </button>
@@ -1001,6 +1213,160 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
               </p>
             ) : null}
           </div>
+
+          {showClientModal ? (
+            <div
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4"
+              onClick={() => {
+                if (!isCreatingClient) {
+                  setShowClientModal(false);
+                }
+              }}
+            >
+              <div
+                className="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between border-b border-gray-200 px-4 py-3">
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-900">Nuevo Cliente</h3>
+                    <p className="text-xs text-gray-600">Completa los datos del nuevo cliente</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowClientModal(false)}
+                    disabled={isCreatingClient}
+                    className="rounded p-1 text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-300"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="max-h-[70vh] space-y-3 overflow-y-auto px-4 py-3">
+                  {createClientError ? (
+                    <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      {createClientError}
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-gray-700">Nombre completo *</label>
+                    <input
+                      type="text"
+                      value={newClient.nombre}
+                      onChange={(event) => setNewClient((prev) => ({ ...prev, nombre: event.target.value }))}
+                      placeholder="Ej: María González"
+                      required
+                      disabled={isCreatingClient}
+                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-gray-700">Cédula</label>
+                      <input
+                        type="text"
+                        value={newClient.cedula ?? ""}
+                        onChange={(event) => setNewClient((prev) => ({ ...prev, cedula: event.target.value }))}
+                        placeholder="123456789"
+                        disabled={isCreatingClient}
+                        className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-gray-700">Teléfono</label>
+                      <input
+                        type="tel"
+                        value={newClient.telefono ?? ""}
+                        onChange={(event) => setNewClient((prev) => ({ ...prev, telefono: event.target.value }))}
+                        placeholder="3001234567"
+                        disabled={isCreatingClient}
+                        className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-gray-700">Email</label>
+                    <input
+                      type="email"
+                      value={newClient.correo ?? ""}
+                      onChange={(event) => setNewClient((prev) => ({ ...prev, correo: event.target.value }))}
+                      placeholder="cliente@email.com"
+                      disabled={isCreatingClient}
+                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-gray-700">Ciudad</label>
+                    <input
+                      type="text"
+                      value={newClient.ciudad ?? ""}
+                      onChange={(event) => setNewClient((prev) => ({ ...prev, ciudad: event.target.value }))}
+                      placeholder="Bogotá"
+                      disabled={isCreatingClient}
+                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-gray-700">Fecha de nacimiento</label>
+                    <input
+                      type="date"
+                      value={newClient.fecha_de_nacimiento ?? ""}
+                      onChange={(event) =>
+                        setNewClient((prev) => ({ ...prev, fecha_de_nacimiento: event.target.value }))
+                      }
+                      disabled={isCreatingClient}
+                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-gray-700">
+                      Notas <span className="text-gray-400">(opcional)</span>
+                    </label>
+                    <textarea
+                      value={newClient.notas ?? ""}
+                      onChange={(event) => setNewClient((prev) => ({ ...prev, notas: event.target.value }))}
+                      rows={3}
+                      placeholder="Información adicional del cliente..."
+                      disabled={isCreatingClient}
+                      className="w-full resize-none rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 border-t border-gray-200 px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowClientModal(false)}
+                    disabled={isCreatingClient}
+                    className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateClient}
+                    disabled={isCreatingClient}
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {isCreatingClient ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Creando...
+                      </>
+                    ) : (
+                      "Crear Cliente"
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <div className="border-b border-gray-200 px-5 py-4">
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600">
@@ -1187,6 +1553,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                   {filteredProducts.map((product) => {
                     const isValidating = validatingProductId === product.productId;
                     const quantityValue = getQuantityInput(product.productId);
+                    const priceValue = getPriceInput(product.productId, product.unitPrice);
                     return (
                       <div key={product.productId} className="rounded-lg border border-gray-200 p-3">
                         <div className="flex items-start justify-between gap-2">
@@ -1200,20 +1567,36 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                           </div>
                         </div>
 
-                        <div className="mt-3 flex items-center gap-2">
-                          <Input
-                            type="number"
-                            min={1}
-                            value={quantityValue}
-                            onChange={(event) =>
-                              setQuantityInputs((prev) => ({
-                                ...prev,
-                                [product.productId]: event.target.value,
-                              }))
-                            }
-                            className="h-9 w-20"
-                            disabled={isCatalogLocked || isBusy}
-                          />
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              min={1}
+                              value={quantityValue}
+                              onChange={(event) =>
+                                setQuantityInputs((prev) => ({
+                                  ...prev,
+                                  [product.productId]: event.target.value,
+                                }))
+                              }
+                              className="h-9 w-20"
+                              disabled={isCatalogLocked || isBusy}
+                            />
+                            <Input
+                              type="number"
+                              min={0}
+                              step="100"
+                              value={priceValue}
+                              onChange={(event) =>
+                                setPriceInputs((prev) => ({
+                                  ...prev,
+                                  [product.productId]: event.target.value,
+                                }))
+                              }
+                              className="h-9 w-28"
+                              disabled={isCatalogLocked || isBusy}
+                            />
+                          </div>
                           <Button
                             className="h-9 flex-1 bg-black text-white hover:bg-gray-800"
                             onClick={() => {
@@ -1248,11 +1631,7 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                 <ShoppingCart className="h-5 w-5" />
                 Resumen de venta
               </h3>
-              {saleId ? (
-                <p className="mt-1 text-xs text-gray-600">Venta creada: {saleId}</p>
-              ) : (
-                <p className="mt-1 text-xs text-gray-600">Aún no se ha creado la venta en backend.</p>
-              )}
+              {saleId ? <p className="mt-1 text-xs text-gray-600">Venta creada: {saleId}</p> : null}
             </div>
 
             <div className="p-4">
@@ -1305,6 +1684,15 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
                               >
                                 +
                               </Button>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="100"
+                                value={getPriceInput(item.productId, item.unitPrice)}
+                                onChange={(event) => updateCartItemPrice(item.productId, event.target.value)}
+                                className="h-9 w-24"
+                                disabled={isBusy}
+                              />
                             </div>
                           )}
 
@@ -1331,9 +1719,37 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
             </div>
 
             <div className="border-t border-gray-200 bg-white p-4">
-              <div className="mb-4 flex items-center justify-between">
-                <p className="text-sm text-gray-700">Total</p>
-                <p className="text-2xl font-bold text-gray-900">{formatCurrency(cartTotal)}</p>
+              <div className="mb-4">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600">
+                  Costo de domicilio (opcional)
+                </label>
+                <div className="mt-1 flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={deliveryCostInput}
+                    onChange={(event) => setDeliveryCostInput(event.target.value)}
+                    disabled={isBusy || isCatalogLocked}
+                    className="h-9 w-36"
+                  />
+                  <p className="text-xs text-gray-500">Se suma al total y se factura.</p>
+                </div>
+              </div>
+
+              <div className="mb-4 space-y-2">
+                <div className="flex items-center justify-between text-sm text-gray-700">
+                  <span>Subtotal productos</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(cartTotal)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm text-gray-700">
+                  <span>Domicilio</span>
+                  <span className="font-semibold text-gray-900">{formatCurrency(deliveryCost)}</span>
+                </div>
+                <div className="flex items-center justify-between pt-2">
+                  <p className="text-sm font-semibold text-gray-800">Total a cobrar</p>
+                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(finalTotal)}</p>
+                </div>
               </div>
 
               <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">

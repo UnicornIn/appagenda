@@ -1,4 +1,4 @@
-// app/comisiones/page.tsx
+// Módulo de Comisiones para ADMIN_SEDE: contenedor principal de la vista.
 "use client";
 
 import { useState, useCallback } from "react";
@@ -22,7 +22,7 @@ export default function ComisionesPage() {
   }, []);
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">
       <Sidebar />
 
       <div className="flex-1 overflow-auto">

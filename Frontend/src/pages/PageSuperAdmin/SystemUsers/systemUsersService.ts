@@ -61,6 +61,14 @@ const normalizeRole = (role: string | null | undefined) =>
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
 
+const normalizeCommissionValue = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  if (parsed < 0 || parsed > 100) return null;
+  return Math.round(parsed * 100) / 100;
+};
+
 const isFallbackCandidate = (response: Response) => response.status === 404 || response.status === 405;
 
 const SEDES_PERMITIDAS_UNSUPPORTED_MESSAGE =
@@ -164,6 +172,7 @@ const mapToSystemUser = (rawUser: any): SystemUser => {
     nombre: String(rawUser?.nombre ?? rawUser?.name ?? ""),
     email: String(rawUser?.email ?? rawUser?.correo_electronico ?? ""),
     role: resolveRoleFromUserRecord(rawUser),
+    comision_productos: normalizeCommissionValue(rawUser?.comision_productos),
     sede_id: rawUser?.sede_id ?? null,
     sede_nombre: rawUser?.sede_nombre ?? rawUser?.nombre_local ?? null,
     sedes_permitidas: Array.isArray(rawUser?.sedes_permitidas)
@@ -215,6 +224,11 @@ const toSystemUserCreateRequest = (payload: CreateSystemUserPayload): Record<str
     role: toLegacySystemUserRole(payload.role),
     activo: payload.activo ?? true,
   };
+
+  const comisionProductos = normalizeCommissionValue(payload.comision_productos);
+  if (comisionProductos !== null) {
+    requestData.comision_productos = comisionProductos;
+  }
 
   const sedeId = payload.sede_id?.trim();
   if (sedeId) {
@@ -285,6 +299,7 @@ const tryCreateWithAuthRegister = async (
           especialidades: payload.especialidades || [],
           activo: payload.activo ?? true,
           user_type: "system",
+          comision_productos: normalizeCommissionValue(payload.comision_productos),
         },
       };
     }
@@ -321,6 +336,13 @@ const tryPatchAuthUser = async (
       sede_id: payload.sede_id?.trim() || null,
       activo: payload.activo ?? true,
     };
+
+    const comisionProductos = normalizeCommissionValue(payload.comision_productos);
+    if (comisionProductos !== null) {
+      requestDataBase.comision_productos = comisionProductos;
+    } else if (payload.comision_productos === null) {
+      requestDataBase.comision_productos = null;
+    }
 
     const password = payload.password?.trim();
     if (password) {
@@ -396,7 +418,9 @@ const tryPatchAuthUser = async (
 
 const syncSedesPermitidasAfterCreate = async (token: string, payload: CreateSystemUserPayload) => {
   const sedesPermitidas = normalizeSedesPermitidas(payload);
-  if (sedesPermitidas.length === 0) return;
+  const comisionProductos = normalizeCommissionValue(payload.comision_productos);
+  const shouldPatch = sedesPermitidas.length > 0 || payload.comision_productos !== undefined;
+  if (!shouldPatch) return;
 
   const targetEmail = payload.email.trim().toLowerCase();
   if (!targetEmail) return;
@@ -428,6 +452,7 @@ const syncSedesPermitidasAfterCreate = async (token: string, payload: CreateSyst
     ...payload,
     password: undefined,
     sedes_permitidas: sedesPermitidas,
+    comision_productos: payload.comision_productos ?? comisionProductos ?? null,
   });
 
   return patchResult?.warning;
