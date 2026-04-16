@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
 
 
@@ -88,3 +88,11 @@ class NotaCliente(BaseModel):
     nota: str
     fecha: datetime
     autor: str
+
+# ─── MODELO ─────────────────────────────────────────────────────
+CalificacionValor = Literal["excelente", "bueno", "regular", "malo", "no_se_atiende"]
+
+class CalificacionRequest(BaseModel):
+    calificacion: CalificacionValor
+    cita_id: Optional[str] = None   # para trazabilidad
+    nota: Optional[str] = ""        # comentario libre opcion

@@ -25,7 +25,8 @@ from app.database.mongo import (
     collection_block,
     collection_card,
     collection_commissions,
-    collection_products
+    collection_products,
+    collection_pre_bookings
 )
 from app.cash.utils_cash import fecha_a_datetime
 from app.auth.routes import get_current_user
@@ -86,6 +87,195 @@ async def resolve_cita_by_id(cita_id: str) -> Optional[dict]:
         return cita
     except Exception:
         return None
+
+# ============================================================
+# ENDPOINT PRE-RESERVAS
+# ============================================================
+from pydantic import BaseModel, Field
+
+ROLES_ADMIN = {"admin", "admin_sede", "call_center", "recepcionista"}
+DURACION_MINIMA = 5
+DURACION_MAXIMA = 60
+DURACION_DEFAULT = 10
+
+class PreReservaRequest(BaseModel):
+    sede_id: str
+    profesional_id: str
+    fecha: str
+    hora_inicio: str
+    duracion_minutos: int = Field(
+        default=DURACION_DEFAULT,
+        ge=DURACION_MINIMA,
+        le=DURACION_MAXIMA,
+        description="Minutos que dura la pre-reserva (5–60). Solo admins pueden superar 10."
+    )
+    notas: str = Field(default="", max_length=200)
+
+
+@router.post("/pre-reservar")
+async def pre_reservar_slot(
+    datos: PreReservaRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    rol = current_user.get("rol", "")
+    es_admin = rol in ROLES_ADMIN
+
+    # Solo admins pueden poner más de 10 minutos
+    duracion = datos.duracion_minutos
+    if duracion > DURACION_DEFAULT and not es_admin:
+        duracion = DURACION_DEFAULT  # silenciosamente lo baja, no rompe el flujo
+
+    # Validar formato fecha/hora
+    try:
+        datetime.strptime(f"{datos.fecha} {datos.hora_inicio}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Formato de fecha u hora inválido. Usa YYYY-MM-DD y HH:MM")
+
+    # Limpiar pre-reservas expiradas de este slot antes de verificar
+    await collection_pre_bookings.delete_many({
+        "profesional_id": datos.profesional_id,
+        "sede_id": datos.sede_id,
+        "fecha": datos.fecha,
+        "hora_inicio": datos.hora_inicio,
+        "expira_en": {"$lt": datetime.utcnow()}
+    })
+
+    # Verificar cita confirmada
+    conflicto_cita = await collection_citas.find_one({
+        "profesional_id": datos.profesional_id,
+        "sede_id": datos.sede_id,
+        "fecha": datos.fecha,
+        "hora_inicio": datos.hora_inicio,
+        "estado": {"$nin": ["cancelada", "cancelado"]}
+    })
+    if conflicto_cita:
+        raise HTTPException(status_code=409, detail="Este horario ya tiene una cita confirmada")
+
+    # Verificar pre-reserva activa (ya limpiamos las expiradas arriba)
+    pre_reserva_activa = await collection_pre_bookings.find_one({
+        "profesional_id": datos.profesional_id,
+        "sede_id": datos.sede_id,
+        "fecha": datos.fecha,
+        "hora_inicio": datos.hora_inicio,
+    })
+    if pre_reserva_activa:
+        reservado_por = pre_reserva_activa.get("reservado_por", "otro usuario")
+        expira_en = pre_reserva_activa.get("expira_en")
+        minutos_restantes = max(0, round((expira_en - datetime.utcnow()).total_seconds() / 60)) if expira_en else "?"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Horario en negociación por {reservado_por}. Libera en ~{minutos_restantes} min."
+        )
+
+    ahora = datetime.utcnow()
+    resultado = await collection_pre_bookings.insert_one({
+        "sede_id": datos.sede_id,
+        "profesional_id": datos.profesional_id,
+        "fecha": datos.fecha,
+        "hora_inicio": datos.hora_inicio,
+        "reservado_por": current_user.get("email"),
+        "rol_reservador": rol,
+        "notas": datos.notas,
+        "duracion_minutos": duracion,
+        "creado_en": ahora,
+        "expira_en": ahora + timedelta(minutes=duracion)
+    })
+
+    expira_en_local = ahora + timedelta(minutes=duracion)
+
+    return {
+        "success": True,
+        "pre_reserva_id": str(resultado.inserted_id),
+        "duracion_minutos": duracion,
+        "expira_en": expira_en_local.strftime("%H:%M:%S UTC"),
+        "message": f"Slot bloqueado por {duracion} minutos."
+    }
+
+
+@router.delete("/pre-reservar/{pre_reserva_id}")
+async def liberar_pre_reserva(
+    pre_reserva_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Libera manualmente una pre-reserva. Admins pueden liberar cualquiera; otros solo la propia."""
+    try:
+        oid = ObjectId(pre_reserva_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID de pre-reserva inválido")
+
+    pre_reserva = await collection_pre_bookings.find_one({"_id": oid})
+    if not pre_reserva:
+        # Ya expiró o no existe — para el frontend esto es éxito igual
+        return {"success": True, "message": "Pre-reserva no encontrada (ya liberada o expirada)"}
+
+    es_admin = current_user.get("rol") in ROLES_ADMIN
+    es_propietario = pre_reserva.get("reservado_por") == current_user.get("email")
+
+    if not es_admin and not es_propietario:
+        raise HTTPException(status_code=403, detail="Solo puedes liberar tus propias pre-reservas")
+
+    await collection_pre_bookings.delete_one({"_id": oid})
+    return {"success": True, "message": "Pre-reserva liberada correctamente"}
+
+
+@router.get("/disponibilidad")
+async def obtener_disponibilidad(
+    sede_id: str,
+    fecha: str,
+    profesional_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    # Limpiar globalmente las pre-reservas expiradas de esa sede/fecha antes de responder
+    await collection_pre_bookings.delete_many({
+        "sede_id": sede_id,
+        "fecha": fecha,
+        "expira_en": {"$lt": datetime.utcnow()}
+    })
+
+    filtro_citas = {
+        "sede_id": sede_id,
+        "fecha": fecha,
+        "estado": {"$nin": ["cancelada", "cancelado"]}
+    }
+    filtro_pre = {"sede_id": sede_id, "fecha": fecha}
+
+    if profesional_id:
+        filtro_citas["profesional_id"] = profesional_id
+        filtro_pre["profesional_id"] = profesional_id
+
+    citas = await collection_citas.find(
+        filtro_citas,
+        {"hora_inicio": 1, "profesional_id": 1}
+    ).to_list(None)
+
+    pre_reservas = await collection_pre_bookings.find(
+        filtro_pre,
+        {"hora_inicio": 1, "profesional_id": 1, "expira_en": 1, "reservado_por": 1, "duracion_minutos": 1}
+    ).to_list(None)
+
+    ahora = datetime.utcnow()
+
+    slots_ocupados = [
+        {
+            "hora": c["hora_inicio"],
+            "profesional_id": c.get("profesional_id"),
+            "tipo": "confirmada"
+        }
+        for c in citas
+    ] + [
+        {
+            "hora": p["hora_inicio"],
+            "profesional_id": p.get("profesional_id"),
+            "tipo": "temporal",
+            "pre_reserva_id": str(p["_id"]),
+            "reservado_por": p.get("reservado_por"),
+            "minutos_restantes": max(0, round((p["expira_en"] - ahora).total_seconds() / 60)) if p.get("expira_en") else 0,
+            "duracion_minutos": p.get("duracion_minutos", DURACION_DEFAULT)
+        }
+        for p in pre_reservas
+    ]
+
+    return {"success": True, "slots_ocupados": slots_ocupados}
 
 # ============================================================
 # ENDPOINT OBTENER CITAS (con cálculos en tiempo real) con fecha

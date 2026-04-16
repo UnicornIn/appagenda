@@ -24,6 +24,7 @@ collection_clients = db["clients"]
 collection_servicios = db["services"]
 collection_locales = db["branch"]
 collection_productos = db["products"]
+collection_contadores = db["product_counters"]
 collection_pedidos = db["orders"]
 collection_salidas = db["exits"]
 collection_card = db["fichas"]
@@ -37,5 +38,6 @@ collection_cash_expenses = db["cash_expenses"]
 collection_cash_ingresos = db["cash_ingresos"]
 collection_cash_closures = db["cash_closures"]
 collection_giftcards = db["giftcards"]
+collection_pre_bookings = db["pre_bookings"]  # Nueva colección para pre-reservas
 def connect_to_mongo():
     pass

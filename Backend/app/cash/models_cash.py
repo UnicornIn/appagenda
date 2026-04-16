@@ -27,6 +27,7 @@ class MetodoPagoIngreso(str, Enum):
     GIFTCARD = "giftcard"
     ADDI = "addi"
     ABONOS = "abonos"
+    ABONO_TRANSFERENCIA = "abono_transferencia"   # ← nuevo
     OTROS = "otros"
     DESCUENTO_POR_NOMINA = "descuento_por_nomina"
 

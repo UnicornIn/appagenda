@@ -48,7 +48,8 @@ MAPEO_METODOS_PAGO = {
     "online"                                : "otros",
     "caja_fuerte"                           : "otros",
     "otro"                                  : "otros",
-    "descuento_por_nomina"                 : "descuento_por_nomina",
+    "descuento_por_nomina"                  : "descuento_por_nomina",
+    "abono_transferencia"                   : "abono_transferencia",
 
     # Variantes del sistema migrado (texto del CSV ya sin tildes)
     "tarjeta de credito"                    : "tarjeta_credito",
@@ -71,6 +72,7 @@ def _metodos_pago_base() -> Dict[str, float]:
         "tarjeta_credito": 0,
         "tarjeta_debito": 0,
         "pos": 0,
+        "abono_transferencia": 0,   # ← nuevo
         "transferencia": 0,
         "link_de_pago": 0,
         "giftcard": 0,
@@ -1226,6 +1228,7 @@ async def calcular_resumen_dia(
             "tarjeta_credito"      : ingresos_discriminados.get("tarjeta_credito", 0),
             "tarjeta_debito"       : ingresos_discriminados.get("tarjeta_debito",  0),
             "abonos"               : ingresos_discriminados.get("abonos_informativos", 0),
+            "abono_transferencia"  : ingresos_discriminados.get("abono_transferencia", 0),  # ← nuevo
             "link_de_pago"         : ingresos_discriminados.get("link_de_pago",    0),
             "giftcard"             : ingresos_discriminados.get("giftcard",        0),
             "addi"                 : ingresos_discriminados.get("addi",            0),
