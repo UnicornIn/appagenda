@@ -5,6 +5,7 @@ from bson import ObjectId
 import random
 import asyncio
 from datetime import timedelta
+from pydantic import BaseModel, Field
 
 from app.database.mongo import collection_giftcards
 from app.giftcards.routes_giftcards import _estado_giftcard
@@ -29,6 +30,10 @@ from app.database.mongo import (
 from app.auth.routes import get_current_user
 
 router = APIRouter()
+
+class FacturarRequest(BaseModel):
+    descuento_porcentaje: Optional[float] = 0   # ej: 10 = 10%
+    descuento_motivo: Optional[str] = ""
 
 def _normalizar_categoria(valor: Optional[str]) -> str:
     """Normaliza nombre de categoría para comparación robusta."""
@@ -101,6 +106,7 @@ def generar_identificador() -> str:
 async def facturar_cita_o_venta(
     id: str,
     tipo: str = Query("cita", regex="^(cita|venta)$"),
+    body: FacturarRequest = FacturarRequest(),   # ← opcional, default sin descuento
     current_user: dict = Depends(get_current_user)
 ):
     print(f"🔍 Facturar invocada por {current_user.get('email')} (rol={current_user.get('rol')})")
@@ -333,9 +339,17 @@ async def facturar_cita_o_venta(
     # ====================================
     total_productos_servicios = round(sum(item["subtotal"] for item in items), 2)
     costo_domicilio = round(float(documento.get("domicilio", 0) or 0), 2)
-    total_final = round(total_productos_servicios + costo_domicilio, 2)
+
+    # ⭐ DESCUENTO OPCIONAL
+    descuento_porcentaje = round(float(body.descuento_porcentaje or 0), 2)
+    descuento_porcentaje = max(0.0, min(descuento_porcentaje, 100.0))  # clamp 0-100
+    descuento_valor = round((total_productos_servicios * descuento_porcentaje) / 100, 2)
+    descuento_motivo = (body.descuento_motivo or "").strip() or None
+
+    total_final = round(total_productos_servicios - descuento_valor + costo_domicilio, 2)
     valor_comision_total = round(total_comision_servicios + total_comision_productos, 2)
-    print(f"💰 Total: ${total_final} {moneda_sede} | Comisión: ${valor_comision_total}")
+
+    print(f"💰 Total: ${total_final} {moneda_sede} | Descuento: {descuento_porcentaje}% (-${descuento_valor}) | Comisión: ${valor_comision_total}")
 
     # ====================================
     # 6️⃣ GENERAR NÚMEROS ÚNICOS
@@ -363,9 +377,9 @@ async def facturar_cita_o_venta(
 
     desglose_pagos["total"] = round(total_pagado, 2)
 
-    if round(total_pagado, 2) != round(total_final, 2):
+    if round(total_pagado, 2) < round(total_final, 2):
         raise ValueError(
-            f"Inconsistencia de pagos: pagado={total_pagado}, total_factura={total_final}"
+            f"Pago insuficiente: pagado={total_pagado}, total_factura={total_final}"
         )
 
     # ====================================
@@ -391,6 +405,10 @@ async def facturar_cita_o_venta(
             "desglose_pagos": desglose_pagos,
             "profesional_id": profesional_id,
             "profesional_nombre": profesional_nombre,
+            "descuento_porcentaje": descuento_porcentaje,  # ⭐
+            "descuento_valor": descuento_valor,             # ⭐
+            "descuento_motivo": descuento_motivo,           # ⭐
+            "total": total_final,
             "numero_comprobante": numero_comprobante,
             "facturado_por": current_user.get("email")
         }
@@ -450,6 +468,9 @@ async def facturar_cita_o_venta(
         "cedula_cliente": cedula_cliente,
         "email_cliente": email_cliente,
         "telefono_cliente": telefono_cliente,
+        "descuento_porcentaje": descuento_porcentaje,   # ⭐
+        "descuento_valor": descuento_valor,              # ⭐
+        "descuento_motivo": descuento_motivo,            # ⭐
         "total": total_final,
         "comprobante_de_pago": "Factura",
         "numero_comprobante": numero_comprobante,
@@ -866,6 +887,9 @@ async def facturar_cita_o_venta(
         "detalles": {
             "servicios": sum(item["subtotal"] for item in items if item["tipo"] == "servicio"),
             "productos": sum(item["subtotal"] for item in items if item["tipo"] == "producto"),
+            "descuento_porcentaje": descuento_porcentaje,  # ⭐
+            "descuento_valor": descuento_valor,             # ⭐
+            "descuento_motivo": descuento_motivo,           # ⭐
             "comision_servicios": total_comision_servicios,
             "comision_productos": total_comision_productos,
             "comision_total": valor_comision_total,

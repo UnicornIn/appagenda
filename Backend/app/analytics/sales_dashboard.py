@@ -16,23 +16,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ventas", tags=["Dashboard de Ventas"])
 
 
+from zoneinfo import ZoneInfo
+
 def get_date_range(
     period: str,
     start_date_custom: Optional[str] = None,
-    end_date_custom: Optional[str] = None
+    end_date_custom: Optional[str] = None,
+    zona_horaria: str = "America/Bogota"  # 👈 NUEVO
 ) -> tuple[datetime, datetime]:
-    """
-    Calcula rango de fechas para métricas financieras.
-    
-    Períodos válidos:
-    - today: Hoy (caja diaria) ⚠️
-    - last_7_days: Últimos 7 días (RECOMENDADO) ✅
-    - last_30_days: Últimos 30 días (estratégico) ✅
-    - month: Mes actual (contable) ✅
-    - custom: Rango personalizado (requiere start_date y end_date) 🔧
-    """
-    today = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(zona_horaria)
+    now = datetime.now(tz)  # 👈 USA TZ DE LA SEDE, NO UTC
+
+    today_start = now.replace(hour=0,  minute=0,  second=0,  microsecond=0)
+    today       = now.replace(hour=23, minute=59, second=59, microsecond=999999)
 
     if period == "custom":
         if not start_date_custom or not end_date_custom:
@@ -40,47 +38,40 @@ def get_date_range(
                 "Para período 'custom' debe proporcionar 'start_date' y 'end_date' "
                 "en formato DD-MM-YYYY"
             )
-        
         try:
             start = datetime.strptime(start_date_custom, "%d-%m-%Y").replace(
-                hour=0, minute=0, second=0, microsecond=0
+                hour=0, minute=0, second=0, microsecond=0, tzinfo=tz  # 👈 AGREGA tzinfo=tz
             )
             end = datetime.strptime(end_date_custom, "%d-%m-%Y").replace(
-                hour=23, minute=59, second=59, microsecond=999999
+                hour=23, minute=59, second=59, microsecond=999999, tzinfo=tz  # 👈 AGREGA tzinfo=tz
             )
-            
+
             if start > end:
                 raise ValueError("La fecha de inicio no puede ser posterior a la fecha de fin")
-            
-            # Validar que no sea un rango muy largo (máximo 365 días)
+
             dias = (end - start).days + 1
             if dias > 365:
                 raise ValueError("El rango personalizado no puede superar 365 días")
-            
+
             return start, end
-        
+
         except ValueError as e:
             if "does not match format" in str(e):
-                raise ValueError(
-                    "Formato de fecha inválido. Use DD-MM-YYYY (ej: 01-12-2024)"
-                )
+                raise ValueError("Formato de fecha inválido. Use DD-MM-YYYY (ej: 01-12-2024)")
             raise
 
     if period == "today":
         return today_start, today
-    
+
     if period == "last_7_days":
-        start = today_start - timedelta(days=6)
-        return start, today
-    
+        return today_start - timedelta(days=6), today
+
     if period == "last_30_days":
-        start = today_start - timedelta(days=29)
-        return start, today
+        return today_start - timedelta(days=29), today
 
     if period == "month":
-        start = today_start.replace(day=1)
-        return start, today
-    
+        return today_start.replace(day=1), today
+
     raise ValueError(
         f"Período no soportado: {period}. "
         f"Use: 'today', 'last_7_days', 'last_30_days', 'month', 'custom'"
@@ -166,6 +157,7 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
                     "tarjeta_credito": 0,
                     "tarjeta_debito": 0,
                     "descuento_nomina": 0,
+                    "abono_transferencia"
                     "abonos": 0
                 }
             }
@@ -195,7 +187,7 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
                 metricas_por_moneda[moneda]["ventas_productos"] += subtotal
         
         # Métodos de pago desde desglose_pagos
-        for metodo in ["efectivo", "transferencia","tarjeta", "tarjeta_credito", "tarjeta_debito", "link_de_pago", "giftcard", "addi", "abonos", "descuento_nomina", "otros"]:
+        for metodo in ["efectivo", "transferencia","tarjeta", "tarjeta_credito", "tarjeta_debito", "link_de_pago", "giftcard", "addi", "abonos","abono_transferencia", "descuento_nomina", "otros"]:
             valor = desglose_pagos.get(metodo, 0)
             if valor > 0:
                 metricas_por_moneda[moneda]["metodos_pago"][metodo] += valor
@@ -412,8 +404,15 @@ async def ventas_dashboard(
                     sede_id = user_sede_id
         
         # ========= CALCULAR RANGOS =========
+        # Obtener zona horaria de la sede
+        zona_horaria = "America/Bogota"  # default
+        if sede_id:
+            from app.database.mongo import collection_locales# ajusta si tu import es diferente
+            sede_doc = await collection_locales.find_one({"_id": sede_id})
+            if sede_doc:
+                zona_horaria = sede_doc.get("zona_horaria", "America/Bogota")
         try:
-            start_date_dt, end_date_dt = get_date_range(period, start_date, end_date)
+            start_date_dt, end_date_dt = get_date_range(period, start_date, end_date, zona_horaria) # 👈 PASA ZONA HORARIA
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         

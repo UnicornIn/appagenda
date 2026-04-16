@@ -221,6 +221,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
     #
     estilista_doc   = None
     profesional_id_guardado = None
+    nombre_vendedor = (venta.vendido_por or "").strip()
 
     if venta.profesional_id:
         estilista_doc = await collection_estilista.find_one(
@@ -231,14 +232,33 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
                 status_code=404,
                 detail=f"Estilista con ID '{venta.profesional_id}' no encontrado"
             )
-        profesional_id_guardado = venta.profesional_id
-        nombre_vendedor = (
-            estilista_doc.get("nombre", "") + " " + estilista_doc.get("apellido", "")
-        ).strip()
-    elif venta.vendido_por and venta.vendido_por.strip():
-        nombre_vendedor = venta.vendido_por.strip()
+
+    # 2️⃣ Viene solo el nombre → intentar resolver en BD por la misma sede
+    elif nombre_vendedor:
+        # Búsqueda directa en Mongo con $expr para concatenar nombre + apellido
+        estilista_doc = await collection_estilista.find_one({
+            "sede_id": venta.sede_id,
+            "$expr": {
+                "$eq": [
+                    {"$toLower": {"$trim": {"input": {"$concat": ["$nombre", " ", "$apellido"]}}}},
+                    nombre_vendedor.lower()
+                ]
+            }
+        })
+        if estilista_doc:
+            print(f"🔍 Estilista resuelto por nombre: {nombre_vendedor} → {estilista_doc.get('profesional_id')}")
+        else:
+            # No se encontró → se guarda como nombre libre sin comisión enlazada
+            print(f"⚠️  Nombre '{nombre_vendedor}' no coincide con ningún estilista en sede {venta.sede_id}")
+        
+    # 3️⃣ Fallback: usuario autenticado
     else:
         nombre_vendedor = nombre_usuario
+
+    # ─── Asignar valores finales ─────────────────────────────────────
+    if estilista_doc:
+        profesional_id_guardado = estilista_doc.get("profesional_id")
+        nombre_vendedor = f"{estilista_doc.get('nombre', '')} {estilista_doc.get('apellido', '')}".strip()
 
     # ─── Determina si aplica comisión de productos ──────────────────
     #

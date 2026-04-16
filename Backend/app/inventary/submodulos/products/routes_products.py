@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from app.inventary.submodulos.products.models import Producto
-from app.database.mongo import collection_productos, collection_inventarios
+from app.database.mongo import collection_productos, collection_inventarios, collection_contadores
 from app.auth.routes import get_current_user
 from datetime import datetime
 from typing import List, Optional, Dict
 from bson import ObjectId
+import re
 
 router = APIRouter(prefix="/productos")
 
@@ -28,16 +29,34 @@ def get_precio_moneda(producto: dict, moneda: str = "COP") -> float:
 
 
 # =========================================================
+# ⭐ Helper: generar ID secuencial atómico
+# =========================================================
+async def generar_id_producto() -> str:
+    """
+    Incrementa atómicamente el contador y retorna un ID tipo P001, P002...
+    Usa find_one_and_update con $inc para garantizar que dos requests
+    simultáneos nunca obtengan el mismo número (operación atómica en MongoDB).
+    """
+    resultado = await collection_contadores.find_one_and_update(
+        {"_id": "productos"},
+        {"$inc": {"secuencia": 1}},
+        upsert=True,
+        return_document=True
+    )
+    numero = resultado["secuencia"]
+    # P001...P999 y luego P1000, P1001 sin truncar
+    return f"P{numero:03d}" if numero < 1000 else f"P{numero}"
+
+
+# =========================================================
 # ⭐ Helper: resolver comisión con fallback sede → global
 # =========================================================
 async def resolver_comision_producto(producto_id: str, sede_id: Optional[str] = None) -> float:
     """
-    Resuelve el porcentaje de comisión de un producto aplicando la siguiente prioridad:
-      1. comision definida en el inventario de esa sede  (override por sede)
-      2. comision global del producto                    (fallback)
+    Prioridad:
+      1. comision del inventario de la sede  (override)
+      2. comision global del producto        (fallback)
       3. 0 si no hay nada definido
-
-    Esto permite que cada sede tenga su propio % sin modificar el producto global.
     """
     if sede_id:
         inventario = await collection_inventarios.find_one(
@@ -48,7 +67,6 @@ async def resolver_comision_producto(producto_id: str, sede_id: Optional[str] = 
 
     producto = await collection_productos.find_one({"id": producto_id})
     if not producto:
-        # Intentar por _id como fallback
         try:
             producto = await collection_productos.find_one({"_id": ObjectId(producto_id)})
         except Exception:
@@ -71,8 +89,8 @@ async def crear_producto(
     """
     Crea un producto global con precios en múltiples monedas.
     Solo super_admin puede crear productos.
-    ⭐ 'comision' es el porcentaje global; cada sede puede sobreescribirlo
-       desde el inventario con PATCH /inventarios/{sede_id}/{producto_id}/comision
+    ⭐ Genera automáticamente un ID secuencial tipo P007, P008...
+       partiendo del máximo encontrado en la BD (inicializado por el script).
     """
     rol = current_user.get("rol")
     if rol != "super_admin":
@@ -87,6 +105,10 @@ async def crear_producto(
         raise HTTPException(status_code=400, detail="Ya existe un producto con ese nombre o código")
 
     data = producto.dict(exclude_none=True)
+
+    # ⭐ Generar ID atómico — nunca habrá colisiones
+    data["id"] = await generar_id_producto()
+
     data["fecha_creacion"] = datetime.now()
     data["creado_por"] = current_user["email"]
 
@@ -111,8 +133,7 @@ async def listar_productos(
 ):
     """
     Lista productos disponibles.
-    ⭐ Si se pasa sede_id, el campo 'comision' refleja el % de esa sede
-       (override de inventario si existe, fallback al global del producto).
+    ⭐ Si se pasa sede_id, el campo 'comision' refleja el % de esa sede.
     """
     rol = current_user.get("rol")
     if rol not in ["admin_sede", "admin_franquicia", "super_admin", "estilista", "call_center", "recepcionista"]:
@@ -124,8 +145,6 @@ async def listar_productos(
 
     productos = await collection_productos.find(query).to_list(None)
 
-    # Si se envía sede_id, pre-cargar todos los inventarios de esa sede
-    # para resolver comisiones sin hacer N queries individuales
     inventarios_sede: dict[str, dict] = {}
     if sede_id:
         inventarios = await collection_inventarios.find({"sede_id": sede_id}).to_list(None)
@@ -136,18 +155,17 @@ async def listar_productos(
         p_dict = producto_to_dict(p)
         producto_id = p_dict.get("id") or p_dict.get("_id")
 
-        # ⭐ Resolver comisión: override de sede → global
         comision_global = float(p_dict.get("comision", 0))
         if sede_id and producto_id in inventarios_sede:
             inv = inventarios_sede[producto_id]
             comision_sede = inv.get("comision")
             p_dict["comision"] = float(comision_sede) if comision_sede is not None else comision_global
-            p_dict["comision_override_sede"] = comision_sede is not None  # indica si hay override
+            p_dict["comision_override_sede"] = comision_sede is not None
         else:
             p_dict["comision"] = comision_global
             p_dict["comision_override_sede"] = False
 
-        p_dict["comision_global"] = comision_global  # siempre visible para el admin
+        p_dict["comision_global"] = comision_global
 
         if moneda:
             p_dict["precio_local"] = get_precio_moneda(p, moneda)
@@ -170,9 +188,19 @@ async def obtener_producto(
 ):
     """
     Obtiene un producto específico.
+    Busca primero por campo 'id' (P001...) y luego por _id de MongoDB como fallback.
     ⭐ Si se pasa sede_id, 'comision' refleja el % de esa sede.
     """
-    producto = await collection_productos.find_one({"_id": ObjectId(producto_id)})
+    # Intentar por campo id legible (P001, P002...) primero
+    producto = await collection_productos.find_one({"id": producto_id})
+
+    # Fallback: intentar como ObjectId de MongoDB
+    if not producto:
+        try:
+            producto = await collection_productos.find_one({"_id": ObjectId(producto_id)})
+        except Exception:
+            pass
+
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
 
@@ -180,7 +208,6 @@ async def obtener_producto(
     producto_id_campo = p_dict.get("id") or producto_id
     comision_global = float(p_dict.get("comision", 0))
 
-    # ⭐ Resolver comisión con sede
     if sede_id:
         inventario = await collection_inventarios.find_one(
             {"producto_id": producto_id_campo, "sede_id": sede_id}
@@ -215,6 +242,8 @@ async def editar_producto(
         raise HTTPException(status_code=403, detail="Solo super_admin puede editar productos")
 
     update_data = {k: v for k, v in producto_data.dict(exclude_none=True).items() if v is not None}
+    # Proteger el campo id para que nunca se sobreescriba en un PUT
+    update_data.pop("id", None)
 
     result = await collection_productos.update_one(
         {"_id": ObjectId(producto_id)},
@@ -313,12 +342,6 @@ async def actualizar_comision_global(
     comision: float = Query(..., ge=0, le=100, description="Porcentaje global (0-100)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Actualiza el porcentaje de comisión GLOBAL del producto.
-    Este valor aplica a todas las sedes que no tengan un override propio.
-    Para sobreescribir en una sede específica usar:
-      PATCH /inventarios/{sede_id}/{producto_id}/comision
-    """
     rol = current_user.get("rol")
     if rol != "super_admin":
         raise HTTPException(status_code=403, detail="Solo super_admin puede actualizar comisiones")
@@ -341,19 +364,13 @@ async def actualizar_comision_global(
 
 
 # =========================================================
-# ⭐ NUEVO: Comisión por sede (override en inventario)
-#    Endpoint sugerido en el router de inventarios, pero
-#    aquí lo incluimos también para visibilidad
+# ⭐ Comisión por sede — vista para super_admin
 # =========================================================
 @router.get("/{producto_id}/comision/sedes", response_model=dict)
 async def ver_comisiones_por_sede(
     producto_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Muestra el porcentaje de comisión del producto en cada sede.
-    Útil para que super_admin vea de un vistazo todos los overrides.
-    """
     rol = current_user.get("rol")
     if rol != "super_admin":
         raise HTTPException(status_code=403, detail="Solo super_admin puede ver esto")

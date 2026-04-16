@@ -155,6 +155,12 @@ def _crear_hoja_resumen_caja(ws, resumen: Dict, sede_info: Dict):
     ws[f'D{fila}'].font = Font(name='Arial', size=10, italic=True, color="808080")
     fila += 1
 
+    ws[f'A{fila}'] = "- Abonos Transferencia"
+    ws[f'D{fila}'] = resumen["ingresos_otros_metodos"].get("abono_transferencia", 0)
+    ws[f'D{fila}'].number_format = '#,##0.00'
+    ws[f'D{fila}'].alignment = derecha
+    fila += 1
+
     ws[f'A{fila}'] = "- Tarjeta Crédito"
     ws[f'D{fila}'] = resumen["ingresos_otros_metodos"]["tarjeta_credito"]
     ws[f'D{fila}'].number_format = '#,##0.00'
@@ -659,6 +665,7 @@ def _crear_hoja_flujo_por_metodo(ws, resumen: Dict, sede_info: Dict, fecha_inici
         ("addi",            "Addi",            ingresos_otros.get("addi", 0)),
         ("descuento_por_nomina", "Descuento por Nómina",  ingresos_otros.get("descuento_por_nomina", 0)),
         ("abonos",          "Abonos",          ingresos_otros.get("abonos", 0)),
+        ("abono_transferencia","Abonos transferencia",  ingresos_otros.get("abono_transferencia", 0)),  # ← nuevo
         ("otros",           "Otros",           ingresos_otros.get("otros", 0)),
     ]
 
