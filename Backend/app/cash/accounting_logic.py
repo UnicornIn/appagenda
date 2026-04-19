@@ -49,6 +49,7 @@ MAPEO_METODOS_PAGO = {
     "caja_fuerte"                           : "otros",
     "otro"                                  : "otros",
     "descuento_por_nomina"                  : "descuento_por_nomina",
+    "descuento_nomina"                      : "descuento_por_nomina",
     "abono_transferencia"                   : "abono_transferencia",
 
     # Variantes del sistema migrado (texto del CSV ya sin tildes)
@@ -811,6 +812,10 @@ async def calcular_egresos_efectivo(
 
     agrupados["por_metodo"] = por_metodo           # ← NUEVO
     agrupados["total_efectivo"] = por_metodo.get("efectivo", 0)  # ← NUEVO
+    agrupados["total"]          = sum(               # ← AGREGAR ESTO
+        agrupados[cat]["total"]
+        for cat in ["compras_internas", "gastos_operativos", "retiros_caja", "otros"]
+    )
     return agrupados
 
 
@@ -1229,12 +1234,14 @@ async def calcular_resumen_dia(
             "tarjeta_debito"       : ingresos_discriminados.get("tarjeta_debito",  0),
             "abonos"               : ingresos_discriminados.get("abonos_informativos", 0),
             "abono_transferencia"  : ingresos_discriminados.get("abono_transferencia", 0),  # ← nuevo
-            "link_de_pago"         : ingresos_discriminados.get("link_de_pago",    0),
+            "link_de_pago"         : (ingresos_discriminados.get("link_de_pago", 0) or 0)
+                                    + (ingresos_discriminados.get("link_pago", 0) or 0),
             "giftcard"             : ingresos_discriminados.get("giftcard",        0),
             "addi"                 : ingresos_discriminados.get("addi",            0),
             "pos"                  : ingresos_discriminados.get("pos",             0),
             "transferencia"        : ingresos_discriminados.get("transferencia",   0),
-            "descuento_por_nomina" : ingresos_discriminados.get("descuento_por_nomina", 0),
+            "descuento_por_nomina" : (ingresos_discriminados.get("descuento_por_nomina", 0) or 0)
+                                    + (ingresos_discriminados.get("descuento_nomina", 0) or 0),
             "otros"                : ingresos_discriminados.get("otros",           0),
             "total"                : (
                 ingresos_discriminados.get("total_general", 0)

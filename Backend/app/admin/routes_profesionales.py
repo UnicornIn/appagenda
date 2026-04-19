@@ -215,35 +215,36 @@ async def list_professionals(
     sede_id: str = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Lista profesionales según permisos del usuario.
-    Incluye nombres de servicios y nombre de la sede.
-    """
     query = {"rol": "estilista"}
-    sede_activa = sede_id or current_user.get("sede_id")  # ← usar sede_activa
+    sede_activa = sede_id or current_user.get("sede_id")
 
-    # Filtrar por sede si es admin_sede
     if current_user["rol"] == "admin_sede":
         query["sede_id"] = sede_activa
     elif sede_activa and current_user["rol"] != "super_admin":
         query["sede_id"] = sede_activa
     
-    # Filtrar por estado activo
     if activo is not None:
         query["activo"] = activo
 
     professionals = await collection_estilista.find(query).to_list(None)
 
+    result = []
     for p in professionals:
+
+        # ===================================================
+        # ⭐ Verificar que el usuario esté activo en collection_auth
+        # ===================================================
+        profesional_id = p.get("profesional_id") or p.get("estilista_id")
+        auth_user = await collection_auth.find_one({"profesional_id": profesional_id})
+        
+        if not auth_user or auth_user.get("activo") is not True:
+            continue  # Saltar profesionales inactivos o sin usuario auth
 
         # ===================================================
         # ⭐ Obtener nombre de la sede
         # ===================================================
         sede = await collection_locales.find_one({"sede_id": p.get("sede_id")})
-        if sede:
-            p["sede_nombre"] = sede.get("nombre", "Nombre no registrado")
-        else:
-            p["sede_nombre"] = "Sede desconocida"
+        p["sede_nombre"] = sede.get("nombre", "Nombre no registrado") if sede else "Sede desconocida"
 
         # ===================================================
         # ⭐ Agregar nombres de servicios
@@ -265,8 +266,9 @@ async def list_professionals(
             p["especialidades_detalle"] = nombres_servicios
         
         profesional_to_dict(p)
+        result.append(p)
 
-    return professionals
+    return result
 
 # ===================================================
 # 👥 Listar nombres de profesionales + recepcionistas

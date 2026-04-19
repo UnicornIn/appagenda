@@ -23,12 +23,15 @@ class Inventario(BaseModel):
 
 
 class AjusteInventario(BaseModel):
-    """Para ajustes manuales de stock por super_admin y admin_sede."""
-    cantidad_ajuste: int = Field(..., description="Cantidad a sumar o restar (negativo para restar)")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "cantidad_ajuste": -5
-            }
-        }
+    """
+    Ajuste manual de stock.
+    - cantidad_ajuste positivo → entrada
+    - cantidad_ajuste negativo → salida
+    - motivo es opcional; si se omite se trata como ajuste rápido
+    """
+    cantidad_ajuste: int = Field(..., description="Cantidad a sumar (+) o restar (-)")
+    motivo: Optional[str] = Field(
+        None,
+        description="Razón del ajuste: 'Compra', 'Pérdida', 'Corrección', etc."
+    )
+    observaciones: Optional[str] = Field(None, description="Notas adicionales opcionales")
