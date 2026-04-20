@@ -18,6 +18,7 @@ from app.analytics.routes_dashboard import router as dashboard_router
 from app.inventary.routes import app_router as inventary_router
 from app.bills.routes import router as billing_router
 from app.analytics.projection_analytics import router as analytics_projection
+from app.bills.routes_reporte import router as reporte_router
 from app.commissions.routes import router as commissions_router
 from app.analytics.sales_dashboard import router as sales_dashboard_router
 from app.clients_service.generate_pdf import router as generate_pdf_router
@@ -73,6 +74,7 @@ async def lifespan(app: FastAPI):
 
 # Incluir todos los routers
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
+app.include_router(reporte_router, prefix="/api/reporte", tags=["Reporte"])
 app.include_router(scheduling_router, prefix="/scheduling")
 app.include_router(admin_franquicias_router, prefix="/admin/franquicias", tags=["Franquicias"])
 app.include_router(routes_fichas_router, prefix="/scheduling/quotes", tags=["Fichas"])

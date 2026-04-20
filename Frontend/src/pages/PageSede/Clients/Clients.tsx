@@ -9,7 +9,7 @@ import type { Cliente } from "../../../types/cliente"
 import { clientesService, type ClientesPaginadosMetadata } from "./clientesService"
 import { useAuth } from "../../../components/Auth/AuthContext"
 import { Loader } from "lucide-react"
-import { useClientSmartSearch } from "../../../hooks/useClientSmartSearch"
+import { rankClientsByRelevance } from "../../../lib/client-search"
 
 const SEARCH_DEBOUNCE_MS = 300
 
@@ -151,7 +151,10 @@ export default function ClientsPage() {
       if (requestId !== latestRequestIdRef.current) return
 
       const clientesNormalizados = result.clientes.map(asegurarClienteCompleto)
-      setClientes(applyCedulaCache(clientesNormalizados))
+      const sorted = filtro.trim()
+        ? rankClientsByRelevance(clientesNormalizados, filtro, clientesNormalizados.length).map(r => r.cliente)
+        : clientesNormalizados
+      setClientes(applyCedulaCache(sorted))
       setMetadata(result.metadata)
 
     } catch (err) {
@@ -314,35 +317,12 @@ export default function ClientsPage() {
     }
   }, [getAccessToken, selectedClient, loadClientes, metadata?.pagina, searchTerm])
 
-  const fetchSmartResults = useCallback(async (query: string) => {
-    const token = getAccessToken()
-    if (!token || !query.trim()) return []
-
-    const { clientes: fetched } = await clientesService.getClientesPaginados(token, {
-      pagina: 1,
-      limite: 25,
-      filtro: query
-    })
-
-    return fetched.map(asegurarClienteCompleto)
-  }, [getAccessToken])
-
-  const {
-    results: smartResults,
-    isLoading: smartLoading,
-    error: smartError,
-  } = useClientSmartSearch(searchTerm, {
-    baseClientes: clientes,
-    fetchRemote: fetchSmartResults,
-    maxSuggestions: 8,
-  })
-
-  if (authLoading || (Boolean(user) && isInitialLoading)) {
+  if (authLoading) {
     return (
       <div className="flex flex-col min-h-screen items-center justify-center bg-white">
         <div className="flex items-center gap-3">
           <Loader className="h-5 w-5 animate-spin text-gray-600" />
-          <span className="text-sm text-gray-600">Cargando clientes...</span>
+          <span className="text-sm text-gray-600">Cargando...</span>
         </div>
       </div>
     )
@@ -362,29 +342,38 @@ export default function ClientsPage() {
   return (
     <div className="flex flex-col h-screen bg-white">
       <Sidebar />
-      <div className="flex-1 overflow-auto">
-        {selectedClient ? (
-          <ClientDetail
-            client={selectedClient}
-            onBack={handleBack}
-            onClientUpdated={handleClientUpdated}
-          />
-        ) : (
-          <ClientsList
-            onSelectClient={handleSelectClient}
-            onAddClient={handleAddClient}
-            clientes={clientes}
-            metadata={metadata || undefined}
-            error={error}
-            isFetching={isFetching}
-            onPageChange={handlePageChange}
-            onSearch={handleSearch}
-            searchValue={searchTerm}
-            smartResults={smartResults}
-            smartLoading={smartLoading}
-            smartError={smartError}
-          />
-        )}
+      <div className="flex-1 overflow-hidden" style={{ display: 'flex' }}>
+        <ClientsList
+          onSelectClient={handleSelectClient}
+          onAddClient={handleAddClient}
+          clientes={clientes}
+          selectedId={selectedClient?.id}
+          metadata={metadata || undefined}
+          error={error}
+          isFetching={isFetching}
+          isInitialLoading={isInitialLoading}
+          onPageChange={handlePageChange}
+          onSearch={handleSearch}
+          searchValue={searchTerm}
+          sedeName={user?.nombre_local}
+        />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {selectedClient ? (
+            <ClientDetail
+              client={selectedClient}
+              onBack={handleBack}
+              onClientUpdated={handleClientUpdated}
+            />
+          ) : (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              height: '100%', color: '#94A3B8', fontSize: '14px',
+              fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif",
+            }}>
+              Selecciona un cliente para ver su perfil completo
+            </div>
+          )}
+        </div>
       </div>
 
       <ClientFormModal

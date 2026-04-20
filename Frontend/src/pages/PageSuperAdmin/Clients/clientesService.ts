@@ -771,7 +771,7 @@ ${datos.observaciones_generales || 'Ninguna'}`;
     return await response.json();
   },
 
-  async agregarNota(token: string, clienteId: string, nota: string): Promise<void> {
+  async agregarNota(token: string, clienteId: string, nota: string, autor?: string): Promise<void> {
     const response = await fetch(`${API_BASE_URL}clientes/${clienteId}/notas`, {
       method: 'POST',
       headers: {
@@ -779,7 +779,7 @@ ${datos.observaciones_generales || 'Ninguna'}`;
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ contenido: nota })
+      body: JSON.stringify({ contenido: nota, ...(autor ? { autor } : {}) })
     });
 
     if (!response.ok) {

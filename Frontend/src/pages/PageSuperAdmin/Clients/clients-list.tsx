@@ -1,38 +1,16 @@
 "use client"
-
-import { memo, useCallback, useMemo, useState } from "react"
-import {
-  Search,
-  Plus,
-  User,
-  Download,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-  Loader2
-} from "lucide-react"
-import { Button } from "../../../components/ui/button"
-import { Input } from "../../../components/ui/input"
-import { PageHeader } from "../../../components/Layout/PageHeader"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../../../components/ui/select"
-import { useAuth } from "../../../components/Auth/AuthContext"
+import { memo, useCallback, useMemo, useState, CSSProperties } from "react"
+import { Search, Plus, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react"
 import type { Cliente } from "../../../types/cliente"
 import type { Sede } from "../Sedes/sedeService"
 import type { ClientesPaginadosMetadata } from "./clientesService"
 import { formatSedeNombre } from "../../../lib/sede"
-import { getLastVisitLabel, type RankedClient } from "../../../lib/client-search"
 
 interface ClientsListProps {
   onSelectClient: (client: Cliente) => void
   onAddClient: () => void
   clientes: Cliente[]
+  selectedId?: string
   metadata?: ClientesPaginadosMetadata
   error?: string | null
   onRetry?: () => void
@@ -42,592 +20,293 @@ interface ClientsListProps {
   onSedeChange?: (sedeId: string) => void
   selectedSede?: string
   sedes?: Sede[]
-  onExport?: () => void
   onItemsPerPageChange?: (value: number) => void
   itemsPerPage?: number
   isFetching?: boolean
-  smartResults?: RankedClient[]
-  smartLoading?: boolean
-  smartError?: string | null
+  isInitialLoading?: boolean
 }
 
-interface TableColumn {
-  key: string
-  label: string
-  className: string
+type FilterType = 'Todos' | 'Activos' | 'Inactivos 30d+' | 'Nuevos' | 'VIP'
+
+const fmt = (n: number) => "$" + Math.round(n).toLocaleString("es-CO")
+const ini = (n: string) =>
+  n.split(" ").map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase()
+
+const S: Record<string, CSSProperties> = {
+  shell: {
+    width: '420px', borderRight: '1px solid #E2E8F0',
+    display: 'flex', flexDirection: 'column', flexShrink: 0,
+    height: '100%', overflow: 'hidden',
+    fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif",
+  },
+  header: { padding: '20px 20px 0' },
+  h1: { fontSize: '20px', fontWeight: 700, letterSpacing: '-.3px', color: '#1E293B', margin: 0 },
+  sub: { fontSize: '12px', color: '#64748B', marginTop: '2px' },
+  searchWrap: { margin: '14px 20px 0', position: 'relative' },
+  searchIcon: { position: 'absolute', left: '12px', top: '11px', color: '#94A3B8', width: '15px', height: '15px', pointerEvents: 'none' },
+  searchInput: {
+    width: '100%', padding: '10px 36px 10px 36px',
+    border: '1px solid #E2E8F0', borderRadius: '8px',
+    fontSize: '13px', background: '#F8FAFC', outline: 'none',
+    fontFamily: 'inherit', color: '#1E293B', boxSizing: 'border-box',
+  },
+  clearBtn: {
+    position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+    background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', padding: 0,
+  },
+  filtersRow: { display: 'flex', gap: '4px', padding: '10px 20px', flexWrap: 'wrap' },
+  sedeSelect: {
+    width: '100%', padding: '6px 10px', border: '1px solid #E2E8F0',
+    borderRadius: '8px', fontSize: '11px', color: '#64748B',
+    background: '#F8FAFC', outline: 'none', fontFamily: 'inherit',
+    marginTop: '6px', cursor: 'pointer',
+  },
+  count: {
+    padding: '4px 20px', fontSize: '10px', color: '#94A3B8',
+    fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px',
+    display: 'flex', alignItems: 'center', gap: '8px',
+  },
+  listScroll: { flex: 1, overflowY: 'auto' as const },
+  row: (selected: boolean): CSSProperties => ({
+    display: 'flex', alignItems: 'center', padding: '10px 20px',
+    cursor: 'pointer', gap: '10px', transition: 'background .1s',
+    borderLeft: selected ? '3px solid #1E293B' : '3px solid transparent',
+    background: selected ? '#F1F5F9' : 'transparent',
+  }),
+  avatar: {
+    width: '36px', height: '36px', borderRadius: '50%', background: '#1E293B',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '11px', fontWeight: 700, color: '#fff', flexShrink: 0,
+  },
+  clInfo: { flex: 1, minWidth: 0 },
+  clName: { fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: '#1E293B' },
+  clMeta: { fontSize: '10px', color: '#64748B', marginTop: '1px', display: 'flex', gap: '8px' },
+  clRight: { textAlign: 'right', flexShrink: 0 },
+  clLtv: { fontSize: '12px', fontWeight: 700, color: '#1E293B' },
+  clLast: { fontSize: '9px', color: '#94A3B8' },
+  pagination: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '8px 20px', borderTop: '1px solid #E2E8F0',
+    fontSize: '11px', color: '#64748B',
+  },
+  pgBtn: (enabled: boolean): CSSProperties => ({
+    background: 'none', border: '1px solid #E2E8F0', borderRadius: '6px',
+    padding: '4px 8px', cursor: enabled ? 'pointer' : 'default',
+    color: enabled ? '#64748B' : '#CBD5E1', fontFamily: 'inherit',
+    display: 'flex', alignItems: 'center',
+  }),
+  addBtn: {
+    width: '100%', padding: '8px', border: '1px dashed #E2E8F0', borderRadius: '8px',
+    fontSize: '12px', color: '#94A3B8', cursor: 'pointer', background: 'none',
+    fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+  },
+  addWrap: { padding: '12px 20px' },
+  skeletonRow: { display: 'flex', alignItems: 'center', padding: '10px 20px', gap: '10px' },
+  skeletonCircle: { width: '36px', height: '36px', borderRadius: '50%', background: '#E2E8F0', flexShrink: 0 },
+  skeletonLine: (w: string, h: string, mb?: string): CSSProperties => ({
+    height: h, background: '#E2E8F0', borderRadius: '4px', width: w, marginBottom: mb,
+  }),
 }
 
 interface ClientRowProps {
   cliente: Cliente
-  onSelectClient: (client: Cliente) => void
-  sedeNombre: string
-  isSuperAdmin: boolean
+  selected: boolean
+  onSelect: (c: Cliente) => void
 }
 
-const formatCedula = (cedula?: string) => {
-  const value = cedula?.trim()
-  return value ? value : "—"
-}
-
-type ClienteConDiasOpcional = Cliente & {
-  diasSinVenir?: number | null
-}
-
-const getDiasSinVenirValue = (cliente: Cliente): number | null => {
-  const diasSinVenir = (cliente as ClienteConDiasOpcional).diasSinVenir
-  return typeof diasSinVenir === "number" && Number.isFinite(diasSinVenir) ? diasSinVenir : null
-}
-
-const getDiasSinVenirBadgeClass = (diasSinVenir: number) => {
-  if (diasSinVenir > 30) return "bg-red-100 text-red-800"
-  if (diasSinVenir > 15) return "bg-yellow-100 text-yellow-800"
-  return "bg-green-100 text-green-800"
-}
-
-const ClientRow = memo(function ClientRow({
-  cliente,
-  onSelectClient,
-  sedeNombre,
-  isSuperAdmin,
-}: ClientRowProps) {
-  const handleSelect = useCallback(() => {
-    onSelectClient(cliente)
-  }, [onSelectClient, cliente])
-  const diasSinVenir = getDiasSinVenirValue(cliente)
+const ClientRow = memo(function ClientRow({ cliente, selected, onSelect }: ClientRowProps) {
+  const handleClick = useCallback(() => onSelect(cliente), [cliente, onSelect])
+  const daysSince = cliente.diasSinVenir ?? 0
 
   return (
-    <tr
-      onClick={handleSelect}
-      className="hover:bg-gray-50 active:bg-gray-100 cursor-pointer transition-colors"
+    <div
+      onClick={handleClick}
+      style={S.row(selected)}
+      onMouseEnter={e => { if (!selected) e.currentTarget.style.background = '#F8FAFC' }}
+      onMouseLeave={e => { if (!selected) e.currentTarget.style.background = 'transparent' }}
     >
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-gray-700 font-medium">
-            {cliente.nombre.charAt(0).toUpperCase()}
-          </div>
-          <div>
-            <div className="font-medium text-gray-900">{cliente.nombre}</div>
-            <div className="text-sm text-gray-500">{cliente.email}</div>
-          </div>
-        </div>
-      </td>
-      <td className="px-6 py-4">
-        <div className="text-gray-900">{cliente.telefono}</div>
-        <div className="text-sm text-gray-500">{cliente.email}</div>
-      </td>
-      <td className="px-6 py-4 text-gray-700">{formatCedula(cliente.cedula)}</td>
-      {isSuperAdmin && (
-        <td className="px-6 py-4">
-          {diasSinVenir === null ? (
-            <span className="text-gray-500">—</span>
-          ) : (
-            <span
-              className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getDiasSinVenirBadgeClass(
-                diasSinVenir
-              )}`}
-            >
-              {diasSinVenir} días
-            </span>
+      <div style={S.avatar}>{ini(cliente.nombre)}</div>
+      <div style={S.clInfo}>
+        <div style={S.clName}>{cliente.nombre}</div>
+        <div style={S.clMeta}>
+          {cliente.historialCitas.length > 0 && (
+            <span>{cliente.historialCitas.length} visitas</span>
           )}
-        </td>
-      )}
-      <td className="px-6 py-4">
-        <div className="text-gray-900">{sedeNombre}</div>
-      </td>
-    </tr>
+          <span>{daysSince === 0 ? 'Hoy' : `${daysSince}d sin venir`}</span>
+        </div>
+      </div>
+      <div style={S.clRight}>
+        <div style={S.clLtv}>{fmt(cliente.ltv)}</div>
+        <div style={S.clLast}>{cliente.ultima_visita ?? '—'}</div>
+      </div>
+    </div>
   )
 })
 
 function ClientsListComponent({
-  onSelectClient,
-  onAddClient,
-  clientes,
-  metadata,
-  error,
-  onRetry,
-  onPageChange,
-  onSearch,
-  searchValue,
-  onSedeChange,
-  selectedSede = "all",
-  sedes = [],
-  onExport,
-  onItemsPerPageChange,
-  itemsPerPage = 10,
-  isFetching = false,
-  smartResults = [],
-  smartLoading = false,
-  smartError = null,
+  onSelectClient, onAddClient, clientes, selectedId,
+  metadata, error, onRetry, isFetching = false, isInitialLoading = false,
+  onPageChange, onSearch, searchValue,
+  onSedeChange, selectedSede = "all", sedes = [],
 }: ClientsListProps) {
-  const { user } = useAuth()
-  const isSuperAdmin =
-    user?.role === "SUPERADMIN" || user?.role === "super_admin" || user?.role === "superadmin"
+  const [activeFilter, setActiveFilter] = useState<FilterType>('Todos')
 
-  const totalClientes = metadata?.total ?? clientes.length
   const totalPages = metadata?.total_paginas ?? 1
   const currentPage = metadata?.pagina ?? 1
-  const rangoInicio = metadata?.rango_inicio ?? (clientes.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0)
-  const rangoFin = metadata?.rango_fin ?? ((currentPage - 1) * itemsPerPage + clientes.length)
   const tieneAnterior = metadata?.tiene_anterior ?? currentPage > 1
   const tieneSiguiente = metadata?.tiene_siguiente ?? currentPage < totalPages
-  const [isFocused, setIsFocused] = useState(false)
-  const showSuggestions = isFocused && Boolean(searchValue.trim())
-  const suggestions = useMemo(() => smartResults.slice(0, 8), [smartResults])
-
-  const highlight = useCallback((text: string, query: string) => {
-    if (!text) return "—"
-    const cleanQuery = query.trim()
-    if (!cleanQuery) return text
-    const lowerText = text.toLowerCase()
-    const lowerQuery = cleanQuery.toLowerCase()
-    const index = lowerText.indexOf(lowerQuery)
-    if (index === -1) return text
-    return (
-      <>
-        {text.slice(0, index)}
-        <span className="bg-yellow-100 text-gray-900">{text.slice(index, index + cleanQuery.length)}</span>
-        {text.slice(index + cleanQuery.length)}
-      </>
-    )
-  }, [])
-
-  const tableColumns = useMemo<TableColumn[]>(() => {
-    const columns: TableColumn[] = [
-      {
-        key: "cliente",
-        label: "Cliente",
-        className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
-      },
-      {
-        key: "contacto",
-        label: "Contacto",
-        className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
-      },
-      {
-        key: "cedula",
-        label: "Cédula",
-        className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
-      },
-    ]
-
-    if (isSuperAdmin) {
-      columns.push({
-        key: "dias_sin_venir",
-        label: "Días sin venir",
-        className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
-      })
-    }
-
-    columns.push({
-      key: "sede",
-      label: "Sede",
-      className: "px-6 py-3.5 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider",
-    })
-
-    return columns
-  }, [isSuperAdmin])
-
-  const sedeNombresById = useMemo(() => {
-    const byId = new Map<string, string>()
-    for (const sede of sedes) {
-      byId.set(sede.sede_id, formatSedeNombre(sede.nombre))
-    }
-    return byId
-  }, [sedes])
-
-  const pageNumbers = useMemo(() => {
-    if (totalPages <= 1) return [1]
-
-    const delta = 2
-    const range: number[] = []
-    const rangeWithDots: Array<number | "..."> = []
-
-    for (let i = 1; i <= totalPages; i++) {
-      if (i === 1 || i === totalPages || (i >= currentPage - delta && i <= currentPage + delta)) {
-        range.push(i)
-      }
-    }
-
-    let prev = 0
-    for (const page of range) {
-      if (prev) {
-        if (page - prev === 2) {
-          rangeWithDots.push(prev + 1)
-        } else if (page - prev !== 1) {
-          rangeWithDots.push("...")
-        }
-      }
-      rangeWithDots.push(page)
-      prev = page
-    }
-
-    return rangeWithDots
-  }, [currentPage, totalPages])
+  const clientCount = metadata?.total ?? clientes.length
 
   const handlePageChange = useCallback((page: number) => {
-    if (!onPageChange) return
-    const nextPage = Math.max(1, Math.min(page, totalPages))
-    onPageChange(nextPage, searchValue)
+    onPageChange?.(Math.max(1, Math.min(page, totalPages)), searchValue)
   }, [onPageChange, searchValue, totalPages])
 
-  const handleSearchChange = useCallback((value: string) => {
-    onSearch?.(value)
-  }, [onSearch])
+  const handleSearchChange = useCallback((v: string) => onSearch?.(v), [onSearch])
+  const clearSearch = useCallback(() => onSearch?.(""), [onSearch])
 
-  const handleSelectSuggestion = useCallback((cliente: Cliente) => {
-    onSelectClient(cliente)
-    if (cliente.nombre) {
-      onSearch?.(cliente.nombre)
-    }
-    setIsFocused(false)
-  }, [onSearch, onSelectClient])
+  const rows = useMemo(() => clientes.map(c => (
+    <ClientRow key={c.id} cliente={c} selected={c.id === selectedId} onSelect={onSelectClient} />
+  )), [clientes, selectedId, onSelectClient])
 
-  const handleFocus = useCallback(() => setIsFocused(true), [])
-  const handleBlur = useCallback(() => {
-    setTimeout(() => setIsFocused(false), 120)
-  }, [])
-
-  const handleSedeChange = useCallback((value: string) => {
-    onSedeChange?.(value)
-  }, [onSedeChange])
-
-  const handleItemsPerPageChange = useCallback((value: string) => {
-    onItemsPerPageChange?.(Number(value))
-  }, [onItemsPerPageChange])
-
-  const clientRows = useMemo(() => {
-    return clientes.map((cliente) => {
-      const sedeNombre = cliente.sede_id
-        ? (sedeNombresById.get(cliente.sede_id) ?? "Sede asignada")
-        : "Sin sede asignada"
-
-      return (
-        <ClientRow
-          key={cliente.id}
-          cliente={cliente}
-          onSelectClient={onSelectClient}
-          sedeNombre={sedeNombre}
-          isSuperAdmin={isSuperAdmin}
-        />
-      )
-    })
-  }, [clientes, isSuperAdmin, onSelectClient, sedeNombresById])
-
-  if (error && clientes.length === 0) {
+  const filterBtn = (f: FilterType) => {
+    const active = activeFilter === f
     return (
-      <div className="flex h-full flex-col items-center justify-center p-8">
-        <div className="text-center">
-          <div className="text-lg font-medium text-gray-900 mb-2">Error al cargar clientes</div>
-          <p className="text-sm text-gray-600 mb-6 max-w-md">{error}</p>
-          {onRetry && (
-            <Button
-              onClick={onRetry}
-              className="bg-gray-900 hover:bg-gray-800 text-white"
-            >
-              Reintentar
-            </Button>
-          )}
-        </div>
-      </div>
+      <button
+        key={f}
+        onClick={() => setActiveFilter(f)}
+        style={{
+          padding: '5px 10px',
+          border: `1px solid ${active ? '#1E293B' : '#E2E8F0'}`,
+          borderRadius: '16px', fontSize: '10px',
+          color: active ? '#fff' : '#64748B',
+          fontWeight: 500, cursor: 'pointer',
+          background: active ? '#1E293B' : 'transparent',
+          fontFamily: 'inherit',
+        }}
+      >
+        {f}
+      </button>
     )
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="bg-white px-6 py-5 border-b border-gray-200">
-        <PageHeader
-          title="Clientes"
-          subtitle={`${totalClientes} cliente${totalClientes !== 1 ? "s" : ""}${
-            searchValue ? ` para "${searchValue}"` : ""
-          }`}
-          actions={
-            <>
-              {onExport && (
-                <Button
-                  onClick={onExport}
-                  variant="outline"
-                  size="sm"
-                  className="bg-white border-gray-300 text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Exportar
-                </Button>
-              )}
-              <Button
-                onClick={onAddClient}
-                className="bg-gray-900 hover:bg-gray-800 text-white"
-                size="sm"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Nuevo Cliente
-              </Button>
-            </>
-          }
-          className="mb-5"
-        />
-        {isFetching && (
-          <div className="mb-4 inline-flex items-center gap-2 text-xs text-gray-500">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
-            <span>Actualizando clientes...</span>
-          </div>
-        )}
-
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <Input
-              placeholder="Buscar por nombre, email, teléfono o cédula..."
-              value={searchValue}
-              onChange={(e) => handleSearchChange(e.target.value)}
-              onFocus={handleFocus}
-              onBlur={handleBlur}
-              className="pl-10 h-10 bg-white"
-            />
-
-            {showSuggestions && (
-              <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-lg border border-gray-200 bg-white shadow-xl">
-                {smartLoading && (
-                  <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
-                    <span>Buscando clientes...</span>
-                  </div>
-                )}
-
-                {!smartLoading && smartError && (
-                  <div className="px-3 py-2 text-xs text-red-600">No se pudo buscar: {smartError}</div>
-                )}
-
-                {!smartLoading && !smartError && suggestions.length === 0 && (
-                  <div className="px-3 py-2 text-xs text-gray-500">Sin resultados</div>
-                )}
-
-                {suggestions.length > 0 && (
-                  <div className="max-h-80 overflow-auto divide-y divide-gray-100">
-                    {suggestions.map((result) => {
-                      const cliente = result.cliente
-                      const avatar =
-                        (cliente as any).foto ||
-                        (cliente as any).foto_url ||
-                        (cliente as any).imagen ||
-                        (cliente as any).image_url
-                      const initial = cliente.nombre?.charAt(0)?.toUpperCase() || "C"
-                      return (
-                        <button
-                          key={cliente.id}
-                          type="button"
-                          className="w-full px-3 py-2 text-left hover:bg-gray-50 active:bg-gray-100 transition-colors"
-                          onMouseDown={(e) => {
-                            e.preventDefault()
-                            handleSelectSuggestion(cliente)
-                          }}
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden">
-                              {avatar ? (
-                                <img src={avatar} alt={cliente.nombre} className="h-full w-full object-cover" />
-                              ) : (
-                                <span className="text-sm font-semibold text-gray-700">{initial}</span>
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="font-semibold text-gray-900 text-sm truncate">
-                                  {highlight(cliente.nombre, searchValue)}
-                                </div>
-                                <span className="text-[11px] text-gray-500 whitespace-nowrap">
-                                  {getLastVisitLabel(cliente)}
-                                </span>
-                              </div>
-                              <div className="text-xs text-gray-600 flex flex-wrap gap-2">
-                                <span className="truncate max-w-[140px]">{highlight(cliente.telefono || "—", searchValue)}</span>
-                                <span className="truncate max-w-[120px]">{highlight(cliente.cedula || "—", searchValue)}</span>
-                                {cliente.email && (
-                                  <span className="truncate max-w-[160px] text-gray-500">
-                                    {highlight(cliente.email, searchValue)}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="w-full sm:w-[220px]">
-            <Select value={selectedSede} onValueChange={handleSedeChange}>
-              <SelectTrigger className="w-full h-10 bg-white border border-gray-300 hover:border-gray-400 text-gray-900">
-                <SelectValue placeholder="Todas las sedes" className="text-gray-900" />
-              </SelectTrigger>
-              <SelectContent className="bg-white border border-gray-300">
-                <SelectItem value="all" className="text-gray-900 hover:bg-gray-100">
-                  Todas las sedes
-                </SelectItem>
-                {sedes.map((sede) => (
-                  <SelectItem
-                    key={sede.sede_id}
-                    value={sede.sede_id}
-                    className="text-gray-900 hover:bg-gray-100"
-                  >
-                    {formatSedeNombre(sede.nombre)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+    <div style={S.shell}>
+      {/* Header */}
+      <div style={S.header}>
+        <h1 style={S.h1}>Clientes</h1>
+        <div style={S.sub}>Base de datos · Todas las sedes</div>
       </div>
 
-      <div className="flex-1 overflow-auto p-6">
-        {error && clientes.length > 0 && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-            No se pudo actualizar la lista: {error}
-          </div>
+      {/* Search */}
+      <div style={S.searchWrap}>
+        <Search style={S.searchIcon} />
+        <input
+          placeholder="Buscar por nombre, teléfono o email..."
+          value={searchValue}
+          onChange={e => handleSearchChange(e.target.value)}
+          style={S.searchInput}
+          onFocus={e => { e.target.style.borderColor = '#1E293B'; e.target.style.background = '#FFF' }}
+          onBlur={e => { e.target.style.borderColor = '#E2E8F0'; e.target.style.background = '#F8FAFC' }}
+        />
+        {searchValue && (
+          <button onClick={clearSearch} style={S.clearBtn} aria-label="Limpiar búsqueda">
+            <X style={{ width: '14px', height: '14px' }} />
+          </button>
         )}
+      </div>
 
-        {clientes.length === 0 ? (
-          <div className="flex h-64 items-center justify-center rounded-xl border-2 border-dashed border-gray-200 bg-white">
-            <div className="text-center px-8">
-              <User className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-lg font-medium text-gray-900 mb-1">
-                {searchValue || selectedSede !== "all"
-                  ? "No se encontraron clientes"
-                  : "No hay clientes registrados"}
-              </p>
-              <p className="text-sm text-gray-600 mb-6 max-w-sm">
-                {searchValue || selectedSede !== "all"
-                  ? "Ajusta los términos de búsqueda o el filtro de sede"
-                  : "Comienza agregando tu primer cliente a la plataforma"}
-              </p>
-              <Button
-                onClick={onAddClient}
-                className="bg-gray-900 hover:bg-gray-800 text-white"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                {searchValue || selectedSede !== "all" ? "Agregar cliente" : "Agregar primer cliente"}
-              </Button>
+      {/* Filters + Sede selector */}
+      <div style={{ padding: '10px 20px 0' }}>
+        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+          {(['Todos', 'Activos', 'Inactivos 30d+', 'Nuevos', 'VIP'] as FilterType[]).map(filterBtn)}
+        </div>
+        {sedes.length > 0 && (
+          <select
+            value={selectedSede}
+            onChange={e => onSedeChange?.(e.target.value)}
+            style={S.sedeSelect}
+          >
+            <option value="all">Todas las sedes</option>
+            {sedes.map(s => (
+              <option key={s.sede_id} value={s.sede_id}>
+                {formatSedeNombre(s.nombre)}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {/* Count */}
+      <div style={S.count}>
+        {isInitialLoading ? 'Cargando...' : `${clientCount} clientes`}
+        {isFetching && !isInitialLoading && (
+          <Loader2 style={{ width: '10px', height: '10px', animation: 'spin 1s linear infinite' }} />
+        )}
+      </div>
+
+      {/* List scroll */}
+      <div style={S.listScroll}>
+        {error && clientes.length === 0 && !isInitialLoading ? (
+          <div style={{ padding: '40px 20px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>
+            Error al cargar clientes
+            <br />
+            <button
+              onClick={onRetry}
+              style={{ marginTop: '8px', background: 'none', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '4px 12px', cursor: 'pointer', fontSize: '12px', color: '#64748B', fontFamily: 'inherit' }}
+            >
+              Reintentar
+            </button>
+          </div>
+        ) : isInitialLoading ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} style={S.skeletonRow}>
+              <div style={S.skeletonCircle} />
+              <div style={{ flex: 1 }}>
+                <div style={S.skeletonLine('60%', '13px', '6px')} />
+                <div style={{ ...S.skeletonLine('40%', '10px'), background: '#F1F5F9' }} />
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ ...S.skeletonLine('60px', '12px', '4px') }} />
+                <div style={{ ...S.skeletonLine('40px', '9px'), background: '#F1F5F9' }} />
+              </div>
             </div>
+          ))
+        ) : clientes.length === 0 ? (
+          <div style={{ padding: '40px 20px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>
+            {searchValue ? 'Sin resultados para la búsqueda' : 'Sin clientes registrados'}
           </div>
         ) : (
-          <>
-            <div className="rounded-lg border border-gray-200 bg-white overflow-hidden mb-4">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[960px]">
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50">
-                      {tableColumns.map((column) => (
-                        <th key={column.key} className={column.className}>
-                          {column.label}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">{clientRows}</tbody>
-                </table>
-              </div>
-            </div>
-
-            {totalPages > 1 && (
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-gray-200 bg-white px-6 py-4 rounded-b-lg">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm text-gray-700">
-                    Mostrando <span className="font-medium">{rangoInicio}</span> a{" "}
-                    <span className="font-medium">{rangoFin}</span> de{" "}
-                    <span className="font-medium">{totalClientes}</span> resultados
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(1)}
-                    disabled={!tieneAnterior}
-                    className="h-8 w-8 p-0 bg-white border-gray-300 hover:bg-gray-50"
-                  >
-                    <ChevronsLeft className="h-4 w-4" />
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={!tieneAnterior}
-                    className="h-8 w-8 p-0 bg-white border-gray-300 hover:bg-gray-50"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-
-                  <div className="flex items-center gap-1 mx-2">
-                    {pageNumbers.map((page, index) => (
-                      page === "..." ? (
-                        <span key={`dots-${index}`} className="px-2 text-gray-500">
-                          ...
-                        </span>
-                      ) : (
-                        <Button
-                          key={page}
-                          variant={currentPage === page ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => handlePageChange(page)}
-                          className={`h-8 w-8 p-0 ${
-                            currentPage === page
-                              ? 'bg-gray-900 hover:bg-gray-800 text-white'
-                              : 'bg-white border-gray-300 hover:bg-gray-50 text-gray-700'
-                          }`}
-                        >
-                          {page}
-                        </Button>
-                      )
-                    ))}
-                  </div>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={!tieneSiguiente}
-                    className="h-8 w-8 p-0 bg-white border-gray-300 hover:bg-gray-50"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(totalPages)}
-                    disabled={!tieneSiguiente}
-                    className="h-8 w-8 p-0 bg-white border-gray-300 hover:bg-gray-50"
-                  >
-                    <ChevronsRight className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-700">Mostrar:</span>
-                  <Select
-                    value={String(itemsPerPage)}
-                    onValueChange={handleItemsPerPageChange}
-                  >
-                    <SelectTrigger className="h-8 w-20 bg-white border border-gray-300 hover:border-gray-400 text-gray-900">
-                      <SelectValue placeholder={String(itemsPerPage)} />
-                    </SelectTrigger>
-                    <SelectContent className="bg-white border border-gray-300">
-                      <SelectItem value="10" className="text-gray-900 hover:bg-gray-100">10</SelectItem>
-                      <SelectItem value="25" className="text-gray-900 hover:bg-gray-100">25</SelectItem>
-                      <SelectItem value="50" className="text-gray-900 hover:bg-gray-100">50</SelectItem>
-                      <SelectItem value="100" className="text-gray-900 hover:bg-gray-100">100</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-          </>
+          rows
         )}
+
+        {/* Pagination */}
+        {!isInitialLoading && totalPages > 1 && (
+          <div style={S.pagination}>
+            <button
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={!tieneAnterior}
+              style={S.pgBtn(tieneAnterior)}
+            >
+              <ChevronLeft style={{ width: '12px', height: '12px' }} />
+            </button>
+            <span>Pág {currentPage} / {totalPages}</span>
+            <button
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={!tieneSiguiente}
+              style={S.pgBtn(tieneSiguiente)}
+            >
+              <ChevronRight style={{ width: '12px', height: '12px' }} />
+            </button>
+          </div>
+        )}
+
+        {/* Add client */}
+        <div style={S.addWrap}>
+          <button onClick={onAddClient} style={S.addBtn}>
+            <Plus style={{ width: '12px', height: '12px' }} />
+            Nuevo cliente
+          </button>
+        </div>
       </div>
     </div>
   )
