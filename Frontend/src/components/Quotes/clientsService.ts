@@ -213,20 +213,13 @@ export async function buscarClientes(
   limite: number = DEFAULT_LIMIT
 ): Promise<Cliente[]> {
   try {
-    console.log(`🔍 Buscando clientes con filtro: "${filtro}"`);
-
     const clientes = await fetchClientesLivianos(token, {
       filtro,
       limite,
       pagina: 1,
     });
-
-    const ordenados = priorizarCoincidenciasPorNombre(clientes, filtro, limite);
-
-    console.log(
-      `✅ ${ordenados.length} clientes devueltos desde el backend (sin cargar todo el universo)`
-    );
-    return ordenados;
+    // El backend ya ordena por relevancia (rapidfuzz) — no re-filtrar ni reordenar
+    return clientes;
   } catch (error) {
     console.error("❌ Error buscando clientes:", error);
     return [];
@@ -241,44 +234,45 @@ export async function buscarClientesPorSede(
   limite: number = DEFAULT_LIMIT
 ): Promise<Cliente[]> {
   try {
-    console.log(`🔍 Buscando clientes con filtro: "${filtro}"`);
-
     const clientes = await getClientesPorSede(token, sedeId, {
       filtro,
       limite,
       pagina: 1,
     });
-
-    const ordenados = priorizarCoincidenciasPorNombre(clientes, filtro, limite);
-
-    console.log(`✅ ${ordenados.length} clientes disponibles`);
-    return ordenados;
+    // El backend ya ordena por relevancia (rapidfuzz) — no re-filtrar ni reordenar
+    return clientes;
   } catch (error) {
     console.error("❌ Error buscando clientes por sede:", error);
     return [];
   }
 }
 
-// 🔥 NUEVA FUNCIÓN: Buscar con debounce para el input del modal
-let searchTimeout: NodeJS.Timeout | null = null;
+// 🔥 BUSCAR CON DEBOUNCE — incluye protección contra race conditions
+let _debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let _activeSearchId = 0;
 
-export async function buscarClientesConDebounce(
+export function buscarClientesConDebounce(
   token: string,
   filtro: string,
   callback: (clientes: Cliente[]) => void,
   delay: number = 300
-): Promise<void> {
-  if (searchTimeout) {
-    clearTimeout(searchTimeout);
-  }
-  
-  searchTimeout = setTimeout(async () => {
+): void {
+  if (_debounceTimer) clearTimeout(_debounceTimer);
+
+  const searchId = ++_activeSearchId;
+
+  _debounceTimer = setTimeout(async () => {
     try {
       const resultados = await buscarClientes(token, filtro, 50);
-      callback(resultados);
+      // Solo actualizar la UI si sigue siendo la búsqueda más reciente
+      if (searchId === _activeSearchId) {
+        callback(resultados);
+      }
     } catch (error) {
       console.error("❌ Error en búsqueda con debounce:", error);
-      callback([]);
+      if (searchId === _activeSearchId) {
+        callback([]);
+      }
     }
   }, delay);
 }

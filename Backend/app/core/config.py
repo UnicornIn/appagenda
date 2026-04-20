@@ -12,9 +12,9 @@ from app.admin.routes_locales import router as admin_locales_router
 from app.admin.routes_servicios import router as admin_servicios_router
 from app.admin.routes_profesionales import router as admin_profesionales_router
 from app.admin.routes_system_users import router as admin_system_users_router
-from app.analytics.routes_churn import router as churn_router
-from app.analytics.routes_analytics import router as analytics_router
-from app.analytics.routes_dashboard import router as dashboard_router
+#from app.analytics.routes_churn import router as churn_router
+#from app.analytics.routes_analytics import router as analytics_router
+#from app.analytics.routes_dashboard import router as dashboard_router
 from app.inventary.routes import app_router as inventary_router
 from app.bills.routes import router as billing_router
 from app.analytics.projection_analytics import router as analytics_projection
@@ -84,9 +84,9 @@ app.include_router(admin_profesionales_router)
 app.include_router(admin_system_users_router)
 app.include_router(inventary_router, prefix="/inventary")
 app.include_router(routes_clientes.router, prefix="/clientes", tags=["Clientes"])
-app.include_router(churn_router)
-app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
-app.include_router(dashboard_router)
+#app.include_router(churn_router)
+#app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
+#app.include_router(dashboard_router)
 app.include_router(billing_router, prefix="/api/billing", tags=["Facturación"])
 app.include_router(analytics_projection, prefix="/analytics", tags=["Analytics"])
 app.include_router(commissions_router, prefix="/api/commissions", tags=["Comisiones"])

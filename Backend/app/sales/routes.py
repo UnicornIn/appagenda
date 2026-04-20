@@ -240,11 +240,16 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
             "sede_id": venta.sede_id,
             "$expr": {
                 "$eq": [
-                    {"$toLower": {"$trim": {"input": {"$concat": ["$nombre", " ", "$apellido"]}}}},
-                    nombre_vendedor.lower()
-                ]
-            }
-        })
+                    {"$toLower": {"$trim": {"input": {
+                        "$concat": [
+                            "$nombre", 
+                            " ", 
+                            {"$ifNull": ["$apellido", ""]}  # ← AQUÍ el fix
+                        ]
+                    }}}},
+                nombre_vendedor.lower()
+            ]
+        }})
         if estilista_doc:
             print(f"🔍 Estilista resuelto por nombre: {nombre_vendedor} → {estilista_doc.get('profesional_id')}")
         else:
@@ -425,6 +430,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
         "desglose_pagos": {venta.metodo_pago: num(abono_real), "total": num(total_venta)},
         # ⭐ Vendedor: puede ser el usuario autenticado, un nombre libre, o el estilista asignado
         "vendido_por": nombre_vendedor,
+        "profesional_nombre": nombre_vendedor,  # para facilitar búsquedas y reportes sin tener que resolver ID → nombre
         "profesional_id": profesional_id_guardado,        # ⭐ null si no se asignó estilista
         "facturado_por": email_usuario,
         "notas": venta.notas,

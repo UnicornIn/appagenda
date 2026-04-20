@@ -180,7 +180,7 @@ def _crear_hoja_resumen_caja(ws, resumen: Dict, sede_info: Dict):
     fila += 1
 
     ws[f'A{fila}'] = "- Link de Pago"
-    ws[f'D{fila}'] = resumen["ingresos_otros_metodos"]["link_de_pago"]
+    ws[f'D{fila}'] = resumen["ingresos_otros_metodos"].get("link_de_pago") or resumen["ingresos_otros_metodos"].get("link_pago")
     ws[f'D{fila}'].number_format = '#,##0.00'
     ws[f'D{fila}'].alignment = derecha
     fila += 1
@@ -210,7 +210,7 @@ def _crear_hoja_resumen_caja(ws, resumen: Dict, sede_info: Dict):
     fila += 1
     
     ws[f'A{fila}'] = "- Descuento por Nómina"
-    ws[f'D{fila}'] = resumen["ingresos_otros_metodos"].get("descuento_por_nomina", 0)
+    ws[f'D{fila}'] = resumen["ingresos_otros_metodos"].get("descuento_por_nomina") or resumen["ingresos_otros_metodos"].get("descuento_nomina")
     ws[f'D{fila}'].number_format = '#,##0.00'
     ws[f'D{fila}'].alignment = derecha
     fila += 1
@@ -270,6 +270,7 @@ def _crear_hoja_resumen_caja(ws, resumen: Dict, sede_info: Dict):
         "tarjeta_debito":  "  · Tarjeta Débito",
         "pos":             "  · POS",
         "link_de_pago":    "  · Link de Pago",
+        "link_pago":       "  · Link de Pago",
         "giftcard":        "  · Giftcard",
         "addi":            "  · Addi",
         "otros":           "  · Otros",
@@ -660,10 +661,11 @@ def _crear_hoja_flujo_por_metodo(ws, resumen: Dict, sede_info: Dict, fecha_inici
         ("tarjeta_debito",  "Tarjeta Débito",  ingresos_otros.get("tarjeta_debito", 0)),
         ("pos",             "POS",             ingresos_otros.get("pos", 0)),
         ("transferencia",   "Transferencia",   ingresos_otros.get("transferencia", 0)),
-        ("link_de_pago",    "Link de Pago",    ingresos_otros.get("link_de_pago", 0)),
+        ("link_de_pago",    "Link de Pago",    (ingresos_otros.get("link_de_pago", 0) or 0) + (ingresos_otros.get("link_pago", 0) or 0)),
         ("giftcard",        "Giftcard",        ingresos_otros.get("giftcard", 0)),
         ("addi",            "Addi",            ingresos_otros.get("addi", 0)),
-        ("descuento_por_nomina", "Descuento por Nómina",  ingresos_otros.get("descuento_por_nomina", 0)),
+        ("descuento_por_nomina", "Descuento por Nómina", (ingresos_otros.get("descuento_por_nomina", 0) or 0)
+                                                + (ingresos_otros.get("descuento_nomina", 0) or 0)),
         ("abonos",          "Abonos",          ingresos_otros.get("abonos", 0)),
         ("abono_transferencia","Abonos transferencia",  ingresos_otros.get("abono_transferencia", 0)),  # ← nuevo
         ("otros",           "Otros",           ingresos_otros.get("otros", 0)),
