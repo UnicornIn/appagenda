@@ -298,6 +298,7 @@ export function CreateGiftCardModal({
       comprador_nombre: selectedBuyer.nombre,
       beneficiario_cliente_id: isForAnotherPerson ? undefined : selectedBuyer.id,
       beneficiario_nombre: finalBeneficiaryName,
+      metodo_pago: paymentMethod,
       notas: notesParts.join(" | "),
     };
 

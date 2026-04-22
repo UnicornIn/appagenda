@@ -81,6 +81,8 @@ export interface GiftCardCreatePayload {
   moneda?: string;
   dias_vigencia?: number | null;
   notas?: string;
+  metodo_pago: string;
+  numero_comprobante?: string;
 }
 
 export interface GiftCardUpdatePayload {

@@ -32,12 +32,18 @@ export interface InventoryProductRaw {
   precio?: number | string;
   moneda_local?: string;
   precios?: Record<string, number | string>;
+  referencia?: string;
+  ref?: string;
+  sku?: string;
+  codigo?: string;
+  codigo_producto?: string;
 }
 
 export interface InventoryProduct {
   productId: string;
   inventoryId: string;
   name: string;
+  ref: string;
   category: string;
   description: string;
   active: boolean;
@@ -215,6 +221,7 @@ function normalizeInventoryProduct(raw: InventoryProductRaw, currency: string): 
     productId,
     inventoryId,
     name: String(raw.nombre ?? "Producto sin nombre").trim(),
+    ref: String(raw.referencia ?? raw.ref ?? raw.sku ?? raw.codigo ?? raw.codigo_producto ?? "").trim(),
     category: String(raw.categoria ?? "Sin categoría").trim(),
     description: String(raw.descripcion ?? "").trim(),
     active: raw.activo !== false,
@@ -625,6 +632,10 @@ export async function deleteAllDirectSaleProducts(token: string, saleId: string)
   if (!response.ok) {
     throw new Error(await parseApiError(response));
   }
+}
+
+export async function fetchAllDirectSaleSellers(token: string): Promise<DirectSaleSellerOption[]> {
+  return fetchDirectSaleSellersFromAuthUsers(token);
 }
 
 export async function verifyDirectSaleInBillingReport(
