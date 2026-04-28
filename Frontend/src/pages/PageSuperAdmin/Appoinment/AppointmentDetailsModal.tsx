@@ -25,6 +25,7 @@ interface AppointmentDetailsModalProps {
   onClose: () => void;
   appointment: any;
   onRefresh?: () => void;
+  panelMode?: boolean;
 }
 
 interface PagoModalData {
@@ -329,7 +330,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   open,
   onClose,
   appointment,
-  onRefresh
+  onRefresh,
+  panelMode = false,
 }) => {
   const { user } = useAuth();
   const [updating, setUpdating] = useState(false);
@@ -1830,13 +1832,9 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
   return (
     <>
-      <Modal
-        open={open}
-        onClose={onClose}
-        title=""
-        className="w-full max-w-[95vw] lg:max-w-[85vw] xl:max-w-[75vw]"
-      >
-        <div className="overflow-y-auto max-h-[90vh] md:max-h-[85vh]">
+      {(() => {
+        const innerContent = (
+          <div className={panelMode ? "flex-1 overflow-y-auto" : "overflow-y-auto max-h-[90vh] md:max-h-[85vh]"}>
           {updating ? (
             <div className="flex flex-col items-center justify-center py-4">
               <Loader2 className="w-5 h-5 text-gray-900 animate-spin mb-1" />
@@ -2309,7 +2307,15 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
             </div>
           )}
         </div>
-      </Modal>
+        );
+        return panelMode ? (
+          innerContent
+        ) : (
+          <Modal open={open} onClose={onClose} title="" className="w-full max-w-[95vw] lg:max-w-[85vw] xl:max-w-[75vw]">
+            {innerContent}
+          </Modal>
+        );
+      })()}
 
       {/* Modal para registrar pago/abono */}
       {renderPagoModal()}

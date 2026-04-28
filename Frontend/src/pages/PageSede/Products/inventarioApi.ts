@@ -223,7 +223,7 @@ export async function crearSalida(
   token: string,
   body: CrearSalidaBody
 ): Promise<{ msg: string; salida: SalidaHistorial }> {
-  const res = await fetch(`${API_BASE_URL}inventary/salidas/`, {
+  const res = await fetch(`${API_BASE_URL}inventary/exit/`, {
     method: "POST",
     headers: buildHeaders(token, true),
     body: JSON.stringify(body),
@@ -239,7 +239,7 @@ export async function getSalidas(
 ): Promise<SalidaHistorial[]> {
   const params = buildFiltroParams(filtro);
   if (sedeId) params.set("sede_id", sedeId);
-  const res = await fetch(`${API_BASE_URL}inventary/salidas/?${params}`, {
+  const res = await fetch(`${API_BASE_URL}inventary/exit/?${params}`, {
     headers: buildHeaders(token),
   });
   if (!res.ok) throw new Error(await parseApiError(res));
@@ -248,6 +248,16 @@ export async function getSalidas(
 }
 
 // ─── Movimientos API ──────────────────────────────────────────────────────────
+
+const EMPTY_MOVIMIENTOS: MovimientosResponse = {
+  data: [],
+  total: 0,
+  page: 1,
+  page_size: 20,
+  total_pages: 0,
+  tiene_siguiente: false,
+  tiene_anterior: false,
+};
 
 export async function getMovimientos(
   token: string,
@@ -273,6 +283,7 @@ export async function getMovimientos(
   const res = await fetch(`${API_BASE_URL}inventary/movimientos/?${params}`, {
     headers: buildHeaders(token),
   });
+  if (res.status === 404) return EMPTY_MOVIMIENTOS;
   if (!res.ok) throw new Error(await parseApiError(res));
   return res.json();
 }

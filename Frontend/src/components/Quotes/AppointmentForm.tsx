@@ -1,1000 +1,947 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Plus, Trash2, Wand2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import {
+  ChevronLeft, ChevronRight, ChevronDown, Check, X,
+  Clock, Calendar as CalendarIcon, Search
+} from 'lucide-react';
 import { useAuth } from '../../components/Auth/AuthContext';
 import { getEstilistas, getEstilistaCompleto, Estilista } from '../../components/Professionales/estilistasApi';
 import { getServicios, Servicio } from '../../components/Quotes/serviciosApi';
-import { Cliente } from './clientsService';
+import { Cliente, getHistorialCliente } from './clientsService';
 import { ClientSearch } from '../../pages/PageSuperAdmin/Appoinment/Clients/ClientSearch';
-import { PaymentModal } from '../../pages/PageSede/Appoinment/PaymentMethods/PaymentMethods'; // 🔥 IMPORTAR EL MODAL DE PAGO
-import TimeInputWithPicker from '../ui/time-input-with-picker';
-import { formatAgendaTime, normalizeAgendaTimeValue } from '../../lib/agenda';
-
-interface Service {
-    id: string;
-    profesional_id: string;
-    name: string;
-    duration: number;
-    price: number;
-    moneda?: string;
-}
+import { crearCita } from './citasApi';
 
 interface EstilistaCompleto extends Estilista {
-    servicios_no_presta: string[];
-    especialidades: boolean;
+  servicios_no_presta: string[];
+  especialidades: boolean;
+}
+
+interface SelectedService {
+  servicio_id: string;
+  nombre: string;
+  duracion: number;
+  precio_base: number;
+  precio_personalizado: number | null;
+  precio_final: number;
 }
 
 interface AppointmentSchedulerProps {
-    onClose: () => void;
-    sedeId: string;
-    estilistaId?: string;
-    fecha: string;
-    horaSeleccionada?: string;
-    estilistas?: EstilistaCompleto[];
+  onClose: () => void;
+  sedeId: string;
+  estilistaId?: string;
+  fecha: string;
+  horaSeleccionada?: string;
+  estilistas?: EstilistaCompleto[];
 }
 
-interface CitaParaPago {
-    cliente: string;
-    servicio: string;
-    profesional: string;
-    fecha: string;
-    hora_inicio: string;
-    hora_fin: string;
-    duracion: string;
-    monto_total: number;
-    cliente_id: string;
-    profesional_id: string;
-    
-    // ⭐ CAMBIO: En lugar de servicio_id singular, ahora es servicios (array)
-    servicios: Array<{
-        servicio_id: string;
-        precio_personalizado: number | null;  // null si usa precio de BD
-    }>;
-    
-    sede_id: string;
-    notas: string;
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const ALL_TIMES: string[] = (() => {
+  const t: string[] = [];
+  for (let h = 5; h <= 19; h++) {
+    const maxM = h === 19 ? 0 : 59;
+    for (let m = 0; m <= maxM; m++) {
+      t.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
+    }
+  }
+  return t;
+})();
+
+const PAYMENT_METHODS = [
+  { id: 'efectivo', label: 'Efectivo' },
+  { id: 'transferencia', label: 'Transferencia' },
+  { id: 'tarjeta_credito', label: 'Tarjeta' },
+  { id: 'nequi', label: 'Nequi' },
+  { id: 'daviplata', label: 'Daviplata' },
+];
+
+const MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const DAY_HEADERS = ['Do','Lu','Ma','Mi','Ju','Vi','Sá'];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function parseDateSafely(s: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, mo, d] = s.split('-').map(Number);
+    return new Date(y, mo - 1, d);
+  }
+  return new Date(s);
 }
 
-const SLOT_INTERVAL_MINUTES = 60;
+function formatDateForBackend(d: Date): string {
+  return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+}
+
+function addMinutes(time: string, mins: number): string {
+  const [h, m] = time.split(':').map(Number);
+  const total = h * 60 + m + mins;
+  return `${Math.floor(total / 60).toString().padStart(2, '0')}:${(total % 60).toString().padStart(2, '0')}`;
+}
+
+function formatDateShort(d: Date): string {
+  return `${DAY_HEADERS[d.getDay()]}, ${d.getDate()} ${MONTH_NAMES[d.getMonth()].substring(0, 3)} ${d.getFullYear()}`;
+}
+
+// ─── TimePicker ───────────────────────────────────────────────────────────────
+
+const PICKER_MINUTES = ['00','05','10','15','20','25','30','35','40','45','50','55'];
+
+function to12h(time24: string): { h: string; m: string; ampm: 'a.m.' | 'p.m.' } {
+  const [hh, mm] = time24.split(':').map(Number);
+  const ampm: 'a.m.' | 'p.m.' = hh < 12 ? 'a.m.' : 'p.m.';
+  const h12 = hh % 12 || 12;
+  return { h: h12.toString().padStart(2, '0'), m: mm.toString().padStart(2, '0'), ampm };
+}
+
+function to24h(h: string, m: string, ampm: 'a.m.' | 'p.m.'): string {
+  let hour = parseInt(h, 10);
+  if (ampm === 'a.m.' && hour === 12) hour = 0;
+  if (ampm === 'p.m.' && hour !== 12) hour += 12;
+  return `${hour.toString().padStart(2, '0')}:${m}`;
+}
+
+const TimePicker: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const parsed = useMemo(() => to12h(value || '07:00'), [value]);
+  const [selH, setSelH] = useState(parsed.h);
+  const [selM, setSelM] = useState(parsed.m);
+  const [selAmpm, setSelAmpm] = useState<'a.m.' | 'p.m.'>(parsed.ampm);
+
+  // sync local state when value prop changes externally
+  useEffect(() => {
+    const p = to12h(value || '07:00');
+    setSelH(p.h);
+    setSelM(p.m);
+    setSelAmpm(p.ampm);
+  }, [value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const fn = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', fn);
+    return () => document.removeEventListener('mousedown', fn);
+  }, [open]);
+
+  const PICKER_HOURS = ['06','07','08','09','10','11','12','01','02','03','04','05'];
+  const displayValue = `${selH}:${selM} ${selAmpm}`;
+
+  const pick = (h: string, m: string, ap: 'a.m.' | 'p.m.') => {
+    setSelH(h); setSelM(m); setSelAmpm(ap);
+    onChange(to24h(h, m, ap));
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between border border-gray-300 rounded-lg px-3 py-2.5 bg-white hover:border-gray-700 transition-colors text-sm"
+      >
+        <span className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-gray-400" />
+          <span className="font-medium text-gray-900">{displayValue}</span>
+        </span>
+        <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 top-full mt-1 left-0 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden" style={{ minWidth: '200px' }}>
+          {/* selected display */}
+          <div className="px-3 py-2 border-b border-gray-100 text-center text-sm font-semibold text-gray-900 bg-gray-50">
+            {displayValue}
+          </div>
+          <div className="flex">
+            {/* Hours column */}
+            <div className="flex-1 max-h-44 overflow-y-auto border-r border-gray-100">
+              {PICKER_HOURS.map(h => (
+                <button
+                  key={h}
+                  type="button"
+                  onClick={() => pick(h, selM, selAmpm)}
+                  className={`w-full py-2 text-sm font-medium transition-colors ${
+                    h === selH ? 'bg-[#1976D2] text-white' : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {h}
+                </button>
+              ))}
+            </div>
+            {/* Minutes column */}
+            <div className="flex-1 max-h-44 overflow-y-auto border-r border-gray-100">
+              {PICKER_MINUTES.map(m => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => pick(selH, m, selAmpm)}
+                  className={`w-full py-2 text-sm font-medium transition-colors ${
+                    m === selM ? 'bg-[#1976D2] text-white' : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+            {/* AM/PM column */}
+            <div className="flex-1 flex flex-col">
+              {(['a.m.', 'p.m.'] as const).map(ap => (
+                <button
+                  key={ap}
+                  type="button"
+                  onClick={() => pick(selH, selM, ap)}
+                  className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                    ap === selAmpm ? 'bg-[#1976D2] text-white' : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {ap}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── MiniCalendar ─────────────────────────────────────────────────────────────
+
+const MiniCalendar: React.FC<{
+  selectedDate: Date | null;
+  onSelect: (d: Date) => void;
+  onClose: () => void;
+}> = ({ selectedDate, onSelect, onClose }) => {
+  const [view, setView] = useState(() => selectedDate || new Date());
+
+  const cells = useMemo(() => {
+    const y = view.getFullYear();
+    const mo = view.getMonth();
+    const firstDow = new Date(y, mo, 1).getDay();
+    const daysInMonth = new Date(y, mo + 1, 0).getDate();
+    const prevLast = new Date(y, mo, 0).getDate();
+    const arr: { date: Date; current: boolean }[] = [];
+
+    for (let i = 0; i < firstDow; i++) {
+      arr.push({ date: new Date(y, mo - 1, prevLast - firstDow + i + 1), current: false });
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      arr.push({ date: new Date(y, mo, d), current: true });
+    }
+    while (arr.length < 42) {
+      arr.push({ date: new Date(y, mo + 1, arr.length - firstDow - daysInMonth + 1), current: false });
+    }
+    return arr;
+  }, [view]);
+
+  const today = new Date();
+
+  return (
+    <div className="absolute z-50 top-full mt-1 left-0 bg-white border border-gray-200 rounded-xl shadow-xl p-3 w-60">
+      <div className="flex items-center justify-between mb-2">
+        <button
+          onClick={() => setView(v => new Date(v.getFullYear(), v.getMonth() - 1))}
+          className="p-1 hover:bg-gray-100 rounded"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <span className="text-xs font-semibold">
+          {MONTH_NAMES[view.getMonth()].substring(0, 3)} {view.getFullYear()}
+        </span>
+        <button
+          onClick={() => setView(v => new Date(v.getFullYear(), v.getMonth() + 1))}
+          className="p-1 hover:bg-gray-100 rounded"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-7 mb-1">
+        {DAY_HEADERS.map(d => (
+          <div key={d} className="text-[9px] text-gray-400 text-center font-medium">{d}</div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-0.5">
+        {cells.map(({ date, current }, i) => {
+          const sel = selectedDate?.toDateString() === date.toDateString();
+          const isToday = date.toDateString() === today.toDateString();
+          return (
+            <button
+              key={i}
+              disabled={!current}
+              onClick={() => { if (current) { onSelect(date); onClose(); } }}
+              className={`h-6 w-6 mx-auto flex items-center justify-center text-[10px] rounded-full transition-colors
+                ${!current ? 'text-gray-300' : ''}
+                ${sel ? 'bg-gray-900 text-white' : ''}
+                ${isToday && !sel ? 'border border-gray-400' : ''}
+                ${current && !sel ? 'hover:bg-gray-100 text-gray-700' : ''}
+              `}
+            >
+              {date.getDate()}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-2 pt-2 border-t border-gray-100">
+        <button
+          onClick={() => { const t = new Date(); onSelect(t); onClose(); }}
+          className="w-full text-[10px] text-gray-600 hover:text-gray-900 font-medium py-1 rounded hover:bg-gray-50"
+        >
+          Hoy
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ─── ProgressBar ──────────────────────────────────────────────────────────────
+
+const ProgressBar: React.FC<{ step: number; total: number }> = ({ step, total }) => (
+  <div className="flex gap-1 mb-5">
+    {Array.from({ length: total }, (_, i) => (
+      <div
+        key={i}
+        className={`h-1 flex-1 rounded-full transition-colors duration-300 ${i < step ? 'bg-gray-900' : 'bg-gray-200'}`}
+      />
+    ))}
+  </div>
+);
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
-    onClose,
-    sedeId,
-    estilistaId,
-    fecha,
-    horaSeleccionada,
-    estilistas: estilistasFromProps
+  onClose,
+  sedeId,
+  estilistaId,
+  fecha,
+  horaSeleccionada,
+  estilistas: estilistasFromProps,
 }) => {
-    const { user } = useAuth();
-    const [currentMonth, setCurrentMonth] = useState(new Date());
-    const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-    const [selectedTime, setSelectedTime] = useState(normalizeAgendaTimeValue(horaSeleccionada || '10:00') || '10:00');
-    const [selectedEndTime, setSelectedEndTime] = useState('11:00');
-    const [isEndTimeManual, setIsEndTimeManual] = useState(false);
-    const [showMiniCalendar, setShowMiniCalendar] = useState(false);
-    const [loading, ] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [serviciosSeleccionados, setServiciosSeleccionados] = useState<Array<{
-    servicio_id: string;
-    nombre: string;
-    duracion: number;
-    precio_base: number;
-    precio_personalizado: number | null;
-    precio_final: number;
-    }>>([]);
-    const [selectedStylist, setSelectedStylist] = useState<EstilistaCompleto | null>(null);
-    const [selectedClient, setSelectedClient] = useState<Cliente | null>(null);
-    const [notes, setNotes] = useState('');
-    const [servicioActual, setServicioActual] = useState<Service | null>(null);
-    const [precioPersonalizado, setPrecioPersonalizado] = useState<string>('');
-    const [usarPrecioCustom, setUsarPrecioCustom] = useState(false);
+  const { user } = useAuth();
 
-    // 🔥 NUEVO ESTADO PARA EL MODAL DE PAGO
-    const [showPaymentModal, setShowPaymentModal] = useState(false);
-    const [preparedCitaData, setPreparedCitaData] = useState<CitaParaPago | null>(null);
+  // Step
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [stepError, setStepError] = useState<string | null>(null);
 
-    const [estilistas, setEstilistas] = useState<EstilistaCompleto[]>([]);
-    const [servicios, setServicios] = useState<Servicio[]>([]);
+  // Step 1 — client
+  const [selectedClient, setSelectedClient] = useState<Cliente | null>(null);
+  const [clientHistorial, setClientHistorial] = useState<any[]>([]);
+  const [loadingHistorial, setLoadingHistorial] = useState(false);
 
-    const [loadingEstilistas, setLoadingEstilistas] = useState(false);
-    const [loadingServicios, setLoadingServicios] = useState(false);
+  // Step 2 — services / pro / time
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedTime, setSelectedTime] = useState(horaSeleccionada || '10:00');
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [servicioSearch, setServicioSearch] = useState('');
+  const [serviciosSeleccionados, setServiciosSeleccionados] = useState<SelectedService[]>([]);
+  const [selectedStylist, setSelectedStylist] = useState<EstilistaCompleto | null>(null);
+  const [estilistas, setEstilistas] = useState<EstilistaCompleto[]>([]);
+  const [servicios, setServicios] = useState<Servicio[]>([]);
+  const [loadingEstilistas, setLoadingEstilistas] = useState(false);
+  const [loadingServicios, setLoadingServicios] = useState(false);
 
-    const parseDateSafely = useCallback((dateString: string): Date => {
-        if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-            const [year, month, day] = dateString.split('-').map(Number);
-            return new Date(year, month - 1, day);
-        }
-        return new Date(dateString);
-    }, []);
+  // Step 3 — payment
+  const [showAbono, setShowAbono] = useState(false);
+  const [abonoAmount, setAbonoAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('efectivo');
+  const [isPreCita, setIsPreCita] = useState(false);
 
-    useEffect(() => {
-        if (fecha) {
-            const parsedDate = parseDateSafely(fecha);
-            setSelectedDate(parsedDate);
-            setCurrentMonth(new Date(parsedDate.getFullYear(), parsedDate.getMonth(), 1));
+  // Step 4 — notes / submit
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Currency
+  const currency = useMemo(() => {
+    const p = user?.pais;
+    if (p === 'Colombia') return 'COP';
+    if (p === 'México' || p === 'Mexico') return 'MXN';
+    return 'USD';
+  }, [user?.pais]);
+
+  // Init date / time from props
+  useEffect(() => {
+    setSelectedDate(fecha ? parseDateSafely(fecha) : new Date());
+    if (horaSeleccionada) setSelectedTime(horaSeleccionada);
+  }, [fecha, horaSeleccionada]);
+
+  // Load stylists
+  useEffect(() => {
+    if (!user?.access_token || !sedeId) return;
+    setLoadingEstilistas(true);
+    const load = async () => {
+      try {
+        let list: EstilistaCompleto[] = [];
+        if (estilistasFromProps?.length) {
+          list = estilistasFromProps;
         } else {
-            const today = new Date();
-            setSelectedDate(today);
-            setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+          const raw = await getEstilistas(user.access_token, sedeId);
+          list = await Promise.all(
+            raw.map(async e => {
+              try {
+                const full = await getEstilistaCompleto(user.access_token, e.profesional_id || e._id);
+                return { ...e, servicios_no_presta: full.servicios_no_presta || [], especialidades: full.especialidades || false };
+              } catch {
+                return { ...e, servicios_no_presta: [], especialidades: false };
+              }
+            })
+          );
         }
-
-        if (horaSeleccionada) {
-            const normalizedHora = normalizeAgendaTimeValue(horaSeleccionada) || '10:00';
-            setSelectedTime(normalizedHora);
-            setSelectedEndTime(normalizedHora);
-            setIsEndTimeManual(false);
-        }
-    }, [fecha, horaSeleccionada, parseDateSafely]);
-
-    const formatFechaBonita = useCallback((fecha: Date, hora: string) => {
-        const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-        const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-
-        const dayName = days[fecha.getDay()];
-        const day = fecha.getDate();
-        const month = months[fecha.getMonth()];
-
-        const [hours, minutes] = hora.split(':').map(Number);
-        const period = hours >= 12 ? 'p.m.' : 'a.m.';
-        const formattedHours = hours % 12 || 12;
-        const formattedTime = `${formattedHours}:${minutes.toString().padStart(2, '0')} ${period}`;
-
-        return `${dayName}, ${day} de ${month}, ${formattedTime}`;
-    }, []);
-
-    const calcularDuracionTexto = useCallback((duracionMinutos: number) => {
-        const horas = Math.floor(duracionMinutos / 60);
-        const minutos = duracionMinutos % 60;
-
-        if (horas === 0) {
-            return `${minutos} min`;
-        } else if (minutos === 0) {
-            return `${horas} h`;
-        } else {
-            return `${horas} h ${minutos} min`;
-        }
-    }, []);
-
-    const eliminarDuplicados = useCallback((estilistasList: EstilistaCompleto[]) => {
-        const estilistasUnicos = Array.from(
-            new Map(
-                estilistasList.map(e => [e.profesional_id || e._id, e])
-            ).values()
-        );
-        return estilistasUnicos;
-    }, []);
-
-    useEffect(() => {
-        const cargarEstilistas = async () => {
-            if (!user?.access_token || !sedeId) return;
-
-            setLoadingEstilistas(true);
-            try {
-                let estilistasData: EstilistaCompleto[] = [];
-
-                if (estilistasFromProps && estilistasFromProps.length > 0) {
-                    estilistasData = eliminarDuplicados(estilistasFromProps);
-                } else {
-                    const estilistasApi = await getEstilistas(user.access_token, sedeId);
-
-                    if (estilistasApi.length > 0) {
-                        const estilistasConDetalles = await Promise.all(
-                            estilistasApi.map(async (estilista) => {
-                                try {
-                                    const estilistaCompleto = await getEstilistaCompleto(user.access_token, estilista.profesional_id || estilista._id);
-                                    return {
-                                        ...estilista,
-                                        servicios_no_presta: estilistaCompleto.servicios_no_presta || [],
-                                        especialidades: estilistaCompleto.especialidades || false
-                                    };
-                                } catch (error) {
-                                    return {
-                                        ...estilista,
-                                        servicios_no_presta: [],
-                                        especialidades: false
-                                    };
-                                }
-                            })
-                        );
-
-                        estilistasData = estilistasConDetalles;
-                    } else {
-                        estilistasData = [];
-                    }
-
-                    estilistasData = eliminarDuplicados(estilistasData);
-                }
-
-                setEstilistas(estilistasData);
-
-                let estilistaSeleccionado: EstilistaCompleto | null = null;
-
-                if (estilistaId && estilistasData.length > 0) {
-                    estilistaSeleccionado = estilistasData.find(e =>
-                        (e.profesional_id === estilistaId) || (e._id === estilistaId)
-                    ) || null;
-                }
-
-                if (!estilistaSeleccionado && estilistasData.length > 0) {
-                    estilistaSeleccionado = estilistasData[0];
-                }
-
-                setSelectedStylist(estilistaSeleccionado);
-
-            } catch (error) {
-                setError("Error al cargar los estilistas");
-                setEstilistas([]);
-            }
-            finally {
-                setLoadingEstilistas(false);
-            }
-        };
-
-        cargarEstilistas();
-    }, [sedeId, estilistaId, user?.access_token, estilistasFromProps, eliminarDuplicados]);
-
-    useEffect(() => {
-        const cargarServicios = async () => {
-            if (!user?.access_token) {
-                setServicios([]);
-                return;
-            }
-
-            setLoadingServicios(true);
-            try {
-                const serviciosData = await getServicios(user.access_token);
-                setServicios(serviciosData);
-            } catch (error) {
-                setError("Error al cargar los servicios");
-                setServicios([]);
-            }
-            finally {
-                setLoadingServicios(false);
-            }
-        };
-
-        cargarServicios();
-    }, [user?.access_token]);
-
-    const handleAgregarServicio = useCallback(() => {
-    if (!servicioActual) return;
-
-    // Verificar si ya está agregado
-    if (serviciosSeleccionados.some(s => s.servicio_id === servicioActual.id)) {
-        setError('⚠️ Este servicio ya está agregado');
-        return;
-    }
-
-    const nuevoServicio = {
-        servicio_id: servicioActual.id,
-        nombre: servicioActual.name,
-        duracion: servicioActual.duration,
-        precio_base: servicioActual.price,
-        precio_personalizado: usarPrecioCustom && precioPersonalizado 
-            ? parseFloat(precioPersonalizado) 
-            : null,
-        precio_final: usarPrecioCustom && precioPersonalizado 
-            ? parseFloat(precioPersonalizado) 
-            : servicioActual.price
+        const seen = new Set<string>();
+        list = list.filter(e => {
+          const k = e.profesional_id || e._id;
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+        setEstilistas(list);
+        const pre = estilistaId
+          ? list.find(e => e.profesional_id === estilistaId || e._id === estilistaId) ?? list[0]
+          : list[0];
+        if (pre) setSelectedStylist(pre);
+      } catch {
+        setEstilistas([]);
+      } finally {
+        setLoadingEstilistas(false);
+      }
     };
+    load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sedeId, estilistaId, user?.access_token]);
 
-    setServiciosSeleccionados([...serviciosSeleccionados, nuevoServicio]);
-    
-    // Resetear campos
-    setServicioActual(null);
-    setPrecioPersonalizado('');
-    setUsarPrecioCustom(false);
-    setError(null);
-    }, [servicioActual, precioPersonalizado, usarPrecioCustom, serviciosSeleccionados]);
+  // Load services
+  useEffect(() => {
+    if (!user?.access_token) return;
+    setLoadingServicios(true);
+    getServicios(user.access_token)
+      .then(setServicios)
+      .catch(() => setServicios([]))
+      .finally(() => setLoadingServicios(false));
+  }, [user?.access_token]);
 
-    // =================================================
-// 🔥 PASO 3: FUNCIÓN PARA ELIMINAR SERVICIO
-// =================================================
+  // Fetch client historial
+  useEffect(() => {
+    if (!selectedClient || !user?.access_token) { setClientHistorial([]); return; }
+    const id = selectedClient.cliente_id || (selectedClient as any)._id;
+    if (!id) return;
+    setLoadingHistorial(true);
+    getHistorialCliente(user.access_token, id)
+      .then(h => setClientHistorial(Array.isArray(h) ? h : []))
+      .catch(() => setClientHistorial([]))
+      .finally(() => setLoadingHistorial(false));
+  }, [selectedClient, user?.access_token]);
 
-const handleEliminarServicio = useCallback((servicioId: string) => {
-    setServiciosSeleccionados(serviciosSeleccionados.filter(s => s.servicio_id !== servicioId));
-}, [serviciosSeleccionados]);
+  // Services filtered by stylist + search
+  const serviciosFiltrados = useMemo(() => {
+    if (!servicios.length) return [];
+    let list = servicios;
+    if (selectedStylist?.servicios_no_presta?.length) {
+      const blocked = new Set(selectedStylist.servicios_no_presta.map(String));
+      list = list.filter(s => !blocked.has(s.servicio_id || s._id));
+    }
+    const q = servicioSearch.toLowerCase().trim();
+    if (!q) return list;
+    return list.filter(s => s.nombre.toLowerCase().includes(q) || (s.categoria || '').toLowerCase().includes(q));
+  }, [servicios, selectedStylist, servicioSearch]);
 
-// =================================================
-// 🔥 PASO 4: FUNCIÓN PARA EDITAR PRECIO
-// =================================================
+  // Totals
+  const { duracionTotal, montoTotal } = useMemo(() => ({
+    duracionTotal: serviciosSeleccionados.reduce((s, x) => s + x.duracion, 0),
+    montoTotal: serviciosSeleccionados.reduce((s, x) => s + x.precio_final, 0),
+  }), [serviciosSeleccionados]);
 
-    const handleEditarPrecio = useCallback((servicioId: string, nuevoPrecio: string) => {
-    setServiciosSeleccionados(serviciosSeleccionados.map(s => {
-        if (s.servicio_id === servicioId) {
-            const precioNum = nuevoPrecio ? parseFloat(nuevoPrecio) : null;
-            return {
-                ...s,
-                precio_personalizado: precioNum,
-                precio_final: precioNum || s.precio_base
-            };
-        }
-        return s;
+  const horaFin = useMemo(
+    () => selectedTime ? addMinutes(selectedTime, Math.max(duracionTotal, 60)) : '',
+    [selectedTime, duracionTotal]
+  );
+
+  const lastServiceName = useMemo(() => {
+    if (!clientHistorial.length) return null;
+    const last = clientHistorial[0];
+    return last?.servicio || last?.servicio_nombre || last?.servicios?.[0]?.nombre || null;
+  }, [clientHistorial]);
+
+  // Service handlers
+  const addService = useCallback((s: Servicio) => {
+    const id = s.servicio_id || s._id;
+    if (serviciosSeleccionados.some(x => x.servicio_id === id)) return;
+    const price = s.precio_local ?? s.precio ?? 0;
+    setServiciosSeleccionados(prev => [...prev, {
+      servicio_id: id,
+      nombre: s.nombre,
+      duracion: s.duracion_minutos || s.duracion || 30,
+      precio_base: price,
+      precio_personalizado: null,
+      precio_final: price,
+    }]);
+  }, [serviciosSeleccionados]);
+
+  const removeService = useCallback((id: string) => {
+    setServiciosSeleccionados(prev => prev.filter(s => s.servicio_id !== id));
+  }, []);
+
+  const updateServicePrice = useCallback((id: string, val: string) => {
+    setServiciosSeleccionados(prev => prev.map(s => {
+      if (s.servicio_id !== id) return s;
+      const p = val ? parseFloat(val) : null;
+      return { ...s, precio_personalizado: p, precio_final: p ?? s.precio_base };
     }));
-}, [serviciosSeleccionados]);
+  }, []);
 
-// =================================================
-// 🔥 PASO 5: CALCULAR TOTALES
-// =================================================
+  const handleStylistChange = useCallback((id: string) => {
+    const s = estilistas.find(e => (e.profesional_id || e._id) === id);
+    if (s) { setSelectedStylist(s); setServiciosSeleccionados([]); }
+  }, [estilistas]);
 
-const calcularTotales = useCallback(() => {
-    const total = serviciosSeleccionados.reduce((sum, s) => sum + s.precio_final, 0);
-    const duracion = serviciosSeleccionados.reduce((sum, s) => sum + s.duracion, 0);
-    return { total, duracion };
-}, [serviciosSeleccionados]);
-
-const { total: montoTotal, duracion: duracionTotal } = calcularTotales();
-
-const convertirHoraAMinutos = useCallback((hora: string): number => {
-    const [hours, minutes] = String(hora || '').split(':').map(Number);
-    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return NaN;
-    return (hours * 60) + minutes;
-}, []);
-
-// =================================================
-// 🔥 PASO 6: ACTUALIZAR handleContinuar
-// =================================================
-
-const handleContinuar = async () => {
-    if (!selectedClient) {
-        setError('Por favor selecciona o crea un cliente');
-        return;
+  // Navigation
+  const handleNext = useCallback(() => {
+    setStepError(null);
+    if (step === 1) {
+      if (!selectedClient) { setStepError('Por favor selecciona un cliente'); return; }
+      setStep(2);
+    } else if (step === 2) {
+      if (serviciosSeleccionados.length === 0) { setStepError('Agrega al menos un servicio'); return; }
+      if (!selectedStylist) { setStepError('Selecciona un profesional'); return; }
+      if (!selectedDate) { setStepError('Selecciona una fecha'); return; }
+      if (!selectedTime) { setStepError('Selecciona una hora'); return; }
+      setStep(3);
+    } else if (step === 3) {
+      setStep(4);
     }
+  }, [step, selectedClient, serviciosSeleccionados, selectedStylist, selectedDate, selectedTime]);
 
-    if (serviciosSeleccionados.length === 0) {
-        setError('Por favor agrega al menos un servicio');
-        return;
-    }
+  const handleBack = useCallback(() => {
+    setStepError(null);
+    if (step === 2) setStep(1);
+    else if (step === 3) setStep(2);
+    else if (step === 4) setStep(3);
+  }, [step]);
 
-    if (!selectedStylist || !selectedStylist.profesional_id) {
-        setError('Por favor selecciona un estilista');
-        return;
-    }
-
-    if (!selectedDate) {
-        setError('Por favor selecciona una fecha');
-        return;
-    }
-
-    if (!sedeId) {
-        setError('No se ha especificado la sede');
-        return;
-    }
-
-    if (!selectedEndTime) {
-        setError('Por favor selecciona la hora de fin');
-        return;
-    }
-
-    const inicioMinutos = convertirHoraAMinutos(selectedTime);
-    const finMinutos = convertirHoraAMinutos(selectedEndTime);
-    if (!Number.isFinite(inicioMinutos) || !Number.isFinite(finMinutos) || finMinutos <= inicioMinutos) {
-        setError('La hora de fin debe ser mayor que la hora de inicio');
-        return;
-    }
-
-    const duracionBloqueMinutos = finMinutos - inicioMinutos;
-
-    setError(null);
-
+  // Submit
+  const handleSubmit = async () => {
+    if (!selectedClient || !selectedStylist || !selectedDate) return;
+    setSubmitting(true);
+    setSubmitError(null);
     try {
-        // ⭐ PREPARAR ARRAY DE SERVICIOS PARA BACKEND
-        const serviciosParaBackend = serviciosSeleccionados.map(s => ({
-            servicio_id: s.servicio_id,
-            precio_personalizado: s.precio_personalizado
-        }));
-
-        // Crear resumen de nombres de servicios
-        const nombresServicios = serviciosSeleccionados.map(s => s.nombre).join(', ');
-
-        const citaParaPago: CitaParaPago = {
-            cliente: selectedClient.nombre,
-            servicio: nombresServicios,  // Para mostrar en UI
-            profesional: selectedStylist.nombre,
-            fecha: formatFechaBonita(selectedDate, selectedTime),
-            hora_inicio: selectedTime,
-            hora_fin: selectedEndTime,
-            duracion: calcularDuracionTexto(duracionBloqueMinutos),
-            monto_total: montoTotal,
-            cliente_id: selectedClient.cliente_id,
-            profesional_id: selectedStylist.profesional_id,
-            
-            // ⭐ ENVIAR ARRAY DE SERVICIOS
-            servicios: serviciosParaBackend,
-            
-            sede_id: sedeId,
-            notas: notes
-        };
-
-        setPreparedCitaData(citaParaPago);
-        setShowPaymentModal(true);
-
-    } catch (error: any) {
-        setError("Error al preparar los datos para el pago");
+      const parsedAbono = Number(abonoAmount) || 0;
+      await crearCita({
+        sede_id: sedeId,
+        cliente_id: selectedClient.cliente_id,
+        profesional_id: selectedStylist.profesional_id || selectedStylist._id,
+        servicios: serviciosSeleccionados.map(s => ({
+          servicio_id: s.servicio_id,
+          precio_personalizado: s.precio_personalizado,
+        })),
+        fecha: formatDateForBackend(selectedDate),
+        hora_inicio: selectedTime,
+        hora_fin: horaFin,
+        abono: isPreCita ? 0 : parsedAbono,
+        metodo_pago: isPreCita || parsedAbono === 0 ? 'sin_pago' : paymentMethod,
+        notas: notes,
+        estado: isPreCita ? 'pre-cita' : 'confirmada',
+        valor_total: montoTotal,
+        cliente_nombre: selectedClient.nombre,
+      }, user!.access_token);
+      onClose();
+    } catch (err: any) {
+      setSubmitError(err?.message || 'Error al crear la cita');
+    } finally {
+      setSubmitting(false);
     }
   };
-    
 
-    
+  // ─── Render ────────────────────────────────────────────────────────────────
 
-    const handleStylistChange = useCallback((estilistaId: string) => {
-        const estilista = estilistas.find(e =>
-            (e.profesional_id === estilistaId) || (e._id === estilistaId)
-        );
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      <ProgressBar step={step} total={4} />
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1 -mr-1">
 
-        if (estilista) {
-            setSelectedStylist(estilista);
-            setServiciosSeleccionados([]);
-            setServicioActual(null);
-        }
-    }, [estilistas]);
+      {/* ── STEP 1: CLIENT ─────────────────────────────────────────────────── */}
+      {step === 1 && (
+        <div className="space-y-4">
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Paso 1 de 4</p>
+            <h3 className="text-base font-bold text-gray-900">Selecciona el cliente</h3>
+          </div>
 
-    const filtrarServiciosPorEstilista = useCallback((serviciosList: Servicio[], estilista: EstilistaCompleto) => {
-        if (!estilista || !serviciosList.length) {
-            return [];
-        }
+          <ClientSearch
+            sedeId={sedeId}
+            selectedClient={selectedClient}
+            onClientSelect={setSelectedClient}
+            onClientClear={() => setSelectedClient(null)}
+            required
+          />
 
-        const serviciosBloqueados = new Set((estilista.servicios_no_presta || []).map(String));
-        return serviciosList.filter((servicio) => {
-            const servicioId = servicio.servicio_id || servicio._id;
-            return !serviciosBloqueados.has(servicioId);
-        });
-    }, []);
-
-    const serviciosFiltrados = useMemo(() => {
-        if (!selectedStylist || servicios.length === 0) {
-            return [];
-        }
-        return filtrarServiciosPorEstilista(servicios, selectedStylist);
-    }, [selectedStylist, servicios, filtrarServiciosPorEstilista]);
-
-    const serviciosAMostrar = useMemo(() =>
-        serviciosFiltrados.map(s => ({
-            id: s.servicio_id || s._id,
-            profesional_id: s.servicio_id || s._id,
-            name: s.nombre,
-            duration: Number(s.duracion_minutos) || s.duracion || 30,
-            price: s.precio_local !== undefined ? s.precio_local : s.precio ?? 0,
-            moneda: s.moneda_local || 'USD'
-        })),
-        [serviciosFiltrados]
-    );
-
-    const serviciosById = useMemo(() => {
-        const map = new Map<string, Service>();
-        serviciosAMostrar.forEach((service) => {
-            map.set(service.profesional_id, service);
-        });
-        return map;
-    }, [serviciosAMostrar]);
-
-    const handleClientSelect = useCallback((cliente: Cliente) => {
-        setSelectedClient(cliente);
-    }, []);
-
-    const handleClientClear = useCallback(() => {
-        setSelectedClient(null);
-    }, []);
-
-    const generateCalendarDays = useCallback(() => {
-        const year = currentMonth.getFullYear();
-        const month = currentMonth.getMonth();
-        const firstDay = new Date(year, month, 1);
-        const lastDay = new Date(year, month + 1, 0);
-        const firstDayOfWeek = firstDay.getDay();
-        const daysInMonth = lastDay.getDate();
-        const prevMonthLastDay = new Date(year, month, 0).getDate();
-        const days = [];
-
-        for (let i = 0; i < firstDayOfWeek; i++) {
-            const day = prevMonthLastDay - firstDayOfWeek + i + 1;
-            const date = new Date(year, month - 1, day);
-            days.push({
-                date,
-                isCurrentMonth: false,
-                isToday: false,
-                isSelected: selectedDate?.toDateString() === date.toDateString()
-            });
-        }
-
-        for (let day = 1; day <= daysInMonth; day++) {
-            const date = new Date(year, month, day);
-            days.push({
-                date,
-                isCurrentMonth: true,
-                isToday: date.toDateString() === new Date().toDateString(),
-                isSelected: selectedDate?.toDateString() === date.toDateString()
-            });
-        }
-
-        const totalCells = 42;
-        const remainingDays = totalCells - days.length;
-        for (let day = 1; day <= remainingDays; day++) {
-            const date = new Date(year, month + 1, day);
-            days.push({
-                date,
-                isCurrentMonth: false,
-                isToday: false,
-                isSelected: false
-            });
-        }
-
-        return days;
-    }, [currentMonth, selectedDate]);
-
-    const formatDateHeader = useCallback((date: Date) => {
-        const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-        const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-        
-        return {
-            day: days[date.getDay()],
-            date: date.getDate(),
-            month: months[date.getMonth()],
-            fullMonth: months[date.getMonth()],
-            year: date.getFullYear()
-        };
-    }, []);
-
-    const navigateMonth = useCallback((direction: 'prev' | 'next') => {
-        setCurrentMonth(prev => {
-            const newDate = new Date(prev);
-            if (direction === 'prev') {
-                newDate.setMonth(prev.getMonth() - 1);
-            } else {
-                newDate.setMonth(prev.getMonth() + 1);
-            }
-            return newDate;
-        });
-    }, []);
-
-    const calculateEndTime = useCallback((startTime: string, duration: number) => {
-        const [hours, minutes] = startTime.split(':').map(Number);
-        const totalMinutes = hours * 60 + minutes + duration;
-        const endHours = Math.floor(totalMinutes / 60);
-        const endMinutes = totalMinutes % 60;
-        return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
-    }, []);
-
-    useEffect(() => {
-        if (!selectedTime || isEndTimeManual) return;
-
-        const duracionAuto = duracionTotal > 0 ? duracionTotal : SLOT_INTERVAL_MINUTES;
-        setSelectedEndTime(calculateEndTime(selectedTime, duracionAuto));
-    }, [selectedTime, duracionTotal, isEndTimeManual, calculateEndTime]);
-
-    const handleDateButtonClick = useCallback(() => {
-        setShowMiniCalendar(!showMiniCalendar);
-    }, [showMiniCalendar]);
-
-    const handleDateSelect = useCallback((date: Date) => {
-        setSelectedDate(date);
-        setShowMiniCalendar(false);
-    }, []);
-
-    const handleCloseSelectors = useCallback(() => {
-        setShowMiniCalendar(false);
-    }, []);
-
-        // 🔥 FUNCIÓN PARA MANEJAR ÉXITO DEL PAGO
-    const handlePaymentSuccess = () => {
-        // Cerrar ambos modales
-        setShowPaymentModal(false);
-        onClose();
-        
-        // Puedes agregar aquí algún callback de éxito si necesitas
-        // Por ejemplo: mostrar un toast, actualizar la lista de citas, etc.
-    };
-
-    // 🔥 FUNCIÓN PARA VOLVER A EDITAR DESDE EL MODAL DE PAGO
-    const handleBackToEdit = () => {
-        // Cerrar modal de pago, mantener abierto el de edición
-        setShowPaymentModal(false);
-        // El usuario permanece en el modal de edición
-    };
-
-    // 🔥 AGREGAR ESTOS useMemo QUE FALTAN (después de handleBackToEdit)
-    const calendarDays = useMemo(() => generateCalendarDays(), [generateCalendarDays]);
-    const dayHeaders = useMemo(() => ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'], []);
-
-
-    const getCurrencySymbol = useCallback(() => {
-        const paisUsuario = user?.pais;
-        if (paisUsuario === 'Colombia') return 'COP';
-        if (paisUsuario === 'México' || paisUsuario === 'Mexico') return 'MXN';
-        return 'USD';
-    }, [user?.pais]);
-
-    const currencySymbol = getCurrencySymbol();
-
-    // MiniCalendar compacto
-    const MiniCalendar = useCallback(() => {
-        return (
-            <div className="absolute z-[9999] mt-1 w-56 bg-white border border-gray-300 rounded shadow-lg p-2">
-                <div className="flex items-center justify-between mb-1">
-                    <button
-                        onClick={() => navigateMonth('prev')}
-                        className="p-1 hover:bg-gray-100 rounded"
-                    >
-                        <ChevronLeft className="w-3 h-3" />
-                    </button>
-                    <div className="text-xs font-semibold text-gray-900">
-                        {formatDateHeader(currentMonth).fullMonth.substring(0, 3)} {currentMonth.getFullYear()}
-                    </div>
-                    <button
-                        onClick={() => navigateMonth('next')}
-                        className="p-1 hover:bg-gray-100 rounded"
-                    >
-                        <ChevronRight className="w-3 h-3" />
-                    </button>
-                </div>
-
-                <div className="grid grid-cols-7 gap-0.5 mb-1">
-                    {dayHeaders.map((day, i) => (
-                        <div key={`day-header-${i}`} className="text-[9px] font-medium text-gray-500 text-center">
-                            {day}
-                        </div>
-                    ))}
-                </div>
-
-                <div className="grid grid-cols-7 gap-0.5">
-                    {calendarDays.map(({ date, isCurrentMonth, isToday, isSelected }, i) => (
-                        <button
-                            key={`calendar-day-${date.toISOString()}-${i}`}
-                            onClick={() => isCurrentMonth && handleDateSelect(date)}
-                            disabled={!isCurrentMonth}
-                            className={`h-5 w-5 text-[9px] flex items-center justify-center rounded transition-all
-                                ${!isCurrentMonth ? 'text-gray-300 cursor-default' : ''}
-                                ${isSelected ? 'bg-gray-900 text-white' : ''}
-                                ${isToday && !isSelected ? 'bg-gray-100 text-gray-900 border border-gray-300' : ''}
-                                ${isCurrentMonth && !isSelected && !isToday ? 'hover:bg-gray-100 text-gray-700' : ''}`}
-                        >
-                            {date.getDate()}
-                        </button>
-                    ))}
-                </div>
-
-                <div className="mt-1 pt-1 border-t border-gray-200">
-                    <button
-                        onClick={() => {
-                            const today = new Date();
-                            setCurrentMonth(new Date());
-                            handleDateSelect(today);
-                        }}
-                        className="w-full text-[10px] text-gray-900 hover:bg-gray-100 font-medium py-1 rounded"
-                    >
-                        Hoy
-                    </button>
-                </div>
-            </div>
-        );
-    }, [currentMonth, calendarDays, dayHeaders, formatDateHeader, navigateMonth, handleDateSelect]);
-
-    return (
-        <>
-            <div className="relative">
-                {/* Header fijo */}
-
-                <div className="max-h-[calc(70vh-50px)] overflow-y-auto px-1">
-                    {error && (
-                        <div className="mb-3 p-2 bg-gray-100 border border-gray-300 rounded text-xs text-gray-700">
-                            <div className="font-semibold mb-1">Error</div>
-                            {error}
-                            <button
-                                onClick={() => setError(null)}
-                                className="float-right text-gray-600 hover:text-gray-900"
-                            >
-                                <X className="w-3 h-3" />
-                            </button>
-                        </div>
+          {selectedClient && (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-1">
+              <div className="text-sm font-semibold text-gray-900">{selectedClient.nombre}</div>
+              {selectedClient.telefono && (
+                <div className="text-xs text-gray-500">{selectedClient.telefono}</div>
+              )}
+              <div className="flex items-center gap-3 pt-1">
+                {loadingHistorial ? (
+                  <span className="text-xs text-gray-400">Cargando historial…</span>
+                ) : (
+                  <>
+                    <span className="text-xs text-gray-600">
+                      <span className="font-semibold text-gray-900">{clientHistorial.length}</span>{' '}
+                      visita{clientHistorial.length !== 1 ? 's' : ''}
+                    </span>
+                    {lastServiceName && (
+                      <span className="text-xs text-gray-500">
+                        Último: <span className="font-medium text-gray-700">{lastServiceName}</span>
+                      </span>
                     )}
-
-                    <div className="space-y-3">
-                        <div className="space-y-1">
-                            <ClientSearch
-                                sedeId={sedeId}
-                                selectedClient={selectedClient}
-                                onClientSelect={handleClientSelect}
-                                onClientClear={handleClientClear}
-                                required={true}
-                            />
-                        </div>
-
-                        {/* ESTILISTA */}
-                        <div className="space-y-1">
-                            <label className="block text-xs font-semibold text-gray-700">
-                                Estilista *
-                            </label>
-                            <select
-                                value={selectedStylist?.profesional_id || selectedStylist?._id || ''}
-                                disabled={loadingEstilistas || estilistas.length === 0}
-                                onChange={(e) => handleStylistChange(e.target.value)}
-                                className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white disabled:bg-gray-100"
-                            >
-                                <option value="">
-                                    {loadingEstilistas
-                                        ? '🔄 Cargando...'
-                                        : estilistas.length === 0
-                                            ? '❌ No hay estilistas'
-                                            : '👨‍💼 Seleccionar...'
-                                    }
-                                </option>
-                                {estilistas.map(stylist => (
-                                    <option
-                                        key={`stylist-${stylist.profesional_id || stylist._id}`}
-                                        value={stylist.profesional_id || stylist._id}
-                                    >
-                                        {stylist.nombre}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* SERVICIO - VERSIÓN NUEVA CON MÚLTIPLES SERVICIOS */}
-                        <div className="space-y-1">
-                            <label className="block text-xs font-semibold text-gray-700">
-                                Servicios *
-                            </label>
-
-                            {!selectedStylist ? (
-                                <div className="p-2 bg-gray-100 rounded text-xs text-gray-600 text-center">
-                                    👆 Selecciona un estilista primero
-                                </div>
-                            ) : (
-                                <>
-                                    {/* Selector de servicio */}
-                                    <select
-                                        value={servicioActual?.profesional_id || ''}
-                                        disabled={loadingServicios || serviciosAMostrar.length === 0}
-                                        onChange={(e) => setServicioActual(serviciosById.get(e.target.value) || null)}
-                                        className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white disabled:bg-gray-100"
-                                    >
-                                        <option value="">
-                                            {loadingServicios
-                                                ? '🔄 Cargando...'
-                                                : serviciosAMostrar.length === 0
-                                                    ? '❌ No hay servicios'
-                                                    : '💇‍♀️ Seleccionar servicio...'
-                                            }
-                                        </option>
-                                        {serviciosAMostrar.map(service => (
-                                            <option key={`service-${service.profesional_id}`} value={service.profesional_id}>
-                                                {service.name} - {service.duration}min - {currencySymbol} {service.price}
-                                            </option>
-                                        ))}
-                                    </select>
-
-                                    {/* Checkbox precio personalizado */}
-                                    {servicioActual && (
-                                        <div className="mt-2">
-                                            <label className="flex items-center gap-2 text-xs">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={usarPrecioCustom}
-                                                    onChange={(e) => {
-                                                        setUsarPrecioCustom(e.target.checked);
-                                                        if (!e.target.checked) setPrecioPersonalizado('');
-                                                    }}
-                                                    className="rounded border-gray-300"
-                                                />
-                                                <span className="text-gray-700">Usar precio personalizado</span>
-                                            </label>
-                                        </div>
-                                    )}
-
-                                    {/* Input precio personalizado */}
-                                    {usarPrecioCustom && servicioActual && (
-                                        <div className="mt-2">
-                                            <input
-                                                type="number"
-                                                value={precioPersonalizado}
-                                                onChange={(e) => setPrecioPersonalizado(e.target.value)}
-                                                placeholder={`Precio (base: ${currencySymbol} ${servicioActual.price})`}
-                                                className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none"
-                                            />
-                                        </div>
-                                    )}
-
-                                    {/* Botón agregar servicio */}
-                                    {servicioActual && (
-                                        <button
-                                            onClick={handleAgregarServicio}
-                                            className="w-full mt-2 bg-gray-900 text-white py-1.5 rounded text-xs font-semibold hover:bg-gray-800 flex items-center justify-center gap-1"
-                                        >
-                                            <Plus className="w-3 h-3" />
-                                            Agregar servicio
-                                        </button>
-                                    )}
-
-                                    {/* Lista de servicios agregados */}
-                                    {serviciosSeleccionados.length > 0 && (
-                                        <div className="mt-2 space-y-2">
-                                            <div className="text-xs font-semibold text-gray-700">
-                                                Servicios agregados ({serviciosSeleccionados.length})
-                                            </div>
-                                            {serviciosSeleccionados.map((servicio, index) => (
-                                                <div
-                                                    key={`selected-${servicio.servicio_id}-${index}`}
-                                                    className="p-2 border border-gray-300 rounded bg-gray-50"
-                                                >
-                                                    <div className="flex items-start justify-between mb-1">
-                                                        <div className="flex-1">
-                                                            <div className="text-xs font-semibold text-gray-900">
-                                                                {servicio.nombre}
-                                                            </div>
-                                                            <div className="flex items-center gap-2 text-[10px] text-gray-600 mt-0.5">
-                                                                <span>{servicio.duracion}min</span>
-                                                                {servicio.precio_personalizado !== null && (
-                                                                    <span className="text-orange-600 font-medium">⚡ Custom</span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        <button
-                                                            onClick={() => handleEliminarServicio(servicio.servicio_id)}
-                                                            className="p-1 hover:bg-red-50 rounded text-red-600"
-                                                            aria-label="Eliminar servicio"
-                                                        >
-                                                            <Trash2 className="w-3 h-3" />
-                                                        </button>
-                                                    </div>
-
-                                                    <div className="flex items-center justify-between">
-                                                        {servicio.precio_personalizado !== null ? (
-                                                            <>
-                                                                <span className="text-[10px] text-gray-500 line-through">
-                                                                    {currencySymbol} {servicio.precio_base}
-                                                                </span>
-                                                                <span className="text-xs font-bold text-orange-600">
-                                                                    {currencySymbol} {servicio.precio_final}
-                                                                </span>
-                                                            </>
-                                                        ) : (
-                                                            <span className="text-xs font-bold text-gray-900">
-                                                                {currencySymbol} {servicio.precio_final}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                {/* Input para editar precio */}
-                                                <input
-                                                type="number"
-                                                value={servicio.precio_personalizado || ''}
-                                                onChange={(e) => handleEditarPrecio(servicio.servicio_id, e.target.value)}
-                                                placeholder={`Editar precio (base: ${servicio.precio_base})`}
-                                                className="w-full border border-gray-300 rounded px-2 py-1 text-[10px] focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none"
-                                                />
-                                            </div>
-                                        ))}
-
-                                            {/* Resumen total */}
-                                            <div className="p-2 border-2 border-gray-900 rounded bg-gray-50">
-                                                <div className="flex justify-between items-center">
-                                                    <div className="text-xs text-gray-700">
-                                                        Total ({duracionTotal} min)
-                                                    </div>
-                                                    <div className="text-sm font-bold text-gray-900">
-                                                        {currencySymbol} {montoTotal}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </>
-                            )}
-                        </div>
-                        {/* FECHA Y HORA */}
-                        <div className="space-y-1">
-                            <label className="block text-xs font-semibold text-gray-700">
-                                Fecha y Hora *
-                            </label>
-                            <div className="grid grid-cols-2 gap-2">
-                                <div className="relative">
-                                    <button
-                                        onClick={handleDateButtonClick}
-                                        className="w-full flex items-center justify-between border border-gray-300 rounded px-2 py-1.5 hover:border-gray-900 bg-white text-xs"
-                                    >
-                                        <span className="flex items-center gap-1">
-                                            <CalendarIcon className="w-3 h-3" />
-                                            {selectedDate
-                                                ? `${formatDateHeader(selectedDate).date} ${formatDateHeader(selectedDate).month.substring(0, 3)}`
-                                                : '📅 Fecha'
-                                            }
-                                        </span>
-                                    </button>
-                                    {showMiniCalendar && <MiniCalendar />}
-                                </div>
-
-                                <div className="relative">
-                                    <TimeInputWithPicker
-                                        value={selectedTime}
-                                        onChange={(e) => {
-                                            const nextValue = normalizeAgendaTimeValue(e.target.value);
-                                            if (!nextValue) return;
-                                            setSelectedTime(nextValue);
-                                        }}
-                                        step={60}
-                                        inputClassName="hide-native-time-indicator w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white"
-                                        buttonClassName="h-5 w-5"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="mt-2">
-                                <div className="mb-2 space-y-1">
-                                    <label className="block text-xs font-semibold text-gray-700">
-                                        Hora fin *
-                                    </label>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            const duracionAuto = duracionTotal > 0 ? duracionTotal : SLOT_INTERVAL_MINUTES;
-                                            setSelectedEndTime(calculateEndTime(selectedTime, duracionAuto));
-                                            setIsEndTimeManual(false);
-                                        }}
-                                        className="inline-flex w-full items-center justify-center gap-1 rounded border border-gray-300 bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-200 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40"
-                                    >
-                                        <Wand2 className="h-3 w-3" />
-                                        Auto
-                                    </button>
-                                </div>
-                                <TimeInputWithPicker
-                                    value={selectedEndTime}
-                                    onChange={(e) => {
-                                        setSelectedEndTime(e.target.value);
-                                        setIsEndTimeManual(true);
-                                    }}
-                                    inputClassName="hide-native-time-indicator w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white"
-                                    buttonClassName="h-5 w-5"
-                                />
-                                <p className="mt-1 text-[10px] text-gray-500">
-                                    Hora inicio: {formatAgendaTime(selectedTime)} · Hora fin: {formatAgendaTime(selectedEndTime)} ({isEndTimeManual ? 'manual' : 'automática según servicios'})
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* NOTAS */}
-                        <div className="space-y-1">
-                            <label className="block text-xs font-semibold text-gray-700">
-                                Notas <span className="text-gray-500 font-normal">(opcional)</span>
-                            </label>
-                            <textarea
-                                value={notes}
-                                onChange={(e) => setNotes(e.target.value)}
-                                placeholder="Notas..."
-                                className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none resize-none"
-                                rows={2}
-                            />
-                        </div>
-
-                        {/* BOTÓN - CAMBIADO A handleContinuar */}
-                        <button
-                            onClick={handleContinuar}
-                            disabled={!selectedClient || serviciosSeleccionados.length === 0 || !selectedStylist || !selectedDate || !selectedEndTime || loading}
-                            className="w-full bg-gray-900 text-white py-2 rounded text-xs font-semibold hover:bg-gray-800 active:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-                        >
-                            Continuar
-                        </button>
-                    </div>
-                </div>
-
-                {/* Overlay para cerrar selectores */}
-                {showMiniCalendar && (
-                    <div
-                        className="fixed inset-0 z-[9998]"
-                        onClick={handleCloseSelectors}
-                    />
+                  </>
                 )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── STEP 2: SERVICES + PRO + TIME ──────────────────────────────────── */}
+      {step === 2 && (
+        <div className="space-y-4">
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Paso 2 de 4</p>
+            <h3 className="text-base font-bold text-gray-900">Servicio, profesional y hora</h3>
+          </div>
+
+          {/* Service search + list */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">Servicios *</label>
+            <div className="relative mb-2">
+              <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-gray-400" />
+              <input
+                type="text"
+                value={servicioSearch}
+                onChange={e => setServicioSearch(e.target.value)}
+                placeholder="Buscar servicio…"
+                className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none"
+              />
             </div>
 
-            {/* 🔥 MODAL DE PAGO */}
-            {showPaymentModal && preparedCitaData && (
-                <PaymentModal
-                    isOpen={showPaymentModal}
-                    onClose={() => setShowPaymentModal(false)}
-                    citaData={preparedCitaData}
-                    onSuccess={handlePaymentSuccess}
-                    onBackToEdit={handleBackToEdit}
-                />
+            <div className="border border-gray-200 rounded-xl max-h-44 overflow-y-auto">
+              {loadingServicios ? (
+                <p className="p-3 text-xs text-gray-400 text-center">Cargando servicios…</p>
+              ) : serviciosFiltrados.length === 0 ? (
+                <p className="p-3 text-xs text-gray-400 text-center">No hay servicios disponibles</p>
+              ) : (
+                serviciosFiltrados.map(s => {
+                  const id = s.servicio_id || s._id;
+                  const added = serviciosSeleccionados.some(x => x.servicio_id === id);
+                  const price = s.precio_local ?? s.precio ?? 0;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => added ? removeService(id) : addService(s)}
+                      className={`w-full text-left px-3 py-2.5 flex items-center justify-between border-b border-gray-100 last:border-b-0 transition-colors ${
+                        added ? 'bg-gray-900 text-white' : 'hover:bg-gray-50 text-gray-800'
+                      }`}
+                    >
+                      <div>
+                        <div className="text-xs font-medium">{s.nombre}</div>
+                        <div className={`text-[10px] mt-0.5 ${added ? 'text-gray-300' : 'text-gray-500'}`}>
+                          {s.duracion_minutos || s.duracion}min · {currency} {price}
+                        </div>
+                      </div>
+                      {added && <Check className="w-3.5 h-3.5 flex-shrink-0" />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            {serviciosSeleccionados.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {serviciosSeleccionados.map(s => (
+                  <div key={s.servicio_id} className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs">
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium text-gray-900 truncate">{s.nombre}</span>
+                      <span className="text-gray-400 ml-1">· {s.duracion}min</span>
+                    </div>
+                    <input
+                      type="number"
+                      value={s.precio_personalizado !== null ? s.precio_personalizado : s.precio_base}
+                      onChange={e => updateServicePrice(s.servicio_id, e.target.value)}
+                      className="w-20 border border-gray-200 rounded px-1.5 py-1 text-[10px] text-right focus:outline-none focus:border-gray-700"
+                    />
+                    <button onClick={() => removeService(s.servicio_id)} className="text-red-400 hover:text-red-600 flex-shrink-0">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <div className="flex justify-end text-xs font-semibold text-gray-900 pr-1">
+                  {currency} {montoTotal} · {duracionTotal} min
+                </div>
+              </div>
             )}
-        </>
-    );
+          </div>
+
+          {/* Stylist */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">Profesional *</label>
+            <select
+              value={selectedStylist?.profesional_id || selectedStylist?._id || ''}
+              onChange={e => handleStylistChange(e.target.value)}
+              disabled={loadingEstilistas}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white disabled:bg-gray-100"
+            >
+              {loadingEstilistas
+                ? <option>Cargando…</option>
+                : <>
+                  <option value="">Seleccionar profesional</option>
+                  {estilistas.map(e => (
+                    <option key={e.profesional_id || e._id} value={e.profesional_id || e._id}>{e.nombre}</option>
+                  ))}
+                </>
+              }
+            </select>
+          </div>
+
+          {/* Date + Time */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Fecha *</label>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowCalendar(o => !o)}
+                  className="w-full flex items-center gap-2 border border-gray-300 rounded-lg px-3 py-2.5 bg-white hover:border-gray-700 text-sm transition-colors"
+                >
+                  <CalendarIcon className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  <span className="text-gray-900 truncate">
+                    {selectedDate ? `${selectedDate.getDate()}/${selectedDate.getMonth() + 1}/${selectedDate.getFullYear()}` : 'Fecha'}
+                  </span>
+                </button>
+                {showCalendar && (
+                  <MiniCalendar
+                    selectedDate={selectedDate}
+                    onSelect={setSelectedDate}
+                    onClose={() => setShowCalendar(false)}
+                  />
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Hora inicio *</label>
+              <TimePicker value={selectedTime} onChange={setSelectedTime} />
+            </div>
+          </div>
+
+          {selectedTime && duracionTotal > 0 && (
+            <p className="text-xs text-gray-500">
+              Fin estimado: <span className="font-medium text-gray-700">{horaFin}</span>
+              {' · '}Duración: <span className="font-medium text-gray-700">{duracionTotal} min</span>
+            </p>
+          )}
+
+          {showCalendar && (
+            <div className="fixed inset-0 z-40" onClick={() => setShowCalendar(false)} />
+          )}
+        </div>
+      )}
+
+      {/* ── STEP 3: SUMMARY + PAYMENT ─────────────────────────────────────── */}
+      {step === 3 && selectedClient && selectedStylist && selectedDate && (
+        <div className="space-y-4">
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Paso 3 de 4</p>
+            <h3 className="text-base font-bold text-gray-900">Resumen y pago</h3>
+          </div>
+
+          {/* Summary */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+            <div>
+              <div className="text-sm font-bold text-gray-900">{selectedClient.nombre}</div>
+              <div className="text-xs text-gray-500 mt-0.5">
+                {clientHistorial.length} visita{clientHistorial.length !== 1 ? 's' : ''}
+                {lastServiceName && <> · Último: {lastServiceName}</>}
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 pt-2 space-y-1">
+              {serviciosSeleccionados.map(s => (
+                <div key={s.servicio_id} className="flex justify-between text-xs">
+                  <span className="text-gray-700">{s.nombre} <span className="text-gray-400">({s.duracion}min)</span></span>
+                  <span className="font-semibold">{currency} {s.precio_final}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-gray-200 pt-2">
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-gray-600">{selectedStylist.nombre}</span>
+                <span className="text-sm font-bold text-gray-900">{currency} {montoTotal}</span>
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5">
+                {formatDateShort(selectedDate)} · {selectedTime} — {horaFin}
+              </div>
+            </div>
+          </div>
+
+          {/* Abono */}
+          <div className="border border-gray-200 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowAbono(o => !o)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 transition-colors"
+            >
+              <span className="text-sm font-medium text-gray-900">
+                {showAbono ? 'Quitar abono' : '+ Agregar abono'}
+              </span>
+              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showAbono ? 'rotate-180' : ''}`} />
+            </button>
+
+            {showAbono && !isPreCita && (
+              <div className="px-4 pb-4 pt-2 border-t border-gray-100 space-y-3 bg-white">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Monto del abono</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-xs text-gray-500">{currency}</span>
+                    <input
+                      type="number"
+                      value={abonoAmount}
+                      onChange={e => setAbonoAmount(e.target.value)}
+                      placeholder="0"
+                      className="w-full border border-gray-300 rounded-lg pl-12 pr-3 py-2.5 text-sm focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-2">Método de pago</label>
+                  <div className="flex flex-wrap gap-2">
+                    {PAYMENT_METHODS.map(pm => (
+                      <button
+                        key={pm.id}
+                        type="button"
+                        onClick={() => setPaymentMethod(pm.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                          paymentMethod === pm.id
+                            ? 'bg-gray-900 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        {pm.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Pre-cita toggle */}
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <button
+              type="button"
+              onClick={() => setIsPreCita(o => !o)}
+              className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${isPreCita ? 'bg-gray-900' : 'bg-gray-200'}`}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${isPreCita ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </button>
+            <div>
+              <div className="text-sm font-medium text-gray-900">Pre-cita</div>
+              <div className="text-xs text-gray-500">La cita quedará pendiente de confirmar</div>
+            </div>
+          </label>
+        </div>
+      )}
+
+      {/* ── STEP 4: NOTES ─────────────────────────────────────────────────── */}
+      {step === 4 && (
+        <div className="space-y-4">
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Paso 4 de 4</p>
+            <h3 className="text-base font-bold text-gray-900">Notas adicionales</h3>
+            <p className="text-xs text-gray-500 mt-1">Agrega cualquier información relevante para esta cita</p>
+          </div>
+
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            placeholder="Ej: Cliente prefiere técnica específica, alergias, observaciones importantes…"
+            className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none resize-none"
+            rows={5}
+          />
+
+          {submitError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-start justify-between gap-2">
+              <span>{submitError}</span>
+              <button onClick={() => setSubmitError(null)} className="flex-shrink-0"><X className="w-3.5 h-3.5" /></button>
+            </div>
+          )}
+
+          {/* Final summary */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-600 space-y-1">
+            <div>
+              <span className="font-semibold text-gray-900">{selectedClient?.nombre}</span>
+              {' · '}{serviciosSeleccionados.length} servicio{serviciosSeleccionados.length !== 1 ? 's' : ''}
+            </div>
+            <div>
+              {selectedStylist?.nombre}
+              {selectedDate && <> · {formatDateShort(selectedDate)}</>}
+              {' · '}{selectedTime}
+            </div>
+            <div>
+              Total: <span className="font-semibold text-gray-900">{currency} {montoTotal}</span>
+              {showAbono && !isPreCita && Number(abonoAmount) > 0 && (
+                <> · Abono: {currency} {abonoAmount}</>
+              )}
+              {isPreCita && <> · <span className="text-amber-600 font-semibold">Pre-cita</span></>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Step error */}
+      {stepError && (
+        <div className="mt-3 p-2.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center justify-between">
+          <span>{stepError}</span>
+          <button onClick={() => setStepError(null)}><X className="w-3 h-3" /></button>
+        </div>
+      )}
+      </div>{/* end scrollable area */}
+
+      {/* Navigation — always visible at bottom */}
+      <div className="flex gap-2 pt-4 mt-2 border-t border-gray-100 flex-shrink-0">
+        {step > 1 && (
+          <button
+            type="button"
+            onClick={handleBack}
+            className="flex-1 py-2.5 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            ← Anterior
+          </button>
+        )}
+        {step < 4 ? (
+          <button
+            type="button"
+            onClick={handleNext}
+            className="flex-1 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-800 transition-colors"
+          >
+            Siguiente →
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="flex-1 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {submitting ? 'Creando cita…' : 'Confirmar Cita'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
 };
 
 export default React.memo(AppointmentScheduler);
