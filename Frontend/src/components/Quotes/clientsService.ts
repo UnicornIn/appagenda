@@ -37,12 +37,6 @@ export interface CrearClienteRequest {
 type FetchClientesOpts = { filtro?: string; limite?: number; pagina?: number };
 const DEFAULT_LIMIT = 25;
 
-const normalize = (value?: string) =>
-  (value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
 const withOptionalField = (
   payload: Record<string, string>,
   key: string,
@@ -115,75 +109,34 @@ const fetchClientesLivianos = async (
   return clientes.map(normalizarCliente);
 };
 
-const priorizarCoincidenciasPorNombre = (
-  clientes: Cliente[],
+// 🔥 BÚSQUEDA DIRECTA CON RAPIDFUZZ (backend) — endpoint GET /clientes/
+export async function buscarClientesRapidFuzz(
+  token: string,
   filtro?: string,
-  limite: number = DEFAULT_LIMIT
-) => {
-  if (!filtro) return clientes.slice(0, limite);
+  limite: number = 20
+): Promise<Cliente[]> {
+  try {
+    const url = new URL(`${API_BASE_URL}clientes/`);
+    const q = filtro?.trim();
+    if (q) url.searchParams.set("filtro", q);
+    url.searchParams.set("limite", String(Math.min(Math.max(limite, 1), 100)));
 
-  const filtroNorm = normalize(filtro);
-  const buscaEmail = filtro.includes("@");
+    const res = await fetch(url.toString(), {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "include",
+    });
 
-  // Si el usuario teclea un correo, buscamos por correo/ID/teléfono directamente
-  if (buscaEmail) {
-    const porEmail = clientes.filter(
-      (c) =>
-        normalize(c.correo).includes(filtroNorm) ||
-        normalize(c.cliente_id).includes(filtroNorm) ||
-        normalize(c.telefono).includes(filtroNorm)
-    );
-    return porEmail.slice(0, limite);
+    if (!res.ok) throw new Error(`Error ${res.status}`);
+    const data = await res.json();
+    return (Array.isArray(data) ? data : []).map(normalizarCliente);
+  } catch (error) {
+    console.error("❌ Error en buscarClientesRapidFuzz:", error);
+    return [];
   }
-
-  // Ranking por nombre:
-  // 1) nombre comienza con filtro
-  // 2) alguna palabra del nombre comienza con filtro
-  // 3) nombre contiene filtro
-  const empiezaCon = clientes.filter((c) =>
-    normalize(c.nombre).startsWith(filtroNorm)
-  );
-
-  const palabraEmpieza = clientes.filter((c) => {
-    const palabras = normalize(c.nombre).split(/\s+/);
-    return palabras.some((p) => p.startsWith(filtroNorm));
-  });
-
-  const contiene = clientes.filter(
-    (c) =>
-      !empiezaCon.includes(c) &&
-      !palabraEmpieza.includes(c) &&
-      normalize(c.nombre).includes(filtroNorm)
-  );
-
-  // fallback: otros campos (tel/ID) solo si no hubo coincidencias de nombre
-  const fallbackMatches = clientes.filter((c) => {
-    const coincideTelefono = normalize(c.telefono).includes(filtroNorm);
-    const coincideId = normalize(c.cliente_id).includes(filtroNorm);
-    return coincideTelefono || coincideId;
-  });
-
-  const unidos = [
-    ...empiezaCon,
-    ...palabraEmpieza.filter((c) => !empiezaCon.includes(c)),
-    ...contiene,
-    ...fallbackMatches,
-  ];
-
-  // evitar duplicados respetando el orden
-  const únicos: Cliente[] = [];
-  const vistos = new Set<string>();
-  for (const c of unidos) {
-    const key = c.cliente_id || c._id || c.nombre;
-    if (!vistos.has(key)) {
-      únicos.push(c);
-      vistos.add(key);
-    }
-    if (únicos.length >= limite) break;
-  }
-
-  return únicos.slice(0, limite);
-};
+}
 
 // 🔥 OBTENER CLIENTES POR SEDE (ahora paginado y sin traer los 42k de golpe)
 export async function getClientesPorSede(

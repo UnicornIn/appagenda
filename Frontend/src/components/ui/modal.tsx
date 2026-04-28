@@ -17,9 +17,9 @@ const Modal: React.FC<ModalProps> = ({ open, onClose, title, children, className
   const sizeClass = size === 'sm' ? 'max-w-sm' : size === 'md' ? 'max-w-md' : size === 'lg' ? 'max-w-4xl' : size === 'xl' ? 'max-w-6xl' : size === 'full' ? 'max-w-full' : 'max-w-lg';
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className={`bg-white rounded-2xl shadow-xl w-full ${sizeClass} relative ${className}`}>
-        <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
+      <div className={`bg-white rounded-2xl shadow-xl w-full ${sizeClass} relative flex flex-col max-h-[90vh] ${className}`}>
+        <div className="p-4 border-b border-gray-200 flex justify-between items-center flex-shrink-0">
           <h2 className="text-lg font-semibold">{title}</h2>
           <button
             onClick={onClose}
@@ -29,7 +29,7 @@ const Modal: React.FC<ModalProps> = ({ open, onClose, title, children, className
           </button>
         </div>
 
-        <div className="p-6 overflow-y-auto max-h-[90vh]">{children}</div>
+        <div className="flex-1 min-h-0 overflow-y-auto p-6 flex flex-col">{children}</div>
       </div>
     </div>
   );

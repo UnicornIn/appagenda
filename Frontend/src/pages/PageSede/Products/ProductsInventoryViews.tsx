@@ -86,7 +86,8 @@ const resolveToken = (user: any): string | null =>
   window.localStorage.getItem("access_token") ||
   null;
 
-const resolveSedeId = (user: any, activeSedeId?: string | null): string =>
+const resolveSedeId = (user: any, activeSedeId?: string | null, overrideSedeId?: string): string =>
+  (overrideSedeId && overrideSedeId !== "all" ? overrideSedeId : null) ||
   activeSedeId ||
   user?.sede_id ||
   window.sessionStorage.getItem("beaux-sede_id") ||
@@ -98,9 +99,10 @@ const resolveSedeId = (user: any, activeSedeId?: string | null): string =>
 interface DashboardTabProps {
   productos: InventarioProducto[];
   sedeLabel?: string;
+  sedeId?: string;
 }
 
-export function InventoryDashboardTab({ productos, sedeLabel = "Sede" }: DashboardTabProps) {
+export function InventoryDashboardTab({ productos, sedeLabel = "Sede", sedeId: sedeIdProp }: DashboardTabProps) {
   const { user, activeSedeId } = useAuth();
   const [topProductos, setTopProductos] = useState<TopProducto[]>([]);
   const [sinMovimiento, setSinMovimiento] = useState<ProductoSinMovimiento[]>([]);
@@ -110,21 +112,21 @@ export function InventoryDashboardTab({ productos, sedeLabel = "Sede" }: Dashboa
 
   useEffect(() => {
     const token = resolveToken(user);
-    const sedeId = resolveSedeId(user, activeSedeId);
-    if (!token) return;
+    const sedeId = resolveSedeId(user, activeSedeId, sedeIdProp);
+    if (!token || !sedeId) return;
 
     setLoadingTop(true);
-    getTopProductos(token, filtro, 5, sedeId || undefined)
+    getTopProductos(token, filtro, 5, sedeId)
       .then(setTopProductos)
       .catch(() => setTopProductos([]))
       .finally(() => setLoadingTop(false));
 
     setLoadingSlow(true);
-    getSinMovimiento(token, filtro, sedeId || undefined)
+    getSinMovimiento(token, filtro, sedeId)
       .then((data) => setSinMovimiento(data.slice(0, 4)))
       .catch(() => setSinMovimiento([]))
       .finally(() => setLoadingSlow(false));
-  }, [user, activeSedeId]);
+  }, [user, activeSedeId, sedeIdProp]);
 
   const totalProductos = productos.length;
   const totalUnidades = productos.reduce((a, p) => a + Number(p.stock_actual ?? 0), 0);
@@ -286,11 +288,12 @@ function KpiCard({ label, value, alert = false }: { label: string; value: number
 interface MovimientosTabProps {
   productos: InventarioProducto[];
   sedeLabel?: string;
+  sedeId?: string;
 }
 
 type MovFiltroTipo = "todos" | "Entrada" | "Salida";
 
-export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: MovimientosTabProps) {
+export function InventoryMovimientosTab({ productos, sedeLabel = "Sede", sedeId: sedeIdProp }: MovimientosTabProps) {
   const { user, activeSedeId } = useAuth();
   const [filtroTipo, setFiltroTipo] = useState<MovFiltroTipo>("todos");
   const [search, setSearch] = useState("");
@@ -304,8 +307,8 @@ export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: Movim
 
   const fetchMovimientos = () => {
     const token = resolveToken(user);
-    const sedeId = resolveSedeId(user, activeSedeId);
-    if (!token) return;
+    const sedeId = resolveSedeId(user, activeSedeId, sedeIdProp);
+    if (!token || !sedeId) return;
 
     setLoading(true);
     setError(null);
@@ -315,7 +318,7 @@ export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: Movim
       tipo: filtroTipo !== "todos" ? filtroTipo : undefined,
       page,
       page_size: 20,
-      sede_id: sedeId || undefined,
+      sede_id: sedeId,
     })
       .then(setResponse)
       .catch((err: unknown) =>
@@ -326,7 +329,7 @@ export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: Movim
 
   useEffect(() => {
     fetchMovimientos();
-  }, [filtroTipo, filtro, page, user, activeSedeId]);
+  }, [filtroTipo, filtro, page, user, activeSedeId, sedeIdProp]);
 
   const handleFiltroTipo = (tipo: MovFiltroTipo) => {
     setFiltroTipo(tipo);
@@ -776,6 +779,7 @@ function MovimientoModal({
 
 interface KardexTabProps {
   productos: InventarioProducto[];
+  sedeId?: string;
 }
 
 const kardexTypeBadge = (tipo: string) => {
@@ -784,7 +788,7 @@ const kardexTypeBadge = (tipo: string) => {
   return "border-gray-200 bg-gray-50 text-gray-600";
 };
 
-export function InventoryKardexTab({ productos }: KardexTabProps) {
+export function InventoryKardexTab({ productos, sedeId: sedeIdProp }: KardexTabProps) {
   const { user, activeSedeId } = useAuth();
   const [selectedId, setSelectedId] = useState(productos[0]?._id ?? "");
   const [search, setSearch] = useState("");
@@ -799,8 +803,8 @@ export function InventoryKardexTab({ productos }: KardexTabProps) {
   useEffect(() => {
     if (!selectedProduct) return;
     const token = resolveToken(user);
-    const sedeId = resolveSedeId(user, activeSedeId);
-    if (!token) return;
+    const sedeId = resolveSedeId(user, activeSedeId, sedeIdProp);
+    if (!token || !sedeId) return;
 
     setLoading(true);
     setError(null);
@@ -810,14 +814,14 @@ export function InventoryKardexTab({ productos }: KardexTabProps) {
       producto_id: selectedProduct.producto_id,
       page,
       page_size: 20,
-      sede_id: sedeId || undefined,
+      sede_id: sedeId,
     })
       .then(setResponse)
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Error cargando kardex")
       )
       .finally(() => setLoading(false));
-  }, [selectedId, filtro, page, user, activeSedeId]);
+  }, [selectedId, filtro, page, user, activeSedeId, sedeIdProp]);
 
   const handleSelectProduct = (id: string) => {
     setSelectedId(id);
