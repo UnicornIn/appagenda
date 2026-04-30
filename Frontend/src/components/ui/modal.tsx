@@ -29,7 +29,7 @@ const Modal: React.FC<ModalProps> = ({ open, onClose, title, children, className
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-6 flex flex-col">{children}</div>
+        <div className="overflow-y-auto scrollbar-hide p-6">{children}</div>
       </div>
     </div>
   );

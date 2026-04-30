@@ -556,9 +556,9 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col">
       <ProgressBar step={step} total={4} />
-      <div className="flex-1 min-h-0 overflow-y-auto pr-1 -mr-1">
+      <div>
 
       {/* ── STEP 1: CLIENT ─────────────────────────────────────────────────── */}
       {step === 1 && (
@@ -908,10 +908,10 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
           <button onClick={() => setStepError(null)}><X className="w-3 h-3" /></button>
         </div>
       )}
-      </div>{/* end scrollable area */}
+      </div>
 
-      {/* Navigation — always visible at bottom */}
-      <div className="flex gap-2 pt-4 mt-2 border-t border-gray-100 flex-shrink-0">
+      {/* Navigation */}
+      <div className="flex gap-2 pt-4 mt-2 border-t border-gray-100">
         {step > 1 && (
           <button
             type="button"

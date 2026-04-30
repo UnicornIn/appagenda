@@ -26,7 +26,7 @@ interface ClientsListProps {
   isInitialLoading?: boolean
 }
 
-type FilterType = 'Todos' | 'Activos' | 'Inactivos 30d+' | 'Nuevos' | 'VIP'
+type FilterType = 'Todos' | 'Inactivos 180d+' | 'Nuevos'
 
 const fmt = (n: number) => "$" + Math.round(n).toLocaleString("es-CO")
 const ini = (n: string) =>
@@ -218,7 +218,7 @@ function ClientsListComponent({
       {/* Filters + Sede selector */}
       <div style={{ padding: '10px 20px 0' }}>
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-          {(['Todos', 'Activos', 'Inactivos 30d+', 'Nuevos', 'VIP'] as FilterType[]).map(filterBtn)}
+          {(['Todos', 'Inactivos 180d+', 'Nuevos'] as FilterType[]).map(filterBtn)}
         </div>
         {sedes.length > 0 && (
           <select

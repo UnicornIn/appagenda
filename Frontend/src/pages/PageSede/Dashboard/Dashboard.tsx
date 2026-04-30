@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { Sidebar } from "../../../components/Layout/Sidebar";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import { formatSedeNombre } from "../../../lib/sede";
@@ -236,6 +237,7 @@ const buildExtendedMetrics = (facturas: FacturaConverted[]): ExtendedMetrics => 
 };
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const { user, isAuthenticated, activeSedeId, setActiveSedeId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [loadingSedes, setLoadingSedes] = useState(true);
@@ -1061,20 +1063,25 @@ export default function DashboardPage() {
     titleSub,
     children,
     scrollable,
+    action,
   }: {
     title: string;
     titleSub?: string;
     children: React.ReactNode;
     scrollable?: boolean;
+    action?: React.ReactNode;
   }) => (
     <div className="bg-white border border-slate-200 rounded-[10px] p-[18px]">
       <div className="text-[13px] font-bold mb-3 flex justify-between items-center text-slate-800">
         <span>{title}</span>
-        {titleSub && (
-          <span className="text-[10px] text-slate-400 font-medium">
-            {titleSub}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {titleSub && (
+            <span className="text-[10px] text-slate-400 font-medium">
+              {titleSub}
+            </span>
+          )}
+          {action}
+        </div>
       </div>
       {scrollable ? (
         <div className="max-h-[260px] overflow-y-auto">{children}</div>
@@ -1399,6 +1406,14 @@ export default function DashboardPage() {
                   title="Ranking por ingreso generado"
                   titleSub="servicios + productos"
                   scrollable
+                  action={
+                    <button
+                      onClick={() => navigate("/sede/stylists")}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 font-medium transition-colors"
+                    >
+                      Ver todos →
+                    </button>
+                  }
                 >
                   {extendedMetrics && extendedMetrics.topEstilistas.length > 0 ? (
                     extendedMetrics.topEstilistas.map((est, idx) => (
@@ -1441,7 +1456,17 @@ export default function DashboardPage() {
                 </Card>
 
                 {/* Productos más vendidos */}
-                <Card title="Productos más vendidos">
+                <Card
+                  title="Productos más vendidos"
+                  action={
+                    <button
+                      onClick={() => navigate("/sede/products")}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 font-medium transition-colors"
+                    >
+                      Ver todos →
+                    </button>
+                  }
+                >
                   {extendedMetrics && extendedMetrics.topProductos.length > 0 ? (
                     <>
                       {extendedMetrics.topProductos.map((p) => (
@@ -1509,7 +1534,7 @@ export default function DashboardPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+              <div className="grid grid-cols-1 ">
                 {/* P&L detallado */}
                 <Card title="Estado de resultados (P&L)" titleSub={getPeriodDisplay()}>
                   <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mb-1.5">
@@ -1564,7 +1589,7 @@ export default function DashboardPage() {
                   </div>
                 </Card>
 
-                {/* Gastos por categoría */}
+                {/* Gastos por categoría
                 <Card title="Gastos por categoría" titleSub="% del gasto total">
                   <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-[11px] text-slate-500 leading-relaxed">
                     Los datos de gastos por categoría (comisiones, arriendo,
@@ -1572,7 +1597,7 @@ export default function DashboardPage() {
                     actuales. Registra los egresos en el módulo de contabilidad
                     para ver esta sección.
                   </div>
-                </Card>
+                </Card> */}
               </div>
             </>
           )}

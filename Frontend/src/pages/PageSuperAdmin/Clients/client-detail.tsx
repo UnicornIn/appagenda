@@ -279,7 +279,7 @@ function CapilarTab({ client }: { client: Cliente }) {
           <div style={S.capCard}>
             <div style={S.capLabel}>Rizotipo</div>
             <div style={S.capValue}>{client.rizotipo || '—'}</div>
-            <div style={S.capDetail}>Clasificación André Walker</div>
+            {/* <div style={S.capDetail}>Clasificación André Walker</div> */}
           </div>
           <div style={S.capCard}>
             <div style={S.capLabel}>Porosidad</div>
@@ -453,8 +453,8 @@ function NotasTab({ client, onNoteAdded }: { client: Cliente; onNoteAdded?: () =
     }
   }, [newNote, client.id, onNoteAdded, autorName])
 
-  const notes = Array.isArray((client as any).notas_historial)
-    ? (client as any).notas_historial as Array<{ contenido: string; fecha: string; autor?: string }>
+  const notes = Array.isArray(client.notas_historial) && client.notas_historial.length > 0
+    ? client.notas_historial
     : client.nota
     ? [{ contenido: client.nota, fecha: '', autor: '' }]
     : []
@@ -522,11 +522,11 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
   const [isEditOpen, setIsEditOpen] = useState(false)
   const navigate = useNavigate()
 
-  const handleLlamar = useCallback(() => {
-    if (client.telefono && client.telefono !== 'No disponible') {
-      window.location.href = `tel:${client.telefono.trim()}`
-    }
-  }, [client.telefono])
+  // const handleLlamar = useCallback(() => {
+  //   if (client.telefono && client.telefono !== 'No disponible') {
+  //     window.location.href = `tel:${client.telefono.trim()}`
+  //   }
+  // }, [client.telefono])
 
   const handleWhatsApp = useCallback(() => {
     if (client.telefono && client.telefono !== 'No disponible') {
@@ -567,7 +567,7 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
           </div>
         </div>
         <div style={S.dActions}>
-          <button style={S.dBtn} onClick={handleLlamar}>Llamar</button>
+          {/* <button style={S.dBtn} onClick={handleLlamar}>Llamar</button> */}
           <button style={S.dBtn} onClick={handleWhatsApp}>WhatsApp</button>
           <button style={S.dBtn} onClick={() => setIsEditOpen(true)}>Editar</button>
           <button style={S.dBtnPrimary} onClick={handleAgendarCita}>Agendar cita</button>

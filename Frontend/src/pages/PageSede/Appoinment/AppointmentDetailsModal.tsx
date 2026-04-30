@@ -1,24 +1,96 @@
 // components/Quotes/AppointmentDetailsModal.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from "react";
 import {
-  User, XCircle, UserX,
-  Loader2, CheckCircle, Plus, Package,
+  User,
+  XCircle,
+  UserX,
+  Loader2,
+  CheckCircle,
+  Plus,
+  Package,
   CreditCard,
-  CreditCard as CardIcon, Wallet, CalendarDays,
-  Tag, Users, X, Bug, Landmark, Wand2,
-  Phone, Mail, DollarSign, AlertCircle, Save,
-  ShoppingBag, Trash2, Gift
-} from 'lucide-react';
-import Modal from '../../../components/ui/modal';
-import { useAuth } from '../../../components/Auth/AuthContext';
-import { updateQuote, registrarPagoCita, ApiRequestError } from './citasApi';
-import { formatDateDMY } from '../../../lib/dateFormat';
-import { getServicios, type Servicio as ServicioCatalogo } from '../../../components/Quotes/serviciosApi';
-import { getEstilistas, type Estilista } from '../../../components/Professionales/estilistasApi';
-import { API_BASE_URL } from '../../../types/config';
-import TimeInputWithPicker from '../../../components/ui/time-input-with-picker';
-import { extractAgendaAdditionalNotes, formatAgendaTime, normalizeAgendaTimeValue } from '../../../lib/agenda';
-import { normalizePaymentMethodForBackend, PAYROLL_PAYMENT_METHOD } from '../../../lib/payment-methods';
+  CreditCard as CardIcon,
+  Wallet,
+  CalendarDays,
+  Tag,
+  Users,
+  X,
+  Bug,
+  Landmark,
+  Wand2,
+  Phone,
+  Mail,
+  DollarSign,
+  AlertCircle,
+  Save,
+  ShoppingBag,
+  Trash2,
+  Gift,
+  MessageCircle,
+  ChevronLeft,
+} from "lucide-react";
+import Modal from "../../../components/ui/modal";
+import { useAuth } from "../../../components/Auth/AuthContext";
+import { updateQuote, registrarPagoCita, ApiRequestError } from "./citasApi";
+import { formatDateDMY } from "../../../lib/dateFormat";
+import {
+  getServicios,
+  type Servicio as ServicioCatalogo,
+} from "../../../components/Quotes/serviciosApi";
+import {
+  getEstilistas,
+  type Estilista,
+} from "../../../components/Professionales/estilistasApi";
+import { API_BASE_URL } from "../../../types/config";
+import { clientesService } from "../Clients/clientesService";
+import type { Cliente } from "../../../types/cliente";
+import TimeInputWithPicker from "../../../components/ui/time-input-with-picker";
+import {
+  extractAgendaAdditionalNotes,
+  formatAgendaTime,
+  normalizeAgendaTimeValue,
+} from "../../../lib/agenda";
+import {
+  normalizePaymentMethodForBackend,
+  PAYROLL_PAYMENT_METHOD,
+} from "../../../lib/payment-methods";
+
+// ── RF design status system (mirrored from Appointment.tsx) ──────────────────
+const RF_STATUSES = {
+  "pre-cita": { color: "#9CA3AF", bg: "#F3F4F6", label: "Pre-cita" },
+  confirmed: { color: "#3B82F6", bg: "#EFF6FF", label: "Confirmada" },
+  "in-progress": { color: "#8B5CF6", bg: "#F5F3FF", label: "En curso" },
+  completed: { color: "#10B981", bg: "#ECFDF5", label: "Completada" },
+  cancelled: { color: "#EF4444", bg: "#FEF2F2", label: "Cancelada" },
+} as const;
+type RFStatusKey = keyof typeof RF_STATUSES;
+
+const resolveRFStatus = (estado: string): RFStatusKey => {
+  const v = (estado || "").toLowerCase().trim();
+  if (v.includes("cancel")) return "cancelled";
+  if (["pre-cita", "pre_cita", "precita"].some((s) => v.includes(s)))
+    return "pre-cita";
+  if (
+    [
+      "en proc",
+      "en_proc",
+      "proceso",
+      "en curso",
+      "en_curso",
+      "en-curso",
+      "progres",
+      "in-prog",
+    ].some((s) => v.includes(s))
+  )
+    return "in-progress";
+  if (
+    ["complet", "finaliz", "terminad", "realizad", "factur"].some((s) =>
+      v.includes(s),
+    )
+  )
+    return "completed";
+  return "confirmed";
+};
 
 interface AppointmentDetailsModalProps {
   open: boolean;
@@ -31,18 +103,18 @@ interface AppointmentDetailsModalProps {
 
 interface PagoModalData {
   show: boolean;
-  tipo: 'pago' | 'abono';
+  tipo: "pago" | "abono";
   monto: number;
   metodoPago:
-    | 'efectivo'
-    | 'transferencia'
-    | 'tarjeta'
-    | 'tarjeta_credito'
-    | 'tarjeta_debito'
-    | 'addi'
-    | 'giftcard'
+    | "efectivo"
+    | "transferencia"
+    | "tarjeta"
+    | "tarjeta_credito"
+    | "tarjeta_debito"
+    | "addi"
+    | "giftcard"
     | typeof PAYROLL_PAYMENT_METHOD
-    | 'descuento_nomina';
+    | "descuento_nomina";
   codigoGiftcard: string;
 }
 
@@ -96,11 +168,11 @@ interface ProfesionalDisponible {
 }
 
 const ESTADOS_NO_EDITABLES_SERVICIOS = new Set([
-  'cancelada',
-  'completada',
-  'finalizada',
-  'no asistio',
-  'no_asistio'
+  "cancelada",
+  "completada",
+  "finalizada",
+  "no asistio",
+  "no_asistio",
 ]);
 
 const toNumber = (value: unknown): number => {
@@ -116,24 +188,28 @@ const extraerMensajeError = (error: any, fallback: string): string => {
   const rawMessage = error?.message ?? error;
 
   if (!rawMessage) return fallback;
-  if (typeof rawMessage === 'string') return rawMessage;
+  if (typeof rawMessage === "string") return rawMessage;
 
   if (Array.isArray(rawMessage)) {
     const joined = rawMessage
       .map((item) => {
-        if (typeof item === 'string') return item;
-        if (item && typeof item === 'object' && typeof item.msg === 'string') return item.msg;
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && typeof item.msg === "string")
+          return item.msg;
         return JSON.stringify(item);
       })
-      .join(' | ');
+      .join(" | ");
     return joined || fallback;
   }
 
-  if (typeof rawMessage === 'object') {
-    if (typeof rawMessage.detail === 'string') return rawMessage.detail;
+  if (typeof rawMessage === "object") {
+    if (typeof rawMessage.detail === "string") return rawMessage.detail;
     const entries = Object.entries(rawMessage)
-      .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
-      .join(' | ');
+      .map(
+        ([key, value]) =>
+          `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`,
+      )
+      .join(" | ");
     return entries || fallback;
   }
 
@@ -141,35 +217,40 @@ const extraerMensajeError = (error: any, fallback: string): string => {
 };
 
 const HORARIO_FLAG_KEYS = [
-  'horario_configurado',
-  'tiene_horario',
-  'has_schedule',
-  'tiene_disponibilidad',
-  'disponible_para_agenda'
+  "horario_configurado",
+  "tiene_horario",
+  "has_schedule",
+  "tiene_disponibilidad",
+  "disponible_para_agenda",
 ];
 
 const normalizarTexto = (value: string): string => {
   return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
 };
 
 const parseBooleanLike = (value: unknown): boolean | null => {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value > 0;
-  if (typeof value === 'string') {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value > 0;
+  if (typeof value === "string") {
     const normalizado = normalizarTexto(value);
-    if (['true', 'si', 'sí', '1', 'activo', 'disponible'].includes(normalizado)) return true;
-    if (['false', 'no', '0', 'inactivo', 'sin horario'].includes(normalizado)) return false;
+    if (["true", "si", "sí", "1", "activo", "disponible"].includes(normalizado))
+      return true;
+    if (["false", "no", "0", "inactivo", "sin horario"].includes(normalizado))
+      return false;
   }
   return null;
 };
 
-const isMongoObjectIdLike = (value: string): boolean => /^[a-fA-F0-9]{24}$/.test(String(value || '').trim());
+const isMongoObjectIdLike = (value: string): boolean =>
+  /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
 
-const inferirSiTieneHorario = (profesional: Record<string, unknown>): boolean | null => {
+const inferirSiTieneHorario = (
+  profesional: Record<string, unknown>,
+): boolean | null => {
   for (const key of HORARIO_FLAG_KEYS) {
     if (Object.prototype.hasOwnProperty.call(profesional, key)) {
       return parseBooleanLike(profesional[key]);
@@ -180,51 +261,61 @@ const inferirSiTieneHorario = (profesional: Record<string, unknown>): boolean | 
 
 const esErrorSinHorarioConfigurado = (mensaje: string): boolean => {
   const normalizado = normalizarTexto(mensaje);
-  return normalizado.includes('no tiene horario configurado');
+  return normalizado.includes("no tiene horario configurado");
 };
 
 const esErrorDisponibilidadHorario = (mensaje: string): boolean => {
   const normalizado = normalizarTexto(mensaje);
   return (
-    normalizado.includes('no tiene disponibilidad para esa fecha') ||
-    normalizado.includes('fuera del horario laboral del profesional')
+    normalizado.includes("no tiene disponibilidad para esa fecha") ||
+    normalizado.includes("fuera del horario laboral del profesional")
   );
 };
 
-const construirMensajeErrorCita = (error: unknown, fallback: string): { mensaje: string; sinHorario: boolean } => {
+const construirMensajeErrorCita = (
+  error: unknown,
+  fallback: string,
+): { mensaje: string; sinHorario: boolean } => {
   const mensajeOriginal = extraerMensajeError(error, fallback);
 
   if (esErrorSinHorarioConfigurado(mensajeOriginal)) {
     return {
-      mensaje: 'No se puede asignar esta cita: el profesional seleccionado no tiene horario configurado. Configura su horario o selecciona otro.',
-      sinHorario: true
+      mensaje:
+        "No se puede asignar esta cita: el profesional seleccionado no tiene horario configurado. Configura su horario o selecciona otro.",
+      sinHorario: true,
     };
   }
 
   if (esErrorDisponibilidadHorario(mensajeOriginal)) {
     return {
-      mensaje: 'No se puede asignar esta cita en la fecha/hora actual para el profesional seleccionado. Ajusta la fecha u hora, o elige otro profesional.',
-      sinHorario: false
+      mensaje:
+        "No se puede asignar esta cita en la fecha/hora actual para el profesional seleccionado. Ajusta la fecha u hora, o elige otro profesional.",
+      sinHorario: false,
     };
   }
 
   if (error instanceof ApiRequestError) {
     if (error.status === 409) {
       return {
-        mensaje: mensajeOriginal || 'Existe un conflicto de agenda para la cita seleccionada.',
-        sinHorario: false
+        mensaje:
+          mensajeOriginal ||
+          "Existe un conflicto de agenda para la cita seleccionada.",
+        sinHorario: false,
       };
     }
     if (error.status === 400 || error.status === 422) {
       return {
-        mensaje: mensajeOriginal || 'Hay datos inválidos en la edición de la cita. Revisa los campos e intenta de nuevo.',
-        sinHorario: false
+        mensaje:
+          mensajeOriginal ||
+          "Hay datos inválidos en la edición de la cita. Revisa los campos e intenta de nuevo.",
+        sinHorario: false,
       };
     }
     if (error.status >= 500) {
       return {
-        mensaje: 'Ocurrió un error interno al guardar la cita. Intenta nuevamente en unos minutos.',
-        sinHorario: false
+        mensaje:
+          "Ocurrió un error interno al guardar la cita. Intenta nuevamente en unos minutos.",
+        sinHorario: false,
       };
     }
   }
@@ -232,30 +323,41 @@ const construirMensajeErrorCita = (error: unknown, fallback: string): { mensaje:
   return { mensaje: mensajeOriginal, sinHorario: false };
 };
 
-const normalizarServiciosCita = (servicios: any[] | undefined): ServicioSeleccionado[] => {
+const normalizarServiciosCita = (
+  servicios: any[] | undefined,
+): ServicioSeleccionado[] => {
   if (!Array.isArray(servicios)) return [];
 
   return servicios
     .filter((servicio) => servicio && servicio.servicio_id)
     .map((servicio) => {
       const precioUnitario = roundMoney(toNumber(servicio.precio));
-      const cantidad = Math.max(1, Math.trunc(toNumber(servicio.cantidad) || 1));
+      const cantidad = Math.max(
+        1,
+        Math.trunc(toNumber(servicio.cantidad) || 1),
+      );
       const usaPrecioPersonalizado = Boolean(servicio.precio_personalizado);
-      const subtotalRaw = servicio.subtotal !== undefined
-        ? toNumber(servicio.subtotal)
-        : precioUnitario * cantidad;
+      const subtotalRaw =
+        servicio.subtotal !== undefined
+          ? toNumber(servicio.subtotal)
+          : precioUnitario * cantidad;
 
       return {
         servicio_id: String(servicio.servicio_id),
-        nombre: String(servicio.nombre || 'Servicio'),
+        nombre: String(servicio.nombre || "Servicio"),
         precio_unitario: precioUnitario,
         precio_unitario_input: String(precioUnitario),
         precio_base: precioUnitario,
         cantidad,
-        duracion_minutos: Math.max(0, Math.trunc(toNumber(servicio.duracion_minutos || servicio.duracion) || 0)),
+        duracion_minutos: Math.max(
+          0,
+          Math.trunc(
+            toNumber(servicio.duracion_minutos || servicio.duracion) || 0,
+          ),
+        ),
         subtotal: roundMoney(subtotalRaw),
         precio_personalizado: usaPrecioPersonalizado ? precioUnitario : null,
-        usa_precio_personalizado: usaPrecioPersonalizado
+        usa_precio_personalizado: usaPrecioPersonalizado,
       };
     });
 };
@@ -266,53 +368,69 @@ const normalizarComparacionServicios = (servicios: ServicioSeleccionado[]) => {
       servicio_id: servicio.servicio_id,
       cantidad: servicio.cantidad,
       precio_unitario: roundMoney(servicio.precio_unitario),
-      usa_precio_personalizado: servicio.usa_precio_personalizado
+      usa_precio_personalizado: servicio.usa_precio_personalizado,
     }))
     .sort((a, b) => a.servicio_id.localeCompare(b.servicio_id));
 };
 
-const normalizarComparacionServiciosHorario = (servicios: ServicioSeleccionado[]) => {
+const normalizarComparacionServiciosHorario = (
+  servicios: ServicioSeleccionado[],
+) => {
   return [...servicios]
     .map((servicio) => ({
       servicio_id: servicio.servicio_id,
-      cantidad: servicio.cantidad
+      cantidad: servicio.cantidad,
     }))
     .sort((a, b) => a.servicio_id.localeCompare(b.servicio_id));
 };
 
-const normalizarProductosCita = (productos: any[] | undefined): ProductoSeleccionado[] => {
+const normalizarProductosCita = (
+  productos: any[] | undefined,
+): ProductoSeleccionado[] => {
   if (!Array.isArray(productos)) return [];
 
   return productos
-    .filter((producto) => producto && (producto.producto_id || producto.id || producto._id))
+    .filter(
+      (producto) =>
+        producto && (producto.producto_id || producto.id || producto._id),
+    )
     .map((producto) => {
-      const productoId = String(producto.producto_id || producto.id || producto._id);
-      const cantidad = Math.max(1, Math.trunc(toNumber(producto.cantidad) || 1));
+      const productoId = String(
+        producto.producto_id || producto.id || producto._id,
+      );
+      const cantidad = Math.max(
+        1,
+        Math.trunc(toNumber(producto.cantidad) || 1),
+      );
       const precioUnitario = roundMoney(
-        toNumber(producto.precio_unitario ?? producto.precio ?? 0)
+        toNumber(producto.precio_unitario ?? producto.precio ?? 0),
       );
       const subtotal = roundMoney(
-        producto.subtotal !== undefined ? toNumber(producto.subtotal) : precioUnitario * cantidad
+        producto.subtotal !== undefined
+          ? toNumber(producto.subtotal)
+          : precioUnitario * cantidad,
       );
-      const comisionPorcentaje = roundMoney(toNumber(producto.comision_porcentaje ?? 0));
+      const comisionPorcentaje = roundMoney(
+        toNumber(producto.comision_porcentaje ?? 0),
+      );
 
       return {
         producto_id: productoId,
-        nombre: String(producto.nombre || 'Producto'),
+        nombre: String(producto.nombre || "Producto"),
         cantidad,
         precio_unitario: precioUnitario,
         subtotal,
-        moneda: String(producto.moneda || ''),
+        moneda: String(producto.moneda || ""),
         comision_porcentaje: comisionPorcentaje,
         comision_valor: roundMoney(
           producto.comision_valor !== undefined
             ? toNumber(producto.comision_valor)
-            : (subtotal * comisionPorcentaje) / 100
+            : (subtotal * comisionPorcentaje) / 100,
         ),
         agregado_por_email: producto.agregado_por_email,
         agregado_por_rol: producto.agregado_por_rol,
         fecha_agregado: producto.fecha_agregado,
-        profesional_id: producto.profesional_id
+        profesional_id: producto.profesional_id,
       };
     });
 };
@@ -322,12 +440,13 @@ const normalizarComparacionProductos = (productos: ProductoSeleccionado[]) => {
     .map((producto) => ({
       producto_id: producto.producto_id,
       cantidad: producto.cantidad,
-      precio_unitario: roundMoney(producto.precio_unitario)
+      precio_unitario: roundMoney(producto.precio_unitario),
     }))
     .sort((a, b) => a.producto_id.localeCompare(b.producto_id));
 };
 
-const normalizeNote = (value: string | null | undefined): string => String(value ?? '').trim();
+const normalizeNote = (value: string | null | undefined): string =>
+  String(value ?? "").trim();
 
 const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   open,
@@ -342,53 +461,86 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   const [showDebug, setShowDebug] = useState(false);
   const [pagoModal, setPagoModal] = useState<PagoModalData>({
     show: false,
-    tipo: 'pago',
+    tipo: "pago",
     monto: 0,
-    metodoPago: 'efectivo',
-    codigoGiftcard: ''
+    metodoPago: "efectivo",
+    codigoGiftcard: "",
   });
   const [registrandoPago, setRegistrandoPago] = useState(false);
   const [productos, setProductos] = useState<ProductoSeleccionado[]>([]);
-  const [productosOriginales, setProductosOriginales] = useState<ProductoSeleccionado[]>([]);
-  const [productosDisponibles, setProductosDisponibles] = useState<ProductoDisponible[]>([]);
-  const [productosCatalogoCargado, setProductosCatalogoCargado] = useState(false);
-  const [selectedProductId, setSelectedProductId] = useState('');
-  const [loadingProductosDisponibles, setLoadingProductosDisponibles] = useState(false);
+  const [productosOriginales, setProductosOriginales] = useState<
+    ProductoSeleccionado[]
+  >([]);
+  const [productosDisponibles, setProductosDisponibles] = useState<
+    ProductoDisponible[]
+  >([]);
+  const [productosCatalogoCargado, setProductosCatalogoCargado] =
+    useState(false);
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [loadingProductosDisponibles, setLoadingProductosDisponibles] =
+    useState(false);
 
-  const [profesionalesDisponibles, setProfesionalesDisponibles] = useState<ProfesionalDisponible[]>([]);
+  const [profesionalesDisponibles, setProfesionalesDisponibles] = useState<
+    ProfesionalDisponible[]
+  >([]);
   const [loadingProfesionales, setLoadingProfesionales] = useState(false);
-  const [fechaEditada, setFechaEditada] = useState('');
-  const [horaInicioEditada, setHoraInicioEditada] = useState('');
-  const [horaFinEditada, setHoraFinEditada] = useState('');
+  const [fechaEditada, setFechaEditada] = useState("");
+  const [horaInicioEditada, setHoraInicioEditada] = useState("");
+  const [horaFinEditada, setHoraFinEditada] = useState("");
   const [horaFinManual, setHoraFinManual] = useState(false);
-  const [profesionalEditadoId, setProfesionalEditadoId] = useState('');
+  const [profesionalEditadoId, setProfesionalEditadoId] = useState("");
   const [horarioOriginal, setHorarioOriginal] = useState({
-    fecha: '',
-    hora_inicio: '',
-    hora_fin: '',
-    profesional_id: ''
+    fecha: "",
+    hora_inicio: "",
+    hora_fin: "",
+    profesional_id: "",
   });
 
-  const [serviciosDisponibles, setServiciosDisponibles] = useState<ServicioDisponible[]>([]);
-  const [serviciosSeleccionados, setServiciosSeleccionados] = useState<ServicioSeleccionado[]>([]);
-  const [serviciosOriginales, setServiciosOriginales] = useState<ServicioSeleccionado[]>([]);
-  const [selectedServiceId, setSelectedServiceId] = useState('');
-  const [loadingServiciosDisponibles, setLoadingServiciosDisponibles] = useState(false);
+  const [serviciosDisponibles, setServiciosDisponibles] = useState<
+    ServicioDisponible[]
+  >([]);
+  const [serviciosSeleccionados, setServiciosSeleccionados] = useState<
+    ServicioSeleccionado[]
+  >([]);
+  const [serviciosOriginales, setServiciosOriginales] = useState<
+    ServicioSeleccionado[]
+  >([]);
+  const [selectedServiceId, setSelectedServiceId] = useState("");
+  const [loadingServiciosDisponibles, setLoadingServiciosDisponibles] =
+    useState(false);
   const [savingServicios, setSavingServicios] = useState(false);
   const [serviceError, setServiceError] = useState<string | null>(null);
-  const [notasEditadas, setNotasEditadas] = useState('');
-  const [notasOriginales, setNotasOriginales] = useState('');
+  const [notasEditadas, setNotasEditadas] = useState("");
+  const [notasOriginales, setNotasOriginales] = useState("");
   const [savingNotas, setSavingNotas] = useState(false);
   const [notasError, setNotasError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"cita" | "pagos" | "notas">(
+    "cita",
+  );
+  const [showClientProfile, setShowClientProfile] = useState(false);
+  const [clientProfile, setClientProfile] = useState<Cliente | null>(null);
+  const [loadingClientProfile, setLoadingClientProfile] = useState(false);
 
-  const sessionCurrency = typeof window !== 'undefined' ? sessionStorage.getItem("beaux-moneda") : null;
-  const userCurrency = String(user?.moneda || sessionCurrency || appointmentDetails?.rawData?.moneda || "USD").toUpperCase();
+  const sessionCurrency =
+    typeof window !== "undefined"
+      ? sessionStorage.getItem("beaux-moneda")
+      : null;
+  const userCurrency = String(
+    user?.moneda ||
+      sessionCurrency ||
+      appointmentDetails?.rawData?.moneda ||
+      "USD",
+  ).toUpperCase();
   const isCopCurrency = userCurrency === "COP";
 
-  const sanitizeMetodoPago = (metodo: PagoModalData['metodoPago']): PagoModalData['metodoPago'] => {
-    const normalizedMethod = normalizePaymentMethodForBackend(metodo) as PagoModalData['metodoPago'];
-    if (!isCopCurrency && normalizedMethod === 'addi') {
-      return 'efectivo';
+  const sanitizeMetodoPago = (
+    metodo: PagoModalData["metodoPago"],
+  ): PagoModalData["metodoPago"] => {
+    const normalizedMethod = normalizePaymentMethodForBackend(
+      metodo,
+    ) as PagoModalData["metodoPago"];
+    if (!isCopCurrency && normalizedMethod === "addi") {
+      return "efectivo";
     }
     return normalizedMethod;
   };
@@ -397,22 +549,33 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     if (open && appointment) {
       setAppointmentDetails(appointment);
       setServiceError(null);
-      setSelectedServiceId('');
-      setSelectedProductId('');
+      setSelectedServiceId("");
+      setSelectedProductId("");
       setProductosDisponibles([]);
       setProductosCatalogoCargado(false);
+      setActiveTab("cita");
+      setShowClientProfile(false);
+      setClientProfile(null);
 
       const rawData = appointment.rawData || {};
-      const productosIniciales = normalizarProductosCita(rawData.productos || appointment.productos || []);
+      const productosIniciales = normalizarProductosCita(
+        rawData.productos || appointment.productos || [],
+      );
       setProductos(productosIniciales);
       setProductosOriginales(productosIniciales);
 
-      const fechaInicial = String(rawData.fecha || '').slice(0, 10);
-      const horaInicioInicial = normalizeAgendaTimeValue(String(rawData.hora_inicio || appointment.start || ''))
-        || String(rawData.hora_inicio || appointment.start || '');
-      const horaFinInicial = normalizeAgendaTimeValue(String(rawData.hora_fin || appointment.end || ''))
-        || String(rawData.hora_fin || appointment.end || '');
-      const profesionalInicial = String(rawData.profesional_id || appointment.profesional_id || '');
+      const fechaInicial = String(rawData.fecha || "").slice(0, 10);
+      const horaInicioInicial =
+        normalizeAgendaTimeValue(
+          String(rawData.hora_inicio || appointment.start || ""),
+        ) || String(rawData.hora_inicio || appointment.start || "");
+      const horaFinInicial =
+        normalizeAgendaTimeValue(
+          String(rawData.hora_fin || appointment.end || ""),
+        ) || String(rawData.hora_fin || appointment.end || "");
+      const profesionalInicial = String(
+        rawData.profesional_id || appointment.profesional_id || "",
+      );
       setFechaEditada(fechaInicial);
       setHoraInicioEditada(horaInicioInicial);
       setHoraFinEditada(horaFinInicial);
@@ -422,16 +585,18 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         fecha: fechaInicial,
         hora_inicio: horaInicioInicial,
         hora_fin: horaFinInicial,
-        profesional_id: profesionalInicial
+        profesional_id: profesionalInicial,
       });
 
-      const notasIniciales = normalizeNote(extractAgendaAdditionalNotes(appointment));
+      const notasIniciales = normalizeNote(
+        extractAgendaAdditionalNotes(appointment),
+      );
       setNotasEditadas(notasIniciales);
       setNotasOriginales(notasIniciales);
 
       // Extraer productos de la cita
       const serviciosIniciales = normalizarServiciosCita(
-        appointment.rawData?.servicios || appointment.servicios || []
+        appointment.rawData?.servicios || appointment.servicios || [],
       );
       setServiciosSeleccionados(serviciosIniciales);
       setServiciosOriginales(serviciosIniciales);
@@ -441,14 +606,19 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   useEffect(() => {
     if (!open || !user?.access_token || !appointment) return;
 
-    const citaId = String(appointment.id || appointment.rawData?._id || appointment.rawData?.cita_id || '').trim();
+    const citaId = String(
+      appointment.id ||
+        appointment.rawData?._id ||
+        appointment.rawData?.cita_id ||
+        "",
+    ).trim();
     if (!citaId) return;
 
     let isCancelled = false;
     const cargarDetalleCita = async () => {
       const endpoints = [
         `${API_BASE_URL}scheduling/quotes/citas/${citaId}`,
-        `${API_BASE_URL}scheduling/quotes/${citaId}`
+        `${API_BASE_URL}scheduling/quotes/${citaId}`,
       ];
 
       for (const endpoint of endpoints) {
@@ -456,26 +626,29 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           const response = await fetch(endpoint, {
             headers: {
               Authorization: `Bearer ${user.access_token}`,
-              Accept: 'application/json'
-            }
+              Accept: "application/json",
+            },
           });
 
           if (!response.ok) continue;
 
           const data = await response.json();
-          const detalle = (data?.cita && typeof data.cita === 'object') ? data.cita : data;
-          if (!detalle || typeof detalle !== 'object' || isCancelled) return;
+          const detalle =
+            data?.cita && typeof data.cita === "object" ? data.cita : data;
+          if (!detalle || typeof detalle !== "object" || isCancelled) return;
 
           setAppointmentDetails((prev: any) => ({
             ...prev,
             ...detalle,
             rawData: {
               ...(prev?.rawData || {}),
-              ...detalle
-            }
+              ...detalle,
+            },
           }));
 
-          const notasDetalle = normalizeNote(extractAgendaAdditionalNotes(detalle));
+          const notasDetalle = normalizeNote(
+            extractAgendaAdditionalNotes(detalle),
+          );
           setNotasEditadas(notasDetalle);
           setNotasOriginales(notasDetalle);
 
@@ -493,8 +666,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   }, [open, appointment, user?.access_token]);
 
   useEffect(() => {
-    if (!isCopCurrency && pagoModal.metodoPago === 'addi') {
-      setPagoModal((prev) => ({ ...prev, metodoPago: 'efectivo' }));
+    if (!isCopCurrency && pagoModal.metodoPago === "addi") {
+      setPagoModal((prev) => ({ ...prev, metodoPago: "efectivo" }));
     }
   }, [isCopCurrency, pagoModal.metodoPago]);
 
@@ -505,7 +678,9 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     const cargarServiciosDisponibles = async () => {
       setLoadingServiciosDisponibles(true);
       try {
-        const catalogoServicios: ServicioCatalogo[] = await getServicios(user.access_token);
+        const catalogoServicios: ServicioCatalogo[] = await getServicios(
+          user.access_token,
+        );
 
         if (isCancelled) return;
 
@@ -513,14 +688,18 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           .filter((servicio) => servicio?.activo !== false)
           .map((servicio) => ({
             servicio_id: String(servicio.servicio_id || servicio._id),
-            nombre: String(servicio.nombre || 'Servicio'),
+            nombre: String(servicio.nombre || "Servicio"),
             precio: roundMoney(
-              servicio.precio_local !== undefined ? toNumber(servicio.precio_local) : toNumber(servicio.precio)
+              servicio.precio_local !== undefined
+                ? toNumber(servicio.precio_local)
+                : toNumber(servicio.precio),
             ),
             duracion_minutos: Math.max(
               0,
-              Math.trunc(toNumber(servicio.duracion_minutos ?? servicio.duracion) || 0)
-            )
+              Math.trunc(
+                toNumber(servicio.duracion_minutos ?? servicio.duracion) || 0,
+              ),
+            ),
           }))
           .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
@@ -528,7 +707,12 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       } catch (error: any) {
         if (isCancelled) return;
         setServiciosDisponibles([]);
-        setServiceError(extraerMensajeError(error, 'No se pudieron cargar los servicios disponibles.'));
+        setServiceError(
+          extraerMensajeError(
+            error,
+            "No se pudieron cargar los servicios disponibles.",
+          ),
+        );
       } finally {
         if (!isCancelled) {
           setLoadingServiciosDisponibles(false);
@@ -542,78 +726,175 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     };
   }, [open, user?.access_token]);
 
-  const cargarProductosDisponibles = useCallback(async (force = false) => {
-    if (!open || !user?.access_token) return;
-    if (!force && (productosCatalogoCargado || loadingProductosDisponibles)) return;
+  const handleVerPerfil = useCallback(async () => {
+    const clienteId =
+      appointmentDetails?.rawData?.cliente_id ||
+      appointmentDetails?.rawData?.client_id;
+    if (!clienteId || !user?.access_token) return;
 
-    setLoadingProductosDisponibles(true);
-    setServiceError(null);
+    // Show panel immediately with data already in the appointment
+    const partial: Cliente = {
+      id: clienteId,
+      nombre:
+        appointmentDetails.cliente_nombre ||
+        appointmentDetails.rawData?.cliente_nombre ||
+        "Cliente",
+      telefono: appointmentDetails.rawData?.cliente_telefono || "No disponible",
+      email: appointmentDetails.rawData?.cliente_email || "No disponible",
+      ticketPromedio: 0,
+      ltv: 0,
+      diasSinVenir: 0,
+      diasSinComprar: 0,
+      rizotipo: "",
+      nota: "",
+      sede_id: "",
+      historialCitas: [],
+      historialCabello: [],
+      historialProductos: [],
+    };
+    setClientProfile(partial);
+    setShowClientProfile(true);
+    setLoadingClientProfile(true);
+
     try {
-      const params = new URLSearchParams();
-      if (userCurrency) {
-        params.append('moneda', userCurrency);
-      }
-      const query = params.toString();
-      const url = `${API_BASE_URL}inventary/product/productos/${query ? `?${query}` : ''}`;
+      // Fetch only the two endpoints we actually need, in parallel
+      const headers = {
+        Authorization: `Bearer ${user.access_token}`,
+        accept: "application/json",
+      };
+      const [clienteRes, historialRes] = await Promise.all([
+        fetch(`${API_BASE_URL}clientes/${clienteId}`, { headers }),
+        fetch(`${API_BASE_URL}clientes/${clienteId}/historial`, { headers }),
+      ]);
 
-      // Endpoint requerido: GET /inventary/product/productos/
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${user.access_token}`,
-          Accept: 'application/json'
-        }
+      const clienteData = clienteRes.ok ? await clienteRes.json() : null;
+      const historialRaw = historialRes.ok ? await historialRes.json() : [];
+
+      const historialCitas: Cliente["historialCitas"] = Array.isArray(
+        historialRaw,
+      )
+        ? historialRaw.map((c: any) => ({
+            fecha: c.fecha || "",
+            servicio: c.servicio_nombre || c.servicio || "Servicio",
+            profesional: c.profesional_nombre || "",
+            estilista: c.profesional_nombre || c.estilista || "",
+            valor_total: c.valor_total ?? 0,
+            estado: c.estado,
+          }))
+        : [];
+
+      setClientProfile({
+        ...partial,
+        nombre: clienteData?.nombre || partial.nombre,
+        telefono: clienteData?.telefono || partial.telefono,
+        email: clienteData?.correo || clienteData?.email || partial.email,
+        ticketPromedio: clienteData?.ticket_promedio ?? 0,
+        fecha_creacion: clienteData?.fecha_creacion,
+        fecha_registro: clienteData?.fecha_registro,
+        historialCitas,
+        historialCabello: [],
+        historialProductos: [],
       });
-
-      if (!response.ok) {
-        throw new Error(`Error ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      const productosArray: any[] = Array.isArray(data)
-        ? data
-        : Array.isArray((data as any)?.productos)
-          ? (data as any).productos
-          : Array.isArray((data as any)?.items)
-            ? (data as any).items
-            : [];
-      const productosMapeados: ProductoDisponible[] = productosArray
-        .map((producto: any) => {
-          const productoId = String(producto.id ?? producto._id ?? producto.producto_id ?? '').trim();
-          const precio = roundMoney(toNumber(
-            producto.precio_local ??
-            producto.precio ??
-            producto.precios?.[userCurrency] ??
-            producto.precios?.COP ??
-            0
-          ));
-          if (!productoId) return null;
-
-          return {
-            producto_id: productoId,
-            nombre: String(producto.nombre || 'Producto'),
-            precio,
-            moneda: String(producto.moneda_local || userCurrency).toUpperCase()
-          };
-        })
-        .filter((producto: ProductoDisponible | null): producto is ProductoDisponible => Boolean(producto))
-        .sort((a: ProductoDisponible, b: ProductoDisponible) => a.nombre.localeCompare(b.nombre));
-
-      setProductosDisponibles(productosMapeados);
-      setProductosCatalogoCargado(true);
-    } catch (error: any) {
-      setProductosDisponibles([]);
-      setProductosCatalogoCargado(false);
-      setServiceError(extraerMensajeError(error, 'No se pudieron cargar los productos disponibles.'));
+    } catch {
+      // panel already open with partial data
     } finally {
-      setLoadingProductosDisponibles(false);
+      setLoadingClientProfile(false);
     }
-  }, [
-    open,
-    user?.access_token,
-    userCurrency,
-    productosCatalogoCargado,
-    loadingProductosDisponibles
-  ]);
+  }, [appointmentDetails, user?.access_token]);
+
+  const cargarProductosDisponibles = useCallback(
+    async (force = false) => {
+      if (!open || !user?.access_token) return;
+      if (!force && (productosCatalogoCargado || loadingProductosDisponibles))
+        return;
+
+      setLoadingProductosDisponibles(true);
+      setServiceError(null);
+      try {
+        const params = new URLSearchParams();
+        if (userCurrency) {
+          params.append("moneda", userCurrency);
+        }
+        const query = params.toString();
+        const url = `${API_BASE_URL}inventary/product/productos/${query ? `?${query}` : ""}`;
+
+        // Endpoint requerido: GET /inventary/product/productos/
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${user.access_token}`,
+            Accept: "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Error ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const productosArray: any[] = Array.isArray(data)
+          ? data
+          : Array.isArray((data as any)?.productos)
+            ? (data as any).productos
+            : Array.isArray((data as any)?.items)
+              ? (data as any).items
+              : [];
+        const productosMapeados: ProductoDisponible[] = productosArray
+          .map((producto: any) => {
+            const productoId = String(
+              producto.id ?? producto._id ?? producto.producto_id ?? "",
+            ).trim();
+            const precio = roundMoney(
+              toNumber(
+                producto.precio_local ??
+                  producto.precio ??
+                  producto.precios?.[userCurrency] ??
+                  producto.precios?.COP ??
+                  0,
+              ),
+            );
+            if (!productoId) return null;
+
+            return {
+              producto_id: productoId,
+              nombre: String(producto.nombre || "Producto"),
+              precio,
+              moneda: String(
+                producto.moneda_local || userCurrency,
+              ).toUpperCase(),
+            };
+          })
+          .filter(
+            (
+              producto: ProductoDisponible | null,
+            ): producto is ProductoDisponible => Boolean(producto),
+          )
+          .sort((a: ProductoDisponible, b: ProductoDisponible) =>
+            a.nombre.localeCompare(b.nombre),
+          );
+
+        setProductosDisponibles(productosMapeados);
+        setProductosCatalogoCargado(true);
+      } catch (error: any) {
+        setProductosDisponibles([]);
+        setProductosCatalogoCargado(false);
+        setServiceError(
+          extraerMensajeError(
+            error,
+            "No se pudieron cargar los productos disponibles.",
+          ),
+        );
+      } finally {
+        setLoadingProductosDisponibles(false);
+      }
+    },
+    [
+      open,
+      user?.access_token,
+      userCurrency,
+      productosCatalogoCargado,
+      loadingProductosDisponibles,
+    ],
+  );
 
   useEffect(() => {
     if (!open || !user?.access_token) return;
@@ -623,17 +904,25 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       setLoadingProfesionales(true);
       try {
         const sedeId = appointmentDetails?.rawData?.sede_id || user?.sede_id;
-        const estilistas: Estilista[] = await getEstilistas(user.access_token, sedeId);
+        const estilistas: Estilista[] = await getEstilistas(
+          user.access_token,
+          sedeId,
+        );
         const profesionales = (Array.isArray(estilistas) ? estilistas : [])
           .map((estilista) => {
-            const estilistaRaw = estilista as unknown as Record<string, unknown>;
-            const agendaId = String(estilista.profesional_id || '').trim();
-            const mongoId = String(estilista._id || '').trim();
+            const estilistaRaw = estilista as unknown as Record<
+              string,
+              unknown
+            >;
+            const agendaId = String(estilista.profesional_id || "").trim();
+            const mongoId = String(estilista._id || "").trim();
             return {
-              profesional_id: agendaId || `invalid:${mongoId || String(estilista.nombre || '').trim()}`,
-              nombre: String(estilista.nombre || 'Profesional'),
+              profesional_id:
+                agendaId ||
+                `invalid:${mongoId || String(estilista.nombre || "").trim()}`,
+              nombre: String(estilista.nombre || "Profesional"),
               hasSchedule: inferirSiTieneHorario(estilistaRaw),
-              invalidAgendaId: !agendaId
+              invalidAgendaId: !agendaId,
             };
           })
           .filter((estilista) => estilista.profesional_id)
@@ -645,7 +934,12 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       } catch (error: any) {
         if (!isCancelled) {
           setProfesionalesDisponibles([]);
-          setServiceError(extraerMensajeError(error, 'No se pudieron cargar los profesionales.'));
+          setServiceError(
+            extraerMensajeError(
+              error,
+              "No se pudieron cargar los profesionales.",
+            ),
+          );
         }
       } finally {
         if (!isCancelled) {
@@ -658,109 +952,166 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [open, user?.access_token, user?.sede_id, appointmentDetails?.rawData?.sede_id]);
+  }, [
+    open,
+    user?.access_token,
+    user?.sede_id,
+    appointmentDetails?.rawData?.sede_id,
+  ]);
 
   useEffect(() => {
     if (!serviciosDisponibles.length) return;
 
     setServiciosSeleccionados((prev) =>
       prev.map((servicio) => {
-        if (servicio.duracion_minutos > 0 && servicio.precio_base > 0) return servicio;
-        const servicioCatalogo = serviciosDisponibles.find((item) => item.servicio_id === servicio.servicio_id);
+        if (servicio.duracion_minutos > 0 && servicio.precio_base > 0)
+          return servicio;
+        const servicioCatalogo = serviciosDisponibles.find(
+          (item) => item.servicio_id === servicio.servicio_id,
+        );
         if (!servicioCatalogo) return servicio;
 
         return {
           ...servicio,
-          duracion_minutos: servicio.duracion_minutos > 0 ? servicio.duracion_minutos : servicioCatalogo.duracion_minutos,
-          precio_base: servicio.precio_base > 0 ? servicio.precio_base : servicioCatalogo.precio
+          duracion_minutos:
+            servicio.duracion_minutos > 0
+              ? servicio.duracion_minutos
+              : servicioCatalogo.duracion_minutos,
+          precio_base:
+            servicio.precio_base > 0
+              ? servicio.precio_base
+              : servicioCatalogo.precio,
         };
-      })
+      }),
     );
   }, [serviciosDisponibles]);
 
-  const estadoCitaActual = String(appointmentDetails?.estado || '').toLowerCase().trim();
-  const isEstadoNoEditableServicios = ESTADOS_NO_EDITABLES_SERVICIOS.has(estadoCitaActual);
+  const estadoCitaActual = String(appointmentDetails?.estado || "")
+    .toLowerCase()
+    .trim();
+  const isEstadoNoEditableServicios =
+    ESTADOS_NO_EDITABLES_SERVICIOS.has(estadoCitaActual);
 
   const totalServicios = roundMoney(
-    serviciosSeleccionados.reduce((total, servicio) => total + roundMoney(servicio.subtotal), 0)
+    serviciosSeleccionados.reduce(
+      (total, servicio) => total + roundMoney(servicio.subtotal),
+      0,
+    ),
   );
   const totalProductos = roundMoney(
-    productos.reduce((total, producto) => total + toNumber(producto.subtotal), 0)
+    productos.reduce(
+      (total, producto) => total + toNumber(producto.subtotal),
+      0,
+    ),
   );
   const totalCitaCalculado = roundMoney(totalServicios + totalProductos);
 
   const duracionTotalServicios = Math.max(
     0,
     serviciosSeleccionados.reduce(
-      (total, servicio) => total + (Math.max(0, servicio.duracion_minutos || 0) * Math.max(1, servicio.cantidad || 1)),
-      0
-    )
+      (total, servicio) =>
+        total +
+        Math.max(0, servicio.duracion_minutos || 0) *
+          Math.max(1, servicio.cantidad || 1),
+      0,
+    ),
   );
 
-  const hasUnsavedServiceChanges = JSON.stringify(normalizarComparacionServicios(serviciosSeleccionados))
-    !== JSON.stringify(normalizarComparacionServicios(serviciosOriginales));
-  const hasUnsavedServiceDurationChanges = JSON.stringify(normalizarComparacionServiciosHorario(serviciosSeleccionados))
-    !== JSON.stringify(normalizarComparacionServiciosHorario(serviciosOriginales));
-  const hasUnsavedProductChanges = JSON.stringify(normalizarComparacionProductos(productos))
-    !== JSON.stringify(normalizarComparacionProductos(productosOriginales));
-  const hasUnsavedNotes = normalizeNote(notasEditadas) !== normalizeNote(notasOriginales);
-  const hasUnsavedScheduleChanges = (
+  const hasUnsavedServiceChanges =
+    JSON.stringify(normalizarComparacionServicios(serviciosSeleccionados)) !==
+    JSON.stringify(normalizarComparacionServicios(serviciosOriginales));
+  const hasUnsavedServiceDurationChanges =
+    JSON.stringify(
+      normalizarComparacionServiciosHorario(serviciosSeleccionados),
+    ) !==
+    JSON.stringify(normalizarComparacionServiciosHorario(serviciosOriginales));
+  const hasUnsavedProductChanges =
+    JSON.stringify(normalizarComparacionProductos(productos)) !==
+    JSON.stringify(normalizarComparacionProductos(productosOriginales));
+  const hasUnsavedNotes =
+    normalizeNote(notasEditadas) !== normalizeNote(notasOriginales);
+  const hasUnsavedScheduleChanges =
     fechaEditada !== horarioOriginal.fecha ||
     horaInicioEditada !== horarioOriginal.hora_inicio ||
     horaFinEditada !== horarioOriginal.hora_fin ||
-    profesionalEditadoId !== horarioOriginal.profesional_id
-  );
+    profesionalEditadoId !== horarioOriginal.profesional_id;
   const hasUnsavedChanges =
     hasUnsavedServiceChanges ||
     hasUnsavedProductChanges ||
     hasUnsavedScheduleChanges ||
     hasUnsavedNotes;
-  const tieneOpcionesSinHorario = profesionalesDisponibles.some((profesional) => profesional.hasSchedule === false);
-  const tieneOpcionesSinIdAgenda = profesionalesDisponibles.some((profesional) => profesional.invalidAgendaId);
+  const tieneOpcionesSinHorario = profesionalesDisponibles.some(
+    (profesional) => profesional.hasSchedule === false,
+  );
+  const tieneOpcionesSinIdAgenda = profesionalesDisponibles.some(
+    (profesional) => profesional.invalidAgendaId,
+  );
 
-  const isServiceActionsDisabled = updating || savingServicios || isEstadoNoEditableServicios;
+  const isServiceActionsDisabled =
+    updating || savingServicios || isEstadoNoEditableServicios;
 
   useEffect(() => {
     if (!open || !user?.access_token || isServiceActionsDisabled) return;
     void cargarProductosDisponibles();
-  }, [open, user?.access_token, isServiceActionsDisabled, cargarProductosDisponibles]);
+  }, [
+    open,
+    user?.access_token,
+    isServiceActionsDisabled,
+    cargarProductosDisponibles,
+  ]);
 
   const sumarMinutosAHora = (hora: string, minutosAgregar: number) => {
-    const [hours, minutes] = String(hora || '00:00').split(':').map((value) => Number(value) || 0);
-    const totalMinutos = (hours * 60) + minutes + Math.max(0, minutosAgregar);
+    const [hours, minutes] = String(hora || "00:00")
+      .split(":")
+      .map((value) => Number(value) || 0);
+    const totalMinutos = hours * 60 + minutes + Math.max(0, minutosAgregar);
     const newHours = Math.floor(totalMinutos / 60);
     const newMinutes = totalMinutos % 60;
-    return `${String(newHours).padStart(2, '0')}:${String(newMinutes).padStart(2, '0')}`;
+    return `${String(newHours).padStart(2, "0")}:${String(newMinutes).padStart(2, "0")}`;
   };
 
   const convertirHoraAMinutos = (hora: string): number => {
-    const [hours, minutes] = String(hora || '').split(':').map((value) => Number(value));
+    const [hours, minutes] = String(hora || "")
+      .split(":")
+      .map((value) => Number(value));
     if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return NaN;
-    return (hours * 60) + minutes;
+    return hours * 60 + minutes;
   };
 
-  const calcularDuracionEntreHoras = (horaInicio: string, horaFin: string): number => {
+  const calcularDuracionEntreHoras = (
+    horaInicio: string,
+    horaFin: string,
+  ): number => {
     const inicioMinutos = convertirHoraAMinutos(horaInicio);
     const finMinutos = convertirHoraAMinutos(horaFin);
-    if (!Number.isFinite(inicioMinutos) || !Number.isFinite(finMinutos)) return 0;
+    if (!Number.isFinite(inicioMinutos) || !Number.isFinite(finMinutos))
+      return 0;
     return Math.max(0, finMinutos - inicioMinutos);
   };
 
   const duracionGuardadaPorHorario = calcularDuracionEntreHoras(
     horarioOriginal.hora_inicio,
-    horarioOriginal.hora_fin
+    horarioOriginal.hora_fin,
   );
-  const duracionProgramadaGuardada = duracionGuardadaPorHorario > 0
-    ? duracionGuardadaPorHorario
-    : Math.max(0, toNumber(appointmentDetails?.rawData?.servicio_duracion));
-  const duracionProgramadaActual = calcularDuracionEntreHoras(horaInicioEditada, horaFinEditada);
+  const duracionProgramadaGuardada =
+    duracionGuardadaPorHorario > 0
+      ? duracionGuardadaPorHorario
+      : Math.max(0, toNumber(appointmentDetails?.rawData?.servicio_duracion));
+  const duracionProgramadaActual = calcularDuracionEntreHoras(
+    horaInicioEditada,
+    horaFinEditada,
+  );
   const duracionReferenciaHorario = hasUnsavedServiceDurationChanges
-    ? (duracionTotalServicios > 0
+    ? duracionTotalServicios > 0
       ? duracionTotalServicios
-      : (duracionProgramadaActual > 0 ? duracionProgramadaActual : duracionProgramadaGuardada))
-    : (duracionProgramadaGuardada > 0
+      : duracionProgramadaActual > 0
+        ? duracionProgramadaActual
+        : duracionProgramadaGuardada
+    : duracionProgramadaGuardada > 0
       ? duracionProgramadaGuardada
-      : (duracionTotalServicios > 0 ? duracionTotalServicios : duracionProgramadaActual));
+      : duracionTotalServicios > 0
+        ? duracionTotalServicios
+        : duracionProgramadaActual;
 
   useEffect(() => {
     if (!horaInicioEditada || horaFinManual) return;
@@ -768,11 +1119,19 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
     if (duracionParaCalculo <= 0) return;
 
-    const horaFinCalculada = sumarMinutosAHora(horaInicioEditada, duracionParaCalculo);
+    const horaFinCalculada = sumarMinutosAHora(
+      horaInicioEditada,
+      duracionParaCalculo,
+    );
     if (horaFinCalculada !== horaFinEditada) {
       setHoraFinEditada(horaFinCalculada);
     }
-  }, [duracionReferenciaHorario, horaFinEditada, horaFinManual, horaInicioEditada]);
+  }, [
+    duracionReferenciaHorario,
+    horaFinEditada,
+    horaFinManual,
+    horaInicioEditada,
+  ]);
 
   const getPagosData = () => {
     if (!appointmentDetails?.rawData) {
@@ -780,10 +1139,10 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         totalCita: 0,
         abonado: 0,
         saldoPendiente: 0,
-        estadoPago: 'pendiente',
+        estadoPago: "pendiente",
         tieneAbono: false,
         estaPagadoCompleto: false,
-        pagos: []
+        pagos: [],
       };
     }
 
@@ -800,14 +1159,14 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
     const estaPagadoCompleto = saldoPendiente <= 0;
 
-    let estadoPago = rawData.estado_pago || 'pendiente';
+    let estadoPago = rawData.estado_pago || "pendiente";
 
     if (estaPagadoCompleto) {
-      estadoPago = 'pagado';
+      estadoPago = "pagado";
     } else if (abonado > 0) {
-      estadoPago = 'abonado';
+      estadoPago = "abonado";
     } else {
-      estadoPago = 'pendiente';
+      estadoPago = "pendiente";
     }
 
     const tieneAbono = abonado > 0;
@@ -817,11 +1176,12 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     if (abonado > 0) {
       pagos.push({
         fecha: formatDateDMY(rawData.fecha_creacion, formatDateDMY(new Date())),
-        tipo: 'Abono',
+        tipo: "Abono",
         monto: abonado,
         // metodo: rawData.metodo_pago || 'Efectivo',
-        metodo: rawData.metodo_pago || '',
-        registradoPor: rawData.creada_por_rol === 'admin_sede' ? 'Administrador' : 'Sistema'
+        metodo: rawData.metodo_pago || "",
+        registradoPor:
+          rawData.creada_por_rol === "admin_sede" ? "Administrador" : "Sistema",
       });
     }
 
@@ -832,16 +1192,20 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       estadoPago,
       tieneAbono,
       estaPagadoCompleto,
-      pagos
+      pagos,
     };
   };
 
   const shouldDisableActions = () => {
     const pagosData = getPagosData();
-    
+
     if (updating || savingServicios) return true;
-    
-    if (['cancelada', 'no asistio'].includes(appointmentDetails?.estado?.toLowerCase())) {
+
+    if (
+      ["cancelada", "no asistio"].includes(
+        appointmentDetails?.estado?.toLowerCase(),
+      )
+    ) {
       return true;
     }
 
@@ -849,7 +1213,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       return true;
     }
 
-    if (appointmentDetails?.estado?.toLowerCase() === 'completada') {
+    if (appointmentDetails?.estado?.toLowerCase() === "completada") {
       return true;
     }
 
@@ -858,16 +1222,23 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
   const handleUpdateStatus = async (nuevoEstado: string) => {
     if (!appointmentDetails?.id || !user?.access_token) {
-      alert('No se puede actualizar: falta información de autenticación');
+      alert("No se puede actualizar: falta información de autenticación");
       return;
     }
 
     const mensajes = {
-      'cancelada': '⚠️ ¿Cancelar esta cita?\n\nLa cita se marcará como cancelada.',
-      'no asistio': '⚠️ ¿Marcar como "No Asistió"?\n\nEl cliente no se presentó a la cita.'
+      cancelada:
+        "⚠️ ¿Cancelar esta cita?\n\nLa cita se marcará como cancelada.",
+      "no asistio":
+        '⚠️ ¿Marcar como "No Asistió"?\n\nEl cliente no se presentó a la cita.',
     };
 
-    if (!confirm(mensajes[nuevoEstado as keyof typeof mensajes] || `¿Cambiar estado a "${nuevoEstado}"?`)) {
+    if (
+      !confirm(
+        mensajes[nuevoEstado as keyof typeof mensajes] ||
+          `¿Cambiar estado a "${nuevoEstado}"?`,
+      )
+    ) {
       return;
     }
 
@@ -876,12 +1247,12 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       await updateQuote(
         appointmentDetails.id,
         { estado: nuevoEstado },
-        user.access_token
+        user.access_token,
       );
 
       setAppointmentDetails({
         ...appointmentDetails,
-        estado: nuevoEstado
+        estado: nuevoEstado,
       });
 
       alert(`✅ Estado cambiado a: ${nuevoEstado}`);
@@ -889,10 +1260,11 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       if (onRefresh) {
         setTimeout(() => onRefresh(), 500);
       }
-
     } catch (error: any) {
-      console.error('Error actualizando estado:', error);
-      alert(`❌ Error: ${extraerMensajeError(error, 'No se pudo actualizar el estado')}`);
+      console.error("Error actualizando estado:", error);
+      alert(
+        `❌ Error: ${extraerMensajeError(error, "No se pudo actualizar el estado")}`,
+      );
     } finally {
       setUpdating(false);
     }
@@ -900,7 +1272,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
   const handleGuardarNotas = async () => {
     if (!appointmentDetails?.id || !user?.access_token) {
-      alert('No se puede actualizar: falta información de autenticación');
+      alert("No se puede actualizar: falta información de autenticación");
       return;
     }
 
@@ -912,7 +1284,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       await updateQuote(
         appointmentDetails.id,
         { notas: notasFinales },
-        user.access_token
+        user.access_token,
       );
 
       setNotasOriginales(notasFinales);
@@ -923,16 +1295,19 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         rawData: {
           ...(prev?.rawData || {}),
           notas: notasFinales,
-          notas_adicionales: notasFinales
-        }
+          notas_adicionales: notasFinales,
+        },
       }));
 
-      alert('Notas actualizadas correctamente.');
+      alert("Notas actualizadas correctamente.");
       if (onRefresh) {
         setTimeout(() => onRefresh(), 200);
       }
     } catch (error: any) {
-      const mensaje = extraerMensajeError(error, 'No se pudieron actualizar las notas.');
+      const mensaje = extraerMensajeError(
+        error,
+        "No se pudieron actualizar las notas.",
+      );
       setNotasError(mensaje);
       alert(`Error: ${mensaje}`);
     } finally {
@@ -942,30 +1317,32 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
   const handleRegistrarPago = async () => {
     if (!appointmentDetails?.id || !user?.access_token) {
-      alert('No se puede registrar pago: falta información de autenticación');
+      alert("No se puede registrar pago: falta información de autenticación");
       return;
     }
 
     if (pagoModal.monto <= 0) {
-      alert('El monto debe ser mayor a 0');
+      alert("El monto debe ser mayor a 0");
       return;
     }
 
     const pagosData = getPagosData();
 
     if (pagoModal.monto > pagosData.saldoPendiente) {
-      alert(`El monto excede el saldo pendiente de $${pagosData.saldoPendiente}`);
+      alert(
+        `El monto excede el saldo pendiente de $${pagosData.saldoPendiente}`,
+      );
       return;
     }
 
     const metodoPagoSeguro = sanitizeMetodoPago(pagoModal.metodoPago);
     const codigoGiftcard = pagoModal.codigoGiftcard.trim();
-    if (metodoPagoSeguro === 'giftcard' && !codigoGiftcard) {
-      alert('Debes ingresar el codigo de la Gift Card para registrar el pago.');
+    if (metodoPagoSeguro === "giftcard" && !codigoGiftcard) {
+      alert("Debes ingresar el codigo de la Gift Card para registrar el pago.");
       return;
     }
     const confirmacion = confirm(
-      `¿Registrar ${pagoModal.tipo === 'pago' ? 'pago' : 'abono'} de $${pagoModal.monto} por ${metodoPagoSeguro}?`
+      `¿Registrar ${pagoModal.tipo === "pago" ? "pago" : "abono"} de $${pagoModal.monto} por ${metodoPagoSeguro}?`,
     );
 
     if (!confirmacion) return;
@@ -977,9 +1354,11 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         {
           monto: pagoModal.monto,
           metodo_pago: metodoPagoSeguro,
-          ...(metodoPagoSeguro === 'giftcard' && codigoGiftcard ? { codigo_giftcard: codigoGiftcard } : {})
+          ...(metodoPagoSeguro === "giftcard" && codigoGiftcard
+            ? { codigo_giftcard: codigoGiftcard }
+            : {}),
         },
-        user.access_token
+        user.access_token,
       );
 
       setAppointmentDetails((prev: any) => ({
@@ -990,27 +1369,32 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           saldo_pendiente: response.saldo_pendiente,
           estado_pago: response.estado_pago,
           metodo_pago: metodoPagoSeguro,
-          ...(metodoPagoSeguro === 'giftcard' && codigoGiftcard ? { codigo_giftcard: codigoGiftcard } : {})
-        }
+          ...(metodoPagoSeguro === "giftcard" && codigoGiftcard
+            ? { codigo_giftcard: codigoGiftcard }
+            : {}),
+        },
       }));
 
-      alert(`✅ ${pagoModal.tipo === 'pago' ? 'Pago' : 'Abono'} registrado exitosamente`);
+      alert(
+        `✅ ${pagoModal.tipo === "pago" ? "Pago" : "Abono"} registrado exitosamente`,
+      );
 
       setPagoModal({
         show: false,
-        tipo: 'pago',
+        tipo: "pago",
         monto: 0,
-        metodoPago: 'efectivo',
-        codigoGiftcard: ''
+        metodoPago: "efectivo",
+        codigoGiftcard: "",
       });
 
       if (onRefresh) {
         setTimeout(() => onRefresh(), 500);
       }
-
     } catch (error: any) {
-      console.error('Error registrando pago:', error);
-      alert(`❌ Error: ${extraerMensajeError(error, 'No se pudo registrar el pago')}`);
+      console.error("Error registrando pago:", error);
+      alert(
+        `❌ Error: ${extraerMensajeError(error, "No se pudo registrar el pago")}`,
+      );
     } finally {
       setRegistrandoPago(false);
     }
@@ -1019,14 +1403,20 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   const handleAgregarServicio = () => {
     if (!selectedServiceId) return;
 
-    if (serviciosSeleccionados.some((servicio) => servicio.servicio_id === selectedServiceId)) {
-      setServiceError('El servicio ya está agregado en la cita.');
+    if (
+      serviciosSeleccionados.some(
+        (servicio) => servicio.servicio_id === selectedServiceId,
+      )
+    ) {
+      setServiceError("El servicio ya está agregado en la cita.");
       return;
     }
 
-    const servicioCatalogo = serviciosDisponibles.find((servicio) => servicio.servicio_id === selectedServiceId);
+    const servicioCatalogo = serviciosDisponibles.find(
+      (servicio) => servicio.servicio_id === selectedServiceId,
+    );
     if (!servicioCatalogo) {
-      setServiceError('No se encontró el servicio seleccionado.');
+      setServiceError("No se encontró el servicio seleccionado.");
       return;
     }
 
@@ -1040,20 +1430,25 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       duracion_minutos: servicioCatalogo.duracion_minutos || 0,
       subtotal: roundMoney(servicioCatalogo.precio),
       precio_personalizado: null,
-      usa_precio_personalizado: false
+      usa_precio_personalizado: false,
     };
 
     setServiciosSeleccionados((prev) => [...prev, nuevoServicio]);
-    setSelectedServiceId('');
+    setSelectedServiceId("");
     setServiceError(null);
   };
 
   const handleEliminarServicio = (servicioId: string) => {
-    setServiciosSeleccionados((prev) => prev.filter((servicio) => servicio.servicio_id !== servicioId));
+    setServiciosSeleccionados((prev) =>
+      prev.filter((servicio) => servicio.servicio_id !== servicioId),
+    );
     setServiceError(null);
   };
 
-  const handleActualizarCantidad = (servicioId: string, cantidadInput: string) => {
+  const handleActualizarCantidad = (
+    servicioId: string,
+    cantidadInput: string,
+  ) => {
     const cantidad = Math.max(1, Math.trunc(toNumber(cantidadInput) || 1));
 
     setServiciosSeleccionados((prev) =>
@@ -1063,40 +1458,44 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         return {
           ...servicio,
           cantidad,
-          subtotal
+          subtotal,
         };
-      })
+      }),
     );
   };
 
-  const handleActualizarPrecioServicio = (servicioId: string, precioInput: string) => {
-    const normalizado = precioInput.replace(',', '.').trim();
+  const handleActualizarPrecioServicio = (
+    servicioId: string,
+    precioInput: string,
+  ) => {
+    const normalizado = precioInput.replace(",", ".").trim();
 
     setServiciosSeleccionados((prev) =>
       prev.map((servicio) => {
         if (servicio.servicio_id !== servicioId) return servicio;
-        if (normalizado === '') {
+        if (normalizado === "") {
           return {
             ...servicio,
-            precio_unitario_input: '',
+            precio_unitario_input: "",
             precio_unitario: 0,
             precio_personalizado: null,
             usa_precio_personalizado: false,
-            subtotal: roundMoney(0 * servicio.cantidad)
+            subtotal: roundMoney(0 * servicio.cantidad),
           };
         }
 
         const precioNumerico = roundMoney(toNumber(normalizado));
-        const usaPersonalizado = roundMoney(precioNumerico) !== roundMoney(servicio.precio_base);
+        const usaPersonalizado =
+          roundMoney(precioNumerico) !== roundMoney(servicio.precio_base);
         return {
           ...servicio,
           precio_unitario_input: normalizado,
           precio_unitario: precioNumerico,
           precio_personalizado: usaPersonalizado ? precioNumerico : null,
           usa_precio_personalizado: usaPersonalizado,
-          subtotal: roundMoney(precioNumerico * servicio.cantidad)
+          subtotal: roundMoney(precioNumerico * servicio.cantidad),
         };
-      })
+      }),
     );
   };
 
@@ -1108,14 +1507,18 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
     if (!selectedProductId) return;
 
-    if (productos.some((producto) => producto.producto_id === selectedProductId)) {
-      setServiceError('El producto ya está agregado en la cita.');
+    if (
+      productos.some((producto) => producto.producto_id === selectedProductId)
+    ) {
+      setServiceError("El producto ya está agregado en la cita.");
       return;
     }
 
-    const productoCatalogo = productosDisponibles.find((producto) => producto.producto_id === selectedProductId);
+    const productoCatalogo = productosDisponibles.find(
+      (producto) => producto.producto_id === selectedProductId,
+    );
     if (!productoCatalogo) {
-      setServiceError('No se encontró el producto seleccionado.');
+      setServiceError("No se encontró el producto seleccionado.");
       return;
     }
 
@@ -1131,50 +1534,63 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       agregado_por_email: user?.email,
       agregado_por_rol: (user as any)?.rol || user?.role,
       fecha_agregado: new Date().toISOString(),
-      profesional_id: profesionalEditadoId || appointmentDetails?.rawData?.profesional_id
+      profesional_id:
+        profesionalEditadoId || appointmentDetails?.rawData?.profesional_id,
     };
 
     setProductos((prev) => [...prev, nuevoProducto]);
-    setSelectedProductId('');
+    setSelectedProductId("");
     setServiceError(null);
   };
 
   const handleEliminarProducto = (productoId: string) => {
-    setProductos((prev) => prev.filter((producto) => producto.producto_id !== productoId));
+    setProductos((prev) =>
+      prev.filter((producto) => producto.producto_id !== productoId),
+    );
   };
 
-  const handleActualizarCantidadProducto = (productoId: string, cantidadInput: string) => {
+  const handleActualizarCantidadProducto = (
+    productoId: string,
+    cantidadInput: string,
+  ) => {
     const cantidad = Math.max(1, Math.trunc(toNumber(cantidadInput) || 1));
     setProductos((prev) =>
       prev.map((producto) => {
         if (producto.producto_id !== productoId) return producto;
         const subtotal = roundMoney(producto.precio_unitario * cantidad);
-        const comisionPorcentaje = roundMoney(toNumber(producto.comision_porcentaje ?? 0));
+        const comisionPorcentaje = roundMoney(
+          toNumber(producto.comision_porcentaje ?? 0),
+        );
         return {
           ...producto,
           cantidad,
           subtotal,
-          comision_valor: roundMoney((subtotal * comisionPorcentaje) / 100)
+          comision_valor: roundMoney((subtotal * comisionPorcentaje) / 100),
         };
-      })
+      }),
     );
   };
 
-  const handleActualizarPrecioProducto = (productoId: string, precioInput: string) => {
+  const handleActualizarPrecioProducto = (
+    productoId: string,
+    precioInput: string,
+  ) => {
     const precio = Math.max(0, roundMoney(toNumber(precioInput)));
     setProductos((prev) =>
       prev.map((producto) => {
         if (producto.producto_id !== productoId) return producto;
         const precioUnitario = precio > 0 ? precio : producto.precio_unitario;
         const subtotal = roundMoney(precioUnitario * producto.cantidad);
-        const comisionPorcentaje = roundMoney(toNumber(producto.comision_porcentaje ?? 0));
+        const comisionPorcentaje = roundMoney(
+          toNumber(producto.comision_porcentaje ?? 0),
+        );
         return {
           ...producto,
           precio_unitario: precioUnitario,
           subtotal,
-          comision_valor: roundMoney((subtotal * comisionPorcentaje) / 100)
+          comision_valor: roundMoney((subtotal * comisionPorcentaje) / 100),
         };
-      })
+      }),
     );
   };
 
@@ -1186,48 +1602,68 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
   const handleGuardarServicios = async () => {
     if (!appointmentDetails?.id || !user?.access_token) {
-      alert('No se puede guardar: falta información de autenticación.');
+      alert("No se puede guardar: falta información de autenticación.");
       return;
     }
 
     if (isEstadoNoEditableServicios) {
-      alert('No se pueden editar servicios en el estado actual de la cita.');
+      alert("No se pueden editar servicios en el estado actual de la cita.");
       return;
     }
 
     if (serviciosSeleccionados.length === 0) {
-      setServiceError('Debes mantener al menos un servicio en la cita.');
+      setServiceError("Debes mantener al menos un servicio en la cita.");
       return;
     }
 
-    if (!fechaEditada || !horaInicioEditada || !horaFinEditada || !profesionalEditadoId) {
-      setServiceError('Debes completar fecha, hora de inicio, hora de fin y profesional.');
+    if (
+      !fechaEditada ||
+      !horaInicioEditada ||
+      !horaFinEditada ||
+      !profesionalEditadoId
+    ) {
+      setServiceError(
+        "Debes completar fecha, hora de inicio, hora de fin y profesional.",
+      );
       return;
     }
 
     const profesionalSeleccionado = profesionalesDisponibles.find(
-      (profesional) => profesional.profesional_id === profesionalEditadoId
+      (profesional) => profesional.profesional_id === profesionalEditadoId,
     );
 
-    if (profesionalSeleccionado?.invalidAgendaId || isMongoObjectIdLike(profesionalEditadoId)) {
-      setServiceError('El profesional seleccionado no tiene un ID de agenda válido. Verifica su configuración antes de asignar la cita.');
+    if (
+      profesionalSeleccionado?.invalidAgendaId ||
+      isMongoObjectIdLike(profesionalEditadoId)
+    ) {
+      setServiceError(
+        "El profesional seleccionado no tiene un ID de agenda válido. Verifica su configuración antes de asignar la cita.",
+      );
       return;
     }
 
     const horaInicioMinutos = convertirHoraAMinutos(horaInicioEditada);
     const horaFinMinutos = convertirHoraAMinutos(horaFinEditada);
-    if (!Number.isFinite(horaInicioMinutos) || !Number.isFinite(horaFinMinutos) || horaFinMinutos <= horaInicioMinutos) {
-      setServiceError('La hora de fin debe ser mayor que la hora de inicio.');
+    if (
+      !Number.isFinite(horaInicioMinutos) ||
+      !Number.isFinite(horaFinMinutos) ||
+      horaFinMinutos <= horaInicioMinutos
+    ) {
+      setServiceError("La hora de fin debe ser mayor que la hora de inicio.");
       return;
     }
 
-    const servicioConPrecioInvalido = serviciosSeleccionados.find((servicio) => {
-      const valorInput = String(servicio.precio_unitario_input ?? '').trim();
-      return valorInput === '' || toNumber(valorInput) <= 0;
-    });
+    const servicioConPrecioInvalido = serviciosSeleccionados.find(
+      (servicio) => {
+        const valorInput = String(servicio.precio_unitario_input ?? "").trim();
+        return valorInput === "" || toNumber(valorInput) <= 0;
+      },
+    );
 
     if (servicioConPrecioInvalido) {
-      setServiceError(`El servicio "${servicioConPrecioInvalido.nombre}" tiene un precio inválido.`);
+      setServiceError(
+        `El servicio "${servicioConPrecioInvalido.nombre}" tiene un precio inválido.`,
+      );
       return;
     }
 
@@ -1238,12 +1674,12 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       const serviciosPayload = serviciosSeleccionados.map((servicio) => ({
         servicio_id: servicio.servicio_id,
         precio: roundMoney(toNumber(servicio.precio_unitario_input)),
-        cantidad: servicio.cantidad
+        cantidad: servicio.cantidad,
       }));
       const productosPayload = productos.map((producto) => ({
         producto_id: producto.producto_id,
         precio: producto.precio_unitario,
-        cantidad: producto.cantidad
+        cantidad: producto.cantidad,
       }));
       const notasFinales = normalizeNote(notasEditadas);
 
@@ -1256,26 +1692,39 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           profesional_id: profesionalEditadoId,
           servicios: serviciosPayload,
           productos: productosPayload,
-          notas: notasFinales
+          notas: notasFinales,
         },
-        user.access_token
+        user.access_token,
       );
 
       const citaActualizada = response?.cita || {};
-      const serviciosActualizados = normalizarServiciosCita(citaActualizada.servicios || []);
-      const productosActualizados = normalizarProductosCita(citaActualizada.productos || []);
+      const serviciosActualizados = normalizarServiciosCita(
+        citaActualizada.servicios || [],
+      );
+      const productosActualizados = normalizarProductosCita(
+        citaActualizada.productos || [],
+      );
 
       setServiciosSeleccionados(serviciosActualizados);
       setServiciosOriginales(serviciosActualizados);
       setProductos(productosActualizados);
       setProductosOriginales(productosActualizados);
 
-      const fechaNueva = String(citaActualizada.fecha || fechaEditada).slice(0, 10);
-      const horaInicioNueva = normalizeAgendaTimeValue(String(citaActualizada.hora_inicio || horaInicioEditada))
-        || horaInicioEditada;
-      const horaFinNueva = normalizeAgendaTimeValue(String(citaActualizada.hora_fin || horaFinEditada))
-        || horaFinEditada;
-      const profesionalNuevo = String(citaActualizada.profesional_id || profesionalEditadoId);
+      const fechaNueva = String(citaActualizada.fecha || fechaEditada).slice(
+        0,
+        10,
+      );
+      const horaInicioNueva =
+        normalizeAgendaTimeValue(
+          String(citaActualizada.hora_inicio || horaInicioEditada),
+        ) || horaInicioEditada;
+      const horaFinNueva =
+        normalizeAgendaTimeValue(
+          String(citaActualizada.hora_fin || horaFinEditada),
+        ) || horaFinEditada;
+      const profesionalNuevo = String(
+        citaActualizada.profesional_id || profesionalEditadoId,
+      );
       setFechaEditada(fechaNueva);
       setHoraInicioEditada(horaInicioNueva);
       setHoraFinEditada(horaFinNueva);
@@ -1284,39 +1733,50 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         fecha: fechaNueva,
         hora_inicio: horaInicioNueva,
         hora_fin: horaFinNueva,
-        profesional_id: profesionalNuevo
+        profesional_id: profesionalNuevo,
       });
 
       setAppointmentDetails((prev: any) => ({
         ...prev,
         start: citaActualizada.hora_inicio || prev?.start,
         end: citaActualizada.hora_fin || prev?.end,
-        servicio_nombre: citaActualizada.servicio_nombre || prev?.servicio_nombre,
-        estilista_nombre: citaActualizada.profesional_nombre || prev?.estilista_nombre,
+        servicio_nombre:
+          citaActualizada.servicio_nombre || prev?.servicio_nombre,
+        estilista_nombre:
+          citaActualizada.profesional_nombre || prev?.estilista_nombre,
         profesional_id: citaActualizada.profesional_id || prev?.profesional_id,
         notas: notasFinales,
         rawData: {
           ...prev?.rawData,
           ...citaActualizada,
-          servicios: citaActualizada.servicios || prev?.rawData?.servicios || [],
-          productos: citaActualizada.productos || prev?.rawData?.productos || [],
+          servicios:
+            citaActualizada.servicios || prev?.rawData?.servicios || [],
+          productos:
+            citaActualizada.productos || prev?.rawData?.productos || [],
           fecha: citaActualizada.fecha || prev?.rawData?.fecha,
-          hora_inicio: citaActualizada.hora_inicio || prev?.rawData?.hora_inicio,
+          hora_inicio:
+            citaActualizada.hora_inicio || prev?.rawData?.hora_inicio,
           hora_fin: citaActualizada.hora_fin || prev?.rawData?.hora_fin,
-          profesional_id: citaActualizada.profesional_id || prev?.rawData?.profesional_id,
-          profesional_nombre: citaActualizada.profesional_nombre || prev?.rawData?.profesional_nombre,
-          valor_total: citaActualizada.valor_total ?? prev?.rawData?.valor_total,
-          saldo_pendiente: citaActualizada.saldo_pendiente ?? prev?.rawData?.saldo_pendiente,
-          estado_pago: citaActualizada.estado_pago ?? prev?.rawData?.estado_pago,
+          profesional_id:
+            citaActualizada.profesional_id || prev?.rawData?.profesional_id,
+          profesional_nombre:
+            citaActualizada.profesional_nombre ||
+            prev?.rawData?.profesional_nombre,
+          valor_total:
+            citaActualizada.valor_total ?? prev?.rawData?.valor_total,
+          saldo_pendiente:
+            citaActualizada.saldo_pendiente ?? prev?.rawData?.saldo_pendiente,
+          estado_pago:
+            citaActualizada.estado_pago ?? prev?.rawData?.estado_pago,
           notas: notasFinales,
-          notas_adicionales: notasFinales
-        }
+          notas_adicionales: notasFinales,
+        },
       }));
 
       setNotasOriginales(notasFinales);
       setNotasEditadas(notasFinales);
 
-      alert('Cita actualizada correctamente.');
+      alert("Cita actualizada correctamente.");
       onClose();
       if (onRefresh) {
         setTimeout(() => onRefresh(), 200);
@@ -1324,10 +1784,13 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     } catch (error: any) {
       const { mensaje, sinHorario } = construirMensajeErrorCita(
         error,
-        'No se pudieron guardar los cambios de la cita.'
+        "No se pudieron guardar los cambios de la cita.",
       );
 
-      if (sinHorario && profesionalEditadoId !== horarioOriginal.profesional_id) {
+      if (
+        sinHorario &&
+        profesionalEditadoId !== horarioOriginal.profesional_id
+      ) {
         setProfesionalEditadoId(horarioOriginal.profesional_id);
       }
 
@@ -1339,66 +1802,75 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   };
 
   const getStatusColor = (_: string) => {
-    return 'bg-gray-100 text-gray-900 border border-gray-300';
+    return "bg-gray-100 text-gray-900 border border-gray-300";
   };
 
   const getEstadoPagoColor = (_: string) => {
-    return 'bg-gray-100 text-gray-900 border border-gray-300';
+    return "bg-gray-100 text-gray-900 border border-gray-300";
   };
 
   const getEstadoPagoTexto = (estado: string, pagosData: any) => {
-    if (!pagosData) return 'PENDIENTE';
+    if (!pagosData) return "PENDIENTE";
 
     switch (estado?.toLowerCase()) {
-      case 'pagado':
-        return 'PAGADO';
-      case 'abonado':
-        return 'PAGO PARCIAL';
-      case 'pendiente':
-        return pagosData.tieneAbono ? 'PAGO PARCIAL' : 'SIN PAGO';
+      case "pagado":
+        return "PAGADO";
+      case "abonado":
+        return "PAGO PARCIAL";
+      case "pendiente":
+        return pagosData.tieneAbono ? "PAGO PARCIAL" : "SIN PAGO";
       default:
-        return estado?.toUpperCase() || 'PENDIENTE';
+        return estado?.toUpperCase() || "PENDIENTE";
     }
   };
 
   const formatFechaSegura = (fechaString: string) => {
-    return formatDateDMY(fechaString, 'Fecha no especificada');
+    return formatDateDMY(fechaString, "Fecha no especificada");
   };
 
   const getPrecio = () => {
-    if (!appointmentDetails) return '0';
+    if (!appointmentDetails) return "0";
 
     const precioGuardado =
       appointmentDetails.valor_total ||
       appointmentDetails.rawData?.valor_total ||
       appointmentDetails.precio ||
-      '0';
+      "0";
 
     const precioNumericoGuardado = toNumber(precioGuardado);
-    const usarTotalCalculado = serviciosSeleccionados.length > 0 || productos.length > 0;
-    const total = usarTotalCalculado ? totalCitaCalculado : precioNumericoGuardado;
+    const usarTotalCalculado =
+      serviciosSeleccionados.length > 0 || productos.length > 0;
+    const total = usarTotalCalculado
+      ? totalCitaCalculado
+      : precioNumericoGuardado;
 
     return roundMoney(total).toString();
   };
 
   const getTotalProductos = () => {
     if (productos.length === 0) return 0;
-    return productos.reduce((total, producto) => total + toNumber(producto.subtotal), 0);
+    return productos.reduce(
+      (total, producto) => total + toNumber(producto.subtotal),
+      0,
+    );
   };
 
   const getTotalComision = () => {
     if (productos.length === 0) return 0;
-    return productos.reduce((total, producto) => total + toNumber(producto.comision_valor), 0);
+    return productos.reduce(
+      (total, producto) => total + toNumber(producto.comision_valor),
+      0,
+    );
   };
 
   const formatFechaHora = (fechaString: string) => {
-    if (!fechaString) return 'Fecha no disponible';
+    if (!fechaString) return "Fecha no disponible";
     const fecha = new Date(fechaString);
     if (Number.isNaN(fecha.getTime())) {
       return formatDateDMY(fechaString, fechaString);
     }
-    const horas = String(fecha.getHours()).padStart(2, '0');
-    const minutos = String(fecha.getMinutes()).padStart(2, '0');
+    const horas = String(fecha.getHours()).padStart(2, "0");
+    const minutos = String(fecha.getMinutes()).padStart(2, "0");
     return `${formatDateDMY(fecha)} ${horas}:${minutos}`;
   };
 
@@ -1406,198 +1878,229 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     if (!pagoModal.show) return null;
 
     const pagosData = getPagosData();
-    const tipoTexto = pagoModal.tipo === 'pago' ? 'pago' : 'abono';
     const maxMonto = pagosData.saldoPendiente;
+    const fmtPago = (n: number) => "$" + Math.round(n).toLocaleString("es-CO");
+
+    type MetodoEntry = { key: PagoModalData["metodoPago"]; label: string };
+    const metodos: MetodoEntry[] = [
+      { key: "efectivo", label: "Efectivo" },
+      { key: "transferencia", label: "Transferencia" },
+      { key: "tarjeta_credito", label: "Tarjeta" },
+      { key: "giftcard", label: "Gift Card" },
+      ...(isCopCurrency
+        ? [{ key: "addi" as PagoModalData["metodoPago"], label: "Addi" }]
+        : []),
+      { key: PAYROLL_PAYMENT_METHOD, label: "Nómina" },
+    ];
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50 p-1">
-        <div className="bg-white rounded w-full max-w-xs shadow-lg border border-gray-200">
-          <div className="p-2">
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="text-xs font-semibold text-gray-900">
-                Registrar {tipoTexto}
-              </h3>
-              <button
-                onClick={() => setPagoModal(prev => ({ ...prev, show: false }))}
-                className="text-gray-500 hover:text-gray-700 p-0.5"
-                disabled={registrandoPago}
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </div>
+      <div
+        className="rounded-2xl p-5 space-y-4"
+        style={{
+          border: "1px solid #E2E8F0",
+          background: "#fff",
+          boxShadow: "0 1px 4px 0 rgba(0,0,0,0.06)",
+        }}
+      >
+        {/* Title */}
+        <p className="text-base font-semibold" style={{ color: "#1E293B" }}>
+          {pagoModal.tipo === "pago" ? "Agregar Abono" : "Registrar Pago"}
+        </p>
 
-            <div className="space-y-1.5">
-              <div className="bg-gray-50 p-1.5 rounded text-[10px]">
-                <div className="text-gray-600 mb-0.5">Cliente</div>
-                <div className="font-medium text-gray-900">{appointmentDetails.cliente_nombre}</div>
-                <div className="text-gray-600 mt-0.5">
-                  Saldo: <span className="font-bold text-gray-900">${pagosData.saldoPendiente}</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-medium text-gray-700 mb-0.5">
-                  Monto *
-                </label>
-                <div className="relative">
-                  <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-500 text-[10px]">$</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max={maxMonto}
-                    step="0.01"
-                    value={pagoModal.monto || ''}
-                    onChange={(e) => setPagoModal(prev => ({
-                      ...prev,
-                      monto: parseFloat(e.target.value) || 0
-                    }))}
-                    className="w-full pl-5 pr-1.5 py-1 text-xs border border-gray-300 rounded focus:ring-0 focus:border-black"
-                    placeholder={`0.00 (máx: $${maxMonto})`}
-                    disabled={registrandoPago}
-                  />
-                </div>
-                <div className="text-[9px] text-gray-500 mt-0.5">
-                  Saldo disponible: ${maxMonto}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-medium text-gray-700 mb-0.5">
-                  Método de pago *
-                </label>
-                <div className={`grid grid-cols-2 sm:grid-cols-3 ${isCopCurrency ? 'lg:grid-cols-7' : 'lg:grid-cols-6'} gap-1`}>
-                  <button
-                    type="button"
-                    onClick={() => setPagoModal(prev => ({ ...prev, metodoPago: 'efectivo' }))}
-                    className={`p-1 rounded border flex flex-col items-center justify-center gap-0.5 text-[10px] ${
-                      pagoModal.metodoPago === 'efectivo' ? 'border-black bg-gray-50' : 'border-gray-300 hover:border-gray-400'
-                    }`}
-                    disabled={registrandoPago}
-                  >
-                    <Wallet className="w-3 h-3 text-gray-700" />
-                    <span className="font-medium">Efectivo</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPagoModal(prev => ({ ...prev, metodoPago: 'transferencia' }))}
-                    className={`p-1 rounded border flex flex-col items-center justify-center gap-0.5 text-[10px] ${
-                      pagoModal.metodoPago === 'transferencia' ? 'border-black bg-gray-50' : 'border-gray-300 hover:border-gray-400'
-                    }`}
-                    disabled={registrandoPago}
-                  >
-                    <Landmark className="w-3 h-3 text-gray-700" />
-                    <span className="font-medium">Transfer.</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPagoModal(prev => ({ ...prev, metodoPago: 'tarjeta_credito' }))}
-                    className={`p-1 rounded border flex flex-col items-center justify-center gap-0.5 text-[10px] ${
-                      pagoModal.metodoPago === 'tarjeta_credito' ? 'border-black bg-gray-50' : 'border-gray-300 hover:border-gray-400'
-                    }`}
-                    disabled={registrandoPago}
-                  >
-                    <CreditCard className="w-3 h-3 text-gray-700" />
-                    <span className="font-medium">T. Crédito</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPagoModal(prev => ({ ...prev, metodoPago: 'tarjeta_debito' }))}
-                    className={`p-1 rounded border flex flex-col items-center justify-center gap-0.5 text-[10px] ${
-                      pagoModal.metodoPago === 'tarjeta_debito' ? 'border-black bg-gray-50' : 'border-gray-300 hover:border-gray-400'
-                    }`}
-                    disabled={registrandoPago}
-                  >
-                    <CreditCard className="w-3 h-3 text-gray-700" />
-                    <span className="font-medium">T. Débito</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPagoModal(prev => ({ ...prev, metodoPago: 'giftcard' }))}
-                    className={`p-1 rounded border flex flex-col items-center justify-center gap-0.5 text-[10px] ${
-                      pagoModal.metodoPago === 'giftcard' ? 'border-black bg-gray-50' : 'border-gray-300 hover:border-gray-400'
-                    }`}
-                    disabled={registrandoPago}
-                  >
-                    <Gift className="w-3 h-3 text-gray-700" />
-                    <span className="font-medium">Gift Card</span>
-                  </button>
-                  {isCopCurrency && (
-                    <button
-                      type="button"
-                      onClick={() => setPagoModal(prev => ({ ...prev, metodoPago: 'addi' }))}
-                      className={`p-1 rounded border flex flex-col items-center justify-center gap-0.5 text-[10px] ${
-                        pagoModal.metodoPago === 'addi' ? 'border-black bg-gray-50' : 'border-gray-300 hover:border-gray-400'
-                      }`}
-                      disabled={registrandoPago}
-                    >
-                      <Wallet className="w-3 h-3 text-gray-700" />
-                      <span className="font-medium">Addi</span>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setPagoModal(prev => ({ ...prev, metodoPago: PAYROLL_PAYMENT_METHOD }))}
-                    className={`p-1 rounded border flex flex-col items-center justify-center gap-0.5 text-[10px] ${
-                      sanitizeMetodoPago(pagoModal.metodoPago) === PAYROLL_PAYMENT_METHOD
-                        ? 'border-black bg-gray-50'
-                        : 'border-gray-300 hover:border-gray-400'
-                    }`}
-                    disabled={registrandoPago}
-                  >
-                    <Wallet className="w-3 h-3 text-gray-700" />
-                    <span className="font-medium">Nómina</span>
-                  </button>
-                </div>
-              </div>
-
-              {pagoModal.metodoPago === 'giftcard' && (
-                <div>
-                  <label className="block text-[10px] font-medium text-gray-700 mb-0.5">
-                    Codigo Gift Card *
-                  </label>
-                  <input
-                    type="text"
-                    value={pagoModal.codigoGiftcard}
-                    onChange={(e) => setPagoModal(prev => ({ ...prev, codigoGiftcard: e.target.value }))}
-                    className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-0 focus:border-black"
-                    placeholder="Ej: RFC-GCP-1234"
-                    disabled={registrandoPago}
-                  />
-                </div>
-              )}
-
-              <div className="flex gap-1 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setPagoModal(prev => ({ ...prev, show: false }))}
-                  className="flex-1 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 font-medium text-[10px]"
-                  disabled={registrandoPago}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRegistrarPago}
-                  disabled={
-                    registrandoPago ||
-                    pagoModal.monto <= 0 ||
-                    pagoModal.monto > maxMonto ||
-                    (pagoModal.metodoPago === 'giftcard' && !pagoModal.codigoGiftcard.trim())
-                  }
-                  className="flex-1 py-1 bg-black text-white rounded hover:bg-gray-800 font-medium text-[10px] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {registrandoPago ? (
-                    <>
-                      <Loader2 className="w-2.5 h-2.5 animate-spin inline mr-0.5" />
-                      Registrando...
-                    </>
-                  ) : (
-                    `Registrar ${tipoTexto}`
-                  )}
-                </button>
-              </div>
-            </div>
+        {/* Tipo toggle */}
+        <div>
+          <p className="text-xs font-medium mb-2" style={{ color: "#64748B" }}>
+            Tipo
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setPagoModal((prev) => ({ ...prev, tipo: "abono", monto: 0 }))
+              }
+              disabled={registrandoPago}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+              style={
+                pagoModal.tipo === "abono"
+                  ? {
+                      background: "#fff",
+                      color: "#1E293B",
+                      border: "2px solid #1E293B",
+                    }
+                  : {
+                      background: "#fff",
+                      color: "#94A3B8",
+                      border: "1px solid #E2E8F0",
+                    }
+              }
+            >
+              Abono parcial
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setPagoModal((prev) => ({
+                  ...prev,
+                  tipo: "pago",
+                  monto: maxMonto,
+                }))
+              }
+              disabled={registrandoPago}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+              style={
+                pagoModal.tipo === "pago"
+                  ? {
+                      background: "#fff",
+                      color: "#1E293B",
+                      border: "2px solid #1E293B",
+                    }
+                  : {
+                      background: "#fff",
+                      color: "#94A3B8",
+                      border: "1px solid #E2E8F0",
+                    }
+              }
+            >
+              Pago total
+            </button>
           </div>
+        </div>
+
+        {/* Monto */}
+        <div>
+          <p className="text-xs font-medium mb-2" style={{ color: "#64748B" }}>
+            Monto
+          </p>
+          <div
+            className="flex items-center rounded-xl px-4 py-2.5 gap-1"
+            style={{ border: "1px solid #E2E8F0" }}
+          >
+            <span className="text-sm mr-1" style={{ color: "#94A3B8" }}>
+              $
+            </span>
+            <input
+              type="number"
+              min="0"
+              max={maxMonto}
+              step="0.01"
+              value={pagoModal.monto || ""}
+              onChange={(e) =>
+                setPagoModal((prev) => ({
+                  ...prev,
+                  monto: parseFloat(e.target.value) || 0,
+                }))
+              }
+              className="flex-1 bg-transparent text-sm font-medium focus:outline-none focus:ring-0 border-0 p-0"
+              style={{ color: "#1E293B" }}
+              placeholder="0"
+              disabled={registrandoPago}
+            />
+          </div>
+          <p className="text-[11px] mt-1.5" style={{ color: "#94A3B8" }}>
+            Saldo pendiente: {fmtPago(maxMonto)}
+          </p>
+        </div>
+
+        {/* Método de pago */}
+        <div>
+          <p className="text-xs font-medium mb-2" style={{ color: "#64748B" }}>
+            Método de pago
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {metodos.map(({ key, label }) => {
+              const isSelected =
+                pagoModal.metodoPago === key ||
+                (key === PAYROLL_PAYMENT_METHOD &&
+                  sanitizeMetodoPago(pagoModal.metodoPago) ===
+                    PAYROLL_PAYMENT_METHOD);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() =>
+                    setPagoModal((prev) => ({ ...prev, metodoPago: key }))
+                  }
+                  disabled={registrandoPago}
+                  className="px-3 py-1.5 rounded-full text-xs transition-colors disabled:opacity-50"
+                  style={{
+                    background: "#fff",
+                    color: isSelected ? "#1E293B" : "#64748B",
+                    fontWeight: isSelected ? 600 : 400,
+                    border: isSelected
+                      ? "2px solid #1E293B"
+                      : "1px solid #E2E8F0",
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Gift card code */}
+        {pagoModal.metodoPago === "giftcard" && (
+          <div>
+            <p
+              className="text-xs font-medium mb-2"
+              style={{ color: "#64748B" }}
+            >
+              Código Gift Card *
+            </p>
+            <input
+              type="text"
+              value={pagoModal.codigoGiftcard}
+              onChange={(e) =>
+                setPagoModal((prev) => ({
+                  ...prev,
+                  codigoGiftcard: e.target.value,
+                }))
+              }
+              className="w-full rounded-xl px-4 py-2.5 text-sm focus:ring-0 focus:outline-none"
+              style={{ border: "1px solid #E2E8F0", color: "#1E293B" }}
+              placeholder="Ej: RFC-GCP-1234"
+              disabled={registrandoPago}
+            />
+          </div>
+        )}
+
+        {/* Footer actions */}
+        <div className="flex gap-3 pt-1">
+          <button
+            type="button"
+            onClick={() => setPagoModal((prev) => ({ ...prev, show: false }))}
+            disabled={registrandoPago}
+            className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-50"
+            style={{
+              border: "1px solid #E2E8F0",
+              color: "#475569",
+              background: "#fff",
+            }}
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={handleRegistrarPago}
+            disabled={
+              registrandoPago ||
+              pagoModal.monto <= 0 ||
+              pagoModal.monto > maxMonto ||
+              (pagoModal.metodoPago === "giftcard" &&
+                !pagoModal.codigoGiftcard.trim())
+            }
+            className="flex-1 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+            style={{ background: "#1E293B" }}
+          >
+            {registrandoPago ? (
+              <span className="flex items-center justify-center gap-1.5">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Registrando...
+              </span>
+            ) : (
+              "Confirmar"
+            )}
+          </button>
         </div>
       </div>
     );
@@ -1605,7 +2108,10 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
   const renderProductos = () => {
     const productosDisponiblesParaAgregar = productosDisponibles.filter(
-      (producto) => !productos.some((seleccionado) => seleccionado.producto_id === producto.producto_id)
+      (producto) =>
+        !productos.some(
+          (seleccionado) => seleccionado.producto_id === producto.producto_id,
+        ),
     );
 
     return (
@@ -1614,17 +2120,21 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           <select
             value={selectedProductId}
             onChange={(e) => setSelectedProductId(e.target.value)}
-            onFocus={() => { void handleOpenProductosSelector(); }}
-            onClick={() => { void handleOpenProductosSelector(); }}
+            onFocus={() => {
+              void handleOpenProductosSelector();
+            }}
+            onClick={() => {
+              void handleOpenProductosSelector();
+            }}
             disabled={isServiceActionsDisabled || loadingProductosDisponibles}
             className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
           >
             <option value="">
               {loadingProductosDisponibles
-                ? 'Cargando productos...'
+                ? "Cargando productos..."
                 : productosCatalogoCargado
-                  ? 'Seleccionar producto para agregar'
-                  : 'Haz clic para cargar productos'}
+                  ? "Seleccionar producto para agregar"
+                  : "Haz clic para cargar productos"}
             </option>
             {productosDisponiblesParaAgregar.map((producto) => (
               <option key={producto.producto_id} value={producto.producto_id}>
@@ -1639,32 +2149,42 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
             disabled={
               isServiceActionsDisabled ||
               loadingProductosDisponibles ||
-              (productosCatalogoCargado && (
-                !selectedProductId ||
-                productosDisponiblesParaAgregar.length === 0
-              ))
+              (productosCatalogoCargado &&
+                (!selectedProductId ||
+                  productosDisponiblesParaAgregar.length === 0))
             }
             className="px-2 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 flex items-center justify-center gap-1 font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="w-3 h-3" />
-            {productosCatalogoCargado ? 'Agregar producto' : 'Cargar productos'}
+            {productosCatalogoCargado ? "Agregar producto" : "Cargar productos"}
           </button>
         </div>
 
         <div className="bg-gray-50 p-1.5 rounded grid grid-cols-3 gap-1 text-xs">
           <div className="text-center">
             <div className="text-gray-600 font-medium">Total Productos</div>
-            <div className="text-sm font-bold text-gray-900">${roundMoney(totalProductos)}</div>
+            <div className="text-sm font-bold text-gray-900">
+              ${roundMoney(totalProductos)}
+            </div>
           </div>
           <div className="text-center">
             <div className="text-gray-600 font-medium">Comisión Total</div>
             <div className="text-sm font-bold text-gray-900">
-              ${roundMoney(productos.reduce((total, producto) => total + toNumber(producto.comision_valor ?? 0), 0))}
+              $
+              {roundMoney(
+                productos.reduce(
+                  (total, producto) =>
+                    total + toNumber(producto.comision_valor ?? 0),
+                  0,
+                ),
+              )}
             </div>
           </div>
           <div className="text-center">
             <div className="text-gray-600 font-medium">Cantidad</div>
-            <div className="text-sm font-bold text-gray-900">{productos.length}</div>
+            <div className="text-sm font-bold text-gray-900">
+              {productos.length}
+            </div>
           </div>
         </div>
 
@@ -1676,7 +2196,10 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         ) : (
           <div className="space-y-1">
             {productos.map((producto) => (
-              <div key={producto.producto_id} className="p-1.5 border border-gray-200 rounded hover:bg-gray-50">
+              <div
+                key={producto.producto_id}
+                className="p-1.5 border border-gray-200 rounded hover:bg-gray-50"
+              >
                 <div className="flex justify-between items-start">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-1">
@@ -1688,25 +2211,39 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
                     <div className="grid grid-cols-2 gap-1 text-[10px] mb-1">
                       <div>
-                        <label className="block text-gray-600 mb-0.5">Cantidad</label>
+                        <label className="block text-gray-600 mb-0.5">
+                          Cantidad
+                        </label>
                         <input
                           type="number"
                           min={1}
                           step={1}
                           value={producto.cantidad}
-                          onChange={(e) => handleActualizarCantidadProducto(producto.producto_id, e.target.value)}
+                          onChange={(e) =>
+                            handleActualizarCantidadProducto(
+                              producto.producto_id,
+                              e.target.value,
+                            )
+                          }
                           disabled={isServiceActionsDisabled}
                           className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
                         />
                       </div>
                       <div>
-                        <label className="block text-gray-600 mb-0.5">Precio unitario</label>
+                        <label className="block text-gray-600 mb-0.5">
+                          Precio unitario
+                        </label>
                         <input
                           type="number"
                           min={0}
                           step="0.01"
                           value={producto.precio_unitario}
-                          onChange={(e) => handleActualizarPrecioProducto(producto.producto_id, e.target.value)}
+                          onChange={(e) =>
+                            handleActualizarPrecioProducto(
+                              producto.producto_id,
+                              e.target.value,
+                            )
+                          }
                           disabled={isServiceActionsDisabled}
                           className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
                         />
@@ -1715,11 +2252,23 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
                     <div className="grid grid-cols-2 gap-1 text-[10px]">
                       <div className="text-gray-600">
-                        Subtotal: <span className="font-bold text-green-700">${producto.subtotal}</span>
+                        Subtotal:{" "}
+                        <span className="font-bold text-green-700">
+                          ${producto.subtotal}
+                        </span>
                       </div>
                       <div className="text-gray-600">
-                        Comisión: <span className="font-bold text-blue-700">${roundMoney(toNumber(producto.comision_valor ?? 0))}</span>
-                        <span className="text-gray-500 ml-0.5">({roundMoney(toNumber(producto.comision_porcentaje ?? 0))}%)</span>
+                        Comisión:{" "}
+                        <span className="font-bold text-blue-700">
+                          ${roundMoney(toNumber(producto.comision_valor ?? 0))}
+                        </span>
+                        <span className="text-gray-500 ml-0.5">
+                          (
+                          {roundMoney(
+                            toNumber(producto.comision_porcentaje ?? 0),
+                          )}
+                          %)
+                        </span>
                       </div>
                     </div>
 
@@ -1753,7 +2302,10 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
   const renderServiciosEditor = () => {
     const serviciosDisponiblesParaAgregar = serviciosDisponibles.filter(
-      (servicio) => !serviciosSeleccionados.some((seleccionado) => seleccionado.servicio_id === servicio.servicio_id)
+      (servicio) =>
+        !serviciosSeleccionados.some(
+          (seleccionado) => seleccionado.servicio_id === servicio.servicio_id,
+        ),
     );
 
     return (
@@ -1778,7 +2330,9 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
             className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
           >
             <option value="">
-              {loadingServiciosDisponibles ? 'Cargando servicios...' : 'Seleccionar servicio para agregar'}
+              {loadingServiciosDisponibles
+                ? "Cargando servicios..."
+                : "Seleccionar servicio para agregar"}
             </option>
             {serviciosDisponiblesParaAgregar.map((servicio) => (
               <option key={servicio.servicio_id} value={servicio.servicio_id}>
@@ -1810,10 +2364,15 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         ) : (
           <div className="space-y-1">
             {serviciosSeleccionados.map((servicio) => (
-              <div key={servicio.servicio_id} className="p-2 border border-gray-200 rounded">
+              <div
+                key={servicio.servicio_id}
+                className="p-2 border border-gray-200 rounded"
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold text-gray-900 truncate">{servicio.nombre}</p>
+                    <p className="text-xs font-semibold text-gray-900 truncate">
+                      {servicio.nombre}
+                    </p>
                     <p className="text-[10px] text-gray-600">
                       Precio unitario: ${servicio.precio_unitario}
                     </p>
@@ -1832,13 +2391,20 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
                 <div className="grid grid-cols-2 gap-2 mt-1.5">
                   <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">Precio unitario</label>
+                    <label className="block text-[10px] text-gray-600 mb-0.5">
+                      Precio unitario
+                    </label>
                     <input
                       type="text"
                       inputMode="decimal"
                       pattern="[0-9]*[.,]?[0-9]*"
                       value={servicio.precio_unitario_input}
-                      onChange={(e) => handleActualizarPrecioServicio(servicio.servicio_id, e.target.value)}
+                      onChange={(e) =>
+                        handleActualizarPrecioServicio(
+                          servicio.servicio_id,
+                          e.target.value,
+                        )
+                      }
                       disabled={isServiceActionsDisabled}
                       className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
                       placeholder="0"
@@ -1846,13 +2412,20 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">Cantidad</label>
+                    <label className="block text-[10px] text-gray-600 mb-0.5">
+                      Cantidad
+                    </label>
                     <input
                       type="number"
                       min={1}
                       step={1}
                       value={servicio.cantidad}
-                      onChange={(e) => handleActualizarCantidad(servicio.servicio_id, e.target.value)}
+                      onChange={(e) =>
+                        handleActualizarCantidad(
+                          servicio.servicio_id,
+                          e.target.value,
+                        )
+                      }
                       disabled={isServiceActionsDisabled}
                       className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
                     />
@@ -1861,13 +2434,17 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
                 <div className="grid grid-cols-2 gap-2 mt-1.5">
                   <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">Subtotal</label>
+                    <label className="block text-[10px] text-gray-600 mb-0.5">
+                      Subtotal
+                    </label>
                     <div className="border border-gray-200 rounded px-2 py-1 text-xs font-semibold text-gray-900 bg-gray-50">
                       ${servicio.subtotal}
                     </div>
                   </div>
                   <div className="text-[10px] text-gray-500 flex items-end">
-                    {servicio.usa_precio_personalizado ? 'Precio personalizado' : 'Precio base'}
+                    {servicio.usa_precio_personalizado
+                      ? "Precio personalizado"
+                      : "Precio base"}
                   </div>
                 </div>
               </div>
@@ -1877,17 +2454,25 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
         <div className="bg-gray-50 p-2 rounded grid grid-cols-2 gap-1 text-xs">
           <div className="text-gray-700">
-            Total servicios: <span className="font-bold text-gray-900">${totalServicios}</span>
+            Total servicios:{" "}
+            <span className="font-bold text-gray-900">${totalServicios}</span>
           </div>
           <div className="text-gray-700 text-right">
-            Total estimado cita: <span className="font-bold text-gray-900">${totalCitaCalculado}</span>
+            Total estimado cita:{" "}
+            <span className="font-bold text-gray-900">
+              ${totalCitaCalculado}
+            </span>
           </div>
         </div>
 
         <div className="flex justify-end items-center gap-2">
-          {hasUnsavedServiceChanges && !hasUnsavedProductChanges && !hasUnsavedScheduleChanges && (
-            <span className="text-[10px] text-gray-600">Hay cambios sin guardar</span>
-          )}
+          {hasUnsavedServiceChanges &&
+            !hasUnsavedProductChanges &&
+            !hasUnsavedScheduleChanges && (
+              <span className="text-[10px] text-gray-600">
+                Hay cambios sin guardar
+              </span>
+            )}
         </div>
       </div>
     );
@@ -1900,517 +2485,1171 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   return (
     <>
       {(() => {
+        // ── render-local helpers ─────────────────────────────────────────────
+        const rfStatus = resolveRFStatus(appointmentDetails?.estado || "");
+        const STATUS_STEPS = [
+          "pre-cita",
+          "confirmed",
+          "in-progress",
+          "completed",
+        ] as const;
+        const currentStepIdx = STATUS_STEPS.findIndex((s) => s === rfStatus);
+        const fmtM = (n: number) => "$" + Math.round(n).toLocaleString("es-CO");
+        const ini2 = (name: string) =>
+          (name || "")
+            .trim()
+            .split(" ")
+            .filter(Boolean)
+            .slice(0, 2)
+            .map((w) => w[0]?.toUpperCase() ?? "")
+            .join("");
+        const profActual = profesionalesDisponibles.find(
+          (p) => p.profesional_id === profesionalEditadoId,
+        );
+        const profNombre =
+          profActual?.nombre || appointmentDetails.estilista_nombre || "";
+        const stepLabel: Record<string, string> = {
+          "pre-cita": "Pre-cita",
+          confirmed: "Confirmada",
+          "in-progress": "En curso",
+          completed: "Completada",
+        };
+        const stepIcon: Record<string, string> = {
+          "pre-cita": "?",
+          confirmed: "✓",
+          "in-progress": "▶",
+          completed: "✔",
+        };
+
         const innerContent = (
-          <div className={panelMode ? "flex-1 overflow-y-auto" : "overflow-y-auto max-h-[90vh] md:max-h-[85vh]"}>
-          {updating ? (
-            <div className="flex flex-col items-center justify-center py-4">
-              <Loader2 className="w-5 h-5 text-gray-900 animate-spin mb-1" />
-              <p className="text-xs text-gray-600">Actualizando estado...</p>
-            </div>
-          ) : (
-            <div className="space-y-2 p-2">
-              {/* Panel de Debug */}
-              {showDebug && (
-                <div className="bg-black text-white p-1.5 rounded mb-1.5 max-h-60 overflow-y-auto text-[9px]">
-                  <div className="flex justify-between items-center mb-1">
-                    <h3 className="text-xs font-bold flex items-center gap-0.5">
-                      <Bug className="w-2.5 h-2.5" />
-                      Debug Data
-                    </h3>
+          <div
+            className={
+              panelMode ? "flex flex-col h-full" : "flex flex-col max-h-[90vh]"
+            }
+            style={{ background: "#fff" }}
+          >
+            {/* Client profile panel */}
+            {showClientProfile && clientProfile && (
+              <div className="flex flex-col h-full overflow-hidden">
+                <div
+                  className="shrink-0 px-5 pt-5 pb-4"
+                  style={{ borderBottom: "1px solid #E2E8F0" }}
+                >
+                  <div className="flex items-center justify-between">
                     <button
-                      onClick={() => setShowDebug(false)}
-                      className="text-gray-300 hover:text-white p-0.5"
+                      type="button"
+                      onClick={() => setShowClientProfile(false)}
+                      className="flex items-center gap-1.5 text-sm font-semibold hover:opacity-70 transition-opacity"
+                      style={{
+                        color: "#1E293B",
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
                     >
-                      <X className="w-2.5 h-2.5" />
+                      <ChevronLeft className="w-4 h-4" />
+                      Perfil del cliente
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                      style={{ color: "#94A3B8" }}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto px-5 py-6 space-y-6">
+                  {/* Avatar + name */}
+                  <div className="flex flex-col items-center text-center gap-2">
+                    <div
+                      className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white"
+                      style={{ background: "#1E293B" }}
+                    >
+                      {ini2(clientProfile.nombre)}
+                    </div>
+                    <div>
+                      <p
+                        className="text-lg font-bold"
+                        style={{ color: "#1E293B" }}
+                      >
+                        {clientProfile.nombre}
+                      </p>
+                      <p
+                        className="text-xs mt-0.5"
+                        style={{ color: "#64748B" }}
+                      >
+                        Cliente desde{" "}
+                        {clientProfile.fecha_creacion
+                          ? new Date(clientProfile.fecha_creacion).getFullYear()
+                          : clientProfile.fecha_registro
+                            ? new Date(
+                                clientProfile.fecha_registro,
+                              ).getFullYear()
+                            : "—"}
+                      </p>
+                    </div>
+                  </div>
+                  {/* Action buttons */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      {
+                        icon: <MessageCircle className="w-4 h-4" />,
+                        label: "WhatsApp",
+                        href: `https://wa.me/${clientProfile.telefono.replace(/\D/g, "")}`,
+                      },
+                      {
+                        icon: <Mail className="w-4 h-4" />,
+                        label: "Email",
+                        href: `mailto:${clientProfile.email}`,
+                      },
+                    ].map(({ icon, label, href }) => (
+                      <a
+                        key={label}
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex flex-col items-center gap-1.5 py-3 rounded-xl hover:bg-slate-50 transition-colors"
+                        style={{
+                          border: "1px solid #E2E8F0",
+                          color: "#1E293B",
+                          textDecoration: "none",
+                        }}
+                      >
+                        {icon}
+                        <span className="text-xs font-medium">{label}</span>
+                      </a>
+                    ))}
+                  </div>
+                  {/* Stats grid */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      {
+                        label: "VISITAS",
+                        value: loadingClientProfile
+                          ? null
+                          : String(clientProfile.historialCitas?.length ?? 0),
+                      },
+                      {
+                        label: "TICKET PROMEDIO",
+                        value: loadingClientProfile
+                          ? null
+                          : fmtM(clientProfile.ticketPromedio),
+                      },
+                      {
+                        label: "ÚLTIMA VISITA",
+                        value: loadingClientProfile
+                          ? null
+                          : clientProfile.historialCitas?.[0]?.fecha
+                            ? formatDateDMY(
+                                clientProfile.historialCitas[0].fecha,
+                              )
+                            : "—",
+                      },
+                      {
+                        label: "TELÉFONO",
+                        value:
+                          clientProfile.telefono &&
+                          clientProfile.telefono !== "No disponible"
+                            ? clientProfile.telefono
+                            : "—",
+                      },
+                    ].map(({ label, value }) => (
+                      <div
+                        key={label}
+                        className="p-3 rounded-xl"
+                        style={{ background: "#F8FAFC" }}
+                      >
+                        <p
+                          className="text-[9px] font-bold uppercase tracking-wider mb-1"
+                          style={{ color: "#94A3B8" }}
+                        >
+                          {label}
+                        </p>
+                        {value === null ? (
+                          <div
+                            className="h-4 w-12 rounded animate-pulse mt-1"
+                            style={{ background: "#E2E8F0" }}
+                          />
+                        ) : (
+                          <p
+                            className="text-sm font-bold truncate"
+                            style={{ color: "#1E293B" }}
+                          >
+                            {value}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {/* Last service */}
+                  {clientProfile.historialCitas &&
+                    clientProfile.historialCitas.length > 0 && (
+                      <div>
+                        <p
+                          className="text-[10px] font-bold uppercase tracking-wider mb-2"
+                          style={{ color: "#94A3B8" }}
+                        >
+                          Último servicio
+                        </p>
+                        <div
+                          className="flex items-center gap-3 p-3 rounded-xl"
+                          style={{ background: "#F8FAFC" }}
+                        >
+                          <div
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+                            style={{ background: "#1E293B" }}
+                          >
+                            {ini2(
+                              (clientProfile.historialCitas[0] as any)
+                                .estilista || "P",
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p
+                              className="text-sm font-semibold truncate"
+                              style={{ color: "#1E293B" }}
+                            >
+                              {clientProfile.historialCitas[0].servicio}
+                            </p>
+                            <p className="text-xs" style={{ color: "#94A3B8" }}>
+                              {clientProfile.historialCitas[0].fecha
+                                ? formatDateDMY(
+                                    clientProfile.historialCitas[0].fecha,
+                                  )
+                                : "—"}
+                              {(clientProfile.historialCitas[0] as any)
+                                .estilista
+                                ? ` · con ${(clientProfile.historialCitas[0] as any).estilista}`
+                                : ""}
+                            </p>
+                          </div>
+                          <p
+                            className="text-sm font-bold shrink-0"
+                            style={{ color: "#1E293B" }}
+                          >
+                            {typeof clientProfile.historialCitas[0]
+                              .valor_total === "number"
+                              ? fmtM(
+                                  clientProfile.historialCitas[0]
+                                    .valor_total as number,
+                                )
+                              : clientProfile.historialCitas[0].valor_total ||
+                                "—"}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  {/* Contact */}
+                  <div>
+                    <p
+                      className="text-[10px] font-bold uppercase tracking-wider mb-2"
+                      style={{ color: "#94A3B8" }}
+                    >
+                      Contacto
+                    </p>
+                    <div className="space-y-2">
+                      {clientProfile.telefono &&
+                        clientProfile.telefono !== "No disponible" && (
+                          <div className="flex items-center gap-2">
+                            <Phone
+                              className="w-3.5 h-3.5 shrink-0"
+                              style={{ color: "#94A3B8" }}
+                            />
+                            <span
+                              className="text-sm"
+                              style={{ color: "#1E293B" }}
+                            >
+                              {clientProfile.telefono}
+                            </span>
+                          </div>
+                        )}
+                      {clientProfile.email &&
+                        clientProfile.email !== "No disponible" && (
+                          <div className="flex items-center gap-2">
+                            <Mail
+                              className="w-3.5 h-3.5 shrink-0"
+                              style={{ color: "#94A3B8" }}
+                            />
+                            <span
+                              className="text-sm truncate"
+                              style={{ color: "#1E293B" }}
+                            >
+                              {clientProfile.email}
+                            </span>
+                          </div>
+                        )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Loading overlay */}
+            {!showClientProfile && updating && (
+              <div className="flex-1 flex flex-col items-center justify-center py-10">
+                <Loader2
+                  className="w-5 h-5 animate-spin mb-2"
+                  style={{ color: "#1E293B" }}
+                />
+                <p className="text-xs" style={{ color: "#64748B" }}>
+                  Actualizando estado...
+                </p>
+              </div>
+            )}
+
+            {!showClientProfile && !updating && (
+              <>
+                {/* ══ HEADER ══════════════════════════════════════════════════ */}
+                <div
+                  className="shrink-0 px-5 pt-5 pb-4"
+                  style={{ borderBottom: "1px solid #E2E8F0" }}
+                >
+                  {/* Client + close */}
+                  <div className="flex items-start justify-between gap-3 mb-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
+                        style={{ background: "#1E293B" }}
+                      >
+                        {ini2(appointmentDetails.cliente_nombre || "C")}
+                      </div>
+                      <div className="min-w-0">
+                        <p
+                          className="text-base font-semibold leading-tight truncate"
+                          style={{ color: "#1E293B" }}
+                        >
+                          {appointmentDetails.cliente_nombre || "Cliente"}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleVerPerfil}
+                          disabled={loadingClientProfile}
+                          className="text-xs mt-0.5 hover:underline transition-opacity disabled:opacity-50 text-left"
+                          style={{
+                            color: "#64748B",
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {loadingClientProfile
+                            ? "Cargando..."
+                            : "Ver perfil →"}
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      onClick={onClose}
+                      className="shrink-0 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                      style={{ color: "#94A3B8" }}
+                    >
+                      <X className="w-4 h-4" />
                     </button>
                   </div>
 
-                  <div className="space-y-1">
-                    <div>
-                      <h4 className="text-xs font-semibold text-gray-300 mb-0.5">💰 Cálculos de Pagos:</h4>
-                      <div className="space-y-0.5">
-                        <div><span className="text-gray-400">Total Cita:</span> <span className="text-white">${pagosData.totalCita}</span></div>
-                        <div><span className="text-gray-400">Abonado:</span> <span className="text-white">${pagosData.abonado}</span></div>
-                        <div><span className="text-gray-400">Saldo Pendiente:</span> <span className="text-white">${pagosData.saldoPendiente}</span></div>
-                        <div><span className="text-gray-400">Estado Pago:</span> <span className="text-white">{pagosData.estadoPago}</span></div>
-                        <div><span className="text-gray-400">Total Productos:</span> <span className="text-white">${getTotalProductos()}</span></div>
-                        <div><span className="text-gray-400">Comisión Total:</span> <span className="text-white">${getTotalComision()}</span></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Header Superior */}
-              <div className="flex justify-between items-center mb-1">
-                <h2 className="text-sm font-semibold text-gray-900">Detalles de cita</h2>
-                <button
-                  onClick={onClose}
-                  className="text-gray-500 hover:text-gray-700 hover:bg-gray-100 p-0.5 rounded"
-                >
-                </button>
-              </div>
-
-              {/* Header Principal */}
-              <div className="border-b border-gray-200 pb-2">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-1">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <div className="w-6 h-6 bg-gray-100 rounded flex items-center justify-center flex-shrink-0">
-                        <User className="w-3 h-3 text-gray-700" />
-                      </div>
-                      <div className="min-w-0">
-                        <h1 className="text-base font-bold text-gray-900 truncate">
-                          {appointmentDetails.cliente_nombre || 'Cliente'}
-                        </h1>
-                        <p className="text-xs text-gray-700 truncate">
-                          {appointmentDetails.servicio_nombre || 'Servicio'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                      <div className="flex flex-wrap items-center gap-1">
-                        <span className={`px-1.5 py-0.5 rounded font-medium text-[10px] border border-gray-300 ${getStatusColor(appointmentDetails.estado)}`}>
-                          {appointmentDetails.estado?.toUpperCase() || 'PENDIENTE'}
-                        </span>
-
-                        {pagosData.tieneAbono && !pagosData.estaPagadoCompleto && (
-                          <div className="flex items-center gap-0.5 bg-gray-100 px-1.5 py-0.5 rounded text-[10px]">
-                            <Tag className="w-2.5 h-2.5 text-gray-800" />
-                            <div className="font-bold text-gray-800">Abono parcial</div>
-                          </div>
-                        )}
-
-                        <span className={`px-1.5 py-0.5 rounded font-medium text-[10px] border border-gray-300 ${getEstadoPagoColor(pagosData.estadoPago)}`}>
-                          {getEstadoPagoTexto(pagosData.estadoPago, pagosData)}
-                        </span>
-                      </div>
-
-                      <div className="text-sm font-bold text-gray-900 border-l border-gray-300 pl-1.5">
-                        Total: <span className="text-black">${getPrecio()}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Contenido Principal */}
-              <div className="space-y-2">
-                {/* Información del Cliente */}
-                <div className="bg-white border border-gray-200 rounded p-2">
-                  <div className="flex items-center gap-1.5 mb-2 pb-1.5 border-b border-gray-200">
-                    <User className="w-3 h-3 text-gray-700 flex-shrink-0" />
-                    <h3 className="text-sm font-bold text-gray-900 truncate">Información del Cliente</h3>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                        <Users className="w-3.5 h-3.5 text-gray-700" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-bold text-gray-900 truncate">
-                          {appointmentDetails.cliente_nombre}
-                        </p>
-                        {appointmentDetails.rawData?.cliente_telefono && (
-                          <div className="flex items-center gap-1 text-xs text-gray-600 mt-0.5">
-                            <Phone className="w-2.5 h-2.5" />
-                            <span className="truncate">{appointmentDetails.rawData.cliente_telefono}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {appointmentDetails.rawData?.cliente_email && (
-                      <div>
-                        <div className="text-xs text-gray-500 font-medium mb-0.5">Email</div>
-                        <div className="flex items-center gap-1">
-                          <Mail className="w-2.5 h-2.5 text-gray-500 flex-shrink-0" />
-                          <p className="text-sm font-medium text-gray-900 truncate">{appointmentDetails.rawData.cliente_email}</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Horario y Sede */}
-                <div className="bg-white border border-gray-200 rounded p-2">
-                  <div className="flex items-center gap-1.5 mb-2 pb-1.5 border-b border-gray-200">
-                    <CalendarDays className="w-3 h-3 text-gray-700 flex-shrink-0" />
-                    <h3 className="text-sm font-bold text-gray-900 truncate">Horario y Sede</h3>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs text-gray-500 font-medium mb-0.5 block">Fecha</label>
-                        <input
-                          type="date"
-                          value={fechaEditada}
-                          onChange={(e) => setFechaEditada(e.target.value)}
-                          disabled={isServiceActionsDisabled}
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-xs text-gray-500 font-medium mb-0.5 block">Profesional</label>
-                        <select
-                          value={profesionalEditadoId}
-                          onChange={(e) => {
-                            setProfesionalEditadoId(e.target.value);
-                            setServiceError(null);
-                          }}
-                          disabled={isServiceActionsDisabled || loadingProfesionales}
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
-                        >
-                          <option value="">
-                            {loadingProfesionales ? 'Cargando profesionales...' : 'Seleccionar profesional'}
-                          </option>
-                          {profesionalesDisponibles.map((profesional) => (
-                            <option
-                              key={profesional.profesional_id}
-                              value={profesional.profesional_id}
-                              disabled={profesional.hasSchedule === false || profesional.invalidAgendaId}
-                            >
-                              {profesional.nombre}
-                              {profesional.invalidAgendaId
-                                ? ' (Sin ID agenda)'
-                                : (profesional.hasSchedule === false ? ' (Sin horario)' : '')}
-                            </option>
-                          ))}
-                        </select>
-                        {tieneOpcionesSinHorario && (
-                          <p className="mt-0.5 text-[10px] text-gray-500">
-                            Los profesionales marcados como "Sin horario" no se pueden asignar a una cita.
-                          </p>
-                        )}
-                        {tieneOpcionesSinIdAgenda && (
-                          <p className="mt-0.5 text-[10px] text-gray-500">
-                            Los profesionales marcados como "Sin ID agenda" requieren configuración del campo profesional_id.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs text-gray-500 font-medium mb-0.5 block">Hora inicio</label>
-                        <TimeInputWithPicker
-                          value={horaInicioEditada}
-                          onChange={(e) => {
-                            setHoraInicioEditada(e.target.value);
-                          }}
-                          disabled={isServiceActionsDisabled}
-                          inputClassName="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
-                          buttonClassName="h-5 w-5"
-                        />
-                      </div>
-
-                      <div>
-                        <div className="mb-0.5 flex items-center justify-between gap-2">
-                          <label className="text-xs text-gray-500 font-medium block">Hora fin</label>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!horaInicioEditada) return;
-                              const duracionParaAuto = duracionReferenciaHorario > 0 ? duracionReferenciaHorario : 30;
-                              setHoraFinEditada(sumarMinutosAHora(horaInicioEditada, duracionParaAuto));
-                              setHoraFinManual(false);
+                  {/* Status stepper – visual display of current appointment progress */}
+                  <div className="mb-4">
+                    <p
+                      className="text-[10px] font-bold uppercase tracking-wider mb-2"
+                      style={{ color: "#94A3B8" }}
+                    >
+                      Estado
+                    </p>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {STATUS_STEPS.map((step, idx) => {
+                        const si = RF_STATUSES[step];
+                        const isActive = step === rfStatus;
+                        const isPast = idx < currentStepIdx;
+                        return (
+                          <div
+                            key={step}
+                            className="flex flex-col items-center py-2 rounded-xl text-[10px] font-semibold text-center select-none"
+                            style={{
+                              border: `${isActive ? 2 : 1}px solid ${isActive || isPast ? si.color : "#E2E8F0"}`,
+                              background:
+                                isActive || isPast ? si.bg : "transparent",
+                              color: isActive || isPast ? si.color : "#CBD5E1",
+                              opacity: isActive ? 1 : isPast ? 0.65 : 0.35,
                             }}
-                            disabled={isServiceActionsDisabled || !horaInicioEditada}
-                            className="inline-flex items-center gap-1 rounded border border-gray-300 bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-200 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            <Wand2 className="h-3 w-3" />
-                            Auto
-                          </button>
-                        </div>
-                        <TimeInputWithPicker
-                          value={horaFinEditada}
-                          onChange={(e) => {
-                            setHoraFinEditada(e.target.value);
-                            setHoraFinManual(true);
-                          }}
-                          disabled={isServiceActionsDisabled}
-                          inputClassName="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
-                          buttonClassName="h-5 w-5"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="text-[10px] text-gray-600">
-                      Duración programada: <span className="font-semibold">{duracionProgramadaActual > 0 ? duracionProgramadaActual : duracionReferenciaHorario} min</span>
-                    </div>
-                    {duracionTotalServicios > 0 && duracionTotalServicios !== (duracionProgramadaActual > 0 ? duracionProgramadaActual : duracionReferenciaHorario) && (
-                      <div className="text-[10px] text-gray-500">
-                        Estimada por servicios: {duracionTotalServicios} min
-                      </div>
-                    )}
-                    <div className="text-[10px] text-gray-500">
-                      Horario actual: {formatAgendaTime(horaInicioEditada)} - {formatAgendaTime(horaFinEditada)} ({horaFinManual ? 'manual' : 'automática'})
-                    </div>
-                    <div className="text-[10px] text-gray-500">
-                      Fecha actual guardada: {formatFechaSegura(appointmentDetails.rawData?.fecha) || 'No definida'}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Servicios de la cita */}
-                <div className="bg-white border border-gray-200 rounded p-2">
-                  <div className="flex items-center gap-1.5 mb-2 pb-1.5 border-b border-gray-200">
-                    <Tag className="w-3 h-3 text-gray-700 flex-shrink-0" />
-                    <h3 className="text-sm font-bold text-gray-900 truncate">
-                      Servicios de la cita {serviciosSeleccionados.length > 0 && `(${serviciosSeleccionados.length})`}
-                    </h3>
-                  </div>
-                  {renderServiciosEditor()}
-                </div>
-
-                {/* Productos y Extras - MODIFICADO */}
-                <div className="bg-white border border-gray-200 rounded p-2">
-                  <div className="flex items-center gap-1.5 mb-2 pb-1.5 border-b border-gray-200">
-                    <Package className="w-3 h-3 text-gray-700 flex-shrink-0" />
-                    <h3 className="text-sm font-bold text-gray-900 truncate">
-                      Productos y extras {productos.length > 0 && `(${productos.length})`}
-                    </h3>
-                  </div>
-
-                  {renderProductos()}
-                </div>
-
-                {/* Pagos y Abonos */}
-                <div className="bg-white border border-gray-200 rounded p-2">
-                  <div className="flex items-center justify-between gap-1.5 mb-2 pb-1.5 border-b border-gray-200">
-                    <div className="flex items-center gap-1.5">
-                      <Tag className="w-3 h-3 text-gray-700 flex-shrink-0" />
-                      <h3 className="text-sm font-bold text-gray-900 truncate">Pagos y Abonos</h3>
-                    </div>
-                    
-                    <div className="flex gap-1 flex-shrink-0">
-                      <button
-                        onClick={() => setPagoModal({
-                          show: true,
-                          tipo: 'pago',
-                          monto: pagosData.saldoPendiente,
-                          metodoPago: 'efectivo',
-                          codigoGiftcard: ''
-                        })}
-                        disabled={pagosData.estaPagadoCompleto || registrandoPago || hasUnsavedChanges}
-                        className="px-2 py-1 bg-black text-white rounded hover:bg-gray-800 flex items-center justify-center gap-1 font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <DollarSign className="w-2.5 h-2.5" />  
-                        <span>Registrar Pago</span>
-                      </button>
-                      <button
-                        onClick={() => setPagoModal({
-                          show: true,
-                          tipo: 'abono',
-                          monto: 0,
-                          metodoPago: 'efectivo',
-                          codigoGiftcard: ''
-                        })}
-                        disabled={pagosData.estaPagadoCompleto || registrandoPago || hasUnsavedChanges}
-                        className="px-2 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 flex items-center justify-center gap-1 font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <Plus className="w-2.5 h-2.5" />
-                        <span>Agregar Abono</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {hasUnsavedChanges && (
-                    <div className="mb-2 p-1.5 text-[10px] text-gray-700 bg-gray-50 border border-gray-200 rounded">
-                      Guarda los cambios pendientes antes de registrar pagos o abonos.
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 mb-3">
-                    <div className="bg-gray-50 p-1.5 rounded text-center">
-                      <div className="text-xs text-gray-600 font-medium">Total</div>
-                      <div className="text-sm font-bold text-gray-900">
-                        ${hasUnsavedChanges ? totalCitaCalculado : pagosData.totalCita}
-                      </div>
-                    </div>
-
-                    <div className={`p-1.5 rounded text-center ${pagosData.tieneAbono ? 'bg-gray-100' : 'bg-gray-50'}`}>
-                      <div className={`text-xs font-medium ${pagosData.tieneAbono ? 'text-gray-900' : 'text-gray-600'}`}>
-                        {pagosData.tieneAbono ? 'Abonado' : 'Sin abono'}
-                      </div>
-                      <div className={`text-sm font-bold ${pagosData.tieneAbono ? 'text-black' : 'text-gray-700'}`}>
-                        ${pagosData.abonado}
-                      </div>
-                    </div>
-
-                    <div className={`p-1.5 rounded text-center ${pagosData.saldoPendiente > 0 ? 'bg-gray-100' : 'bg-gray-50'}`}>
-                      <div className={`text-xs font-medium ${pagosData.saldoPendiente > 0 ? 'text-gray-900' : 'text-gray-600'}`}>
-                        Saldo
-                      </div>
-                      <div className={`text-sm font-bold ${pagosData.saldoPendiente > 0 ? 'text-black' : 'text-gray-700'}`}>
-                        ${pagosData.saldoPendiente}
-                      </div>
-                    </div>
-
-                    <div className={`p-1.5 rounded text-center ${pagosData.estaPagadoCompleto ? 'bg-gray-100' : 'bg-gray-50'}`}>
-                      <div className={`text-xs font-medium ${pagosData.estaPagadoCompleto ? 'text-gray-900' : 'text-gray-600'}`}>
-                        {pagosData.estaPagadoCompleto ? 'Pagado' : 'Falta'}
-                      </div>
-                      <div className={`text-sm font-bold ${pagosData.estaPagadoCompleto ? 'text-black' : 'text-gray-700'}`}>
-                        ${pagosData.estaPagadoCompleto ? 0 : pagosData.saldoPendiente}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Historial de Pagos */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <h4 className="text-xs font-bold text-gray-900">Historial de pagos</h4>
-                    </div>
-
-                    <div className="space-y-1">
-                      {pagosData.pagos.length > 0 ? (
-                        pagosData.pagos.map((pago, index) => (
-                          <div key={index} className="p-1.5 border border-gray-200 rounded text-xs">
-                            <div className="flex justify-between items-start">
-                              <div className="flex items-start gap-2 min-w-0 flex-1">
-                                <div className={`w-6 h-6 rounded flex items-center justify-center flex-shrink-0 ${pago.metodo === 'Efectivo' ? 'bg-gray-100' : 'bg-gray-100'}`}>
-                                  {pago.metodo === 'Efectivo' ?
-                                    <Wallet className="w-3 h-3 text-gray-700" /> :
-                                    <CardIcon className="w-3 h-3 text-gray-700" />
-                                  }
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <div className="font-semibold text-gray-900 truncate">
-                                    {pago.tipo} · ${pago.monto}
-                                  </div>
-                                  <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1 truncate">
-                                    <CalendarDays className="w-2.5 h-2.5 flex-shrink-0" />
-                                    <span className="truncate">{pago.fecha}{pago.metodo ? ` • ${pago.metodo}` : ''}</span>
-                                  </div>
-                                  <div className="text-xs text-gray-400 truncate">
-                                    Registrado por: {pago.registradoPor}
-                                  </div>
-                                </div>
-                              </div>
-                              <CheckCircle className="w-3 h-3 text-gray-700 flex-shrink-0 mt-0.5" />
-                            </div>
+                            <span className="text-sm leading-none mb-0.5">
+                              {stepIcon[step]}
+                            </span>
+                            {stepLabel[step]}
                           </div>
-                        ))
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Financial summary card */}
+                  <div
+                    className="flex items-center justify-between rounded-xl px-4 py-3"
+                    style={{ background: "#F8FAFC" }}
+                  >
+                    <div>
+                      <p
+                        className="text-[10px] font-medium mb-0.5"
+                        style={{ color: "#94A3B8" }}
+                      >
+                        Total cita
+                      </p>
+                      <p
+                        className="text-lg font-bold"
+                        style={{ color: "#1E293B" }}
+                      >
+                        {fmtM(parseFloat(getPrecio()) || 0)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      {pagosData.saldoPendiente > 0 ? (
+                        <>
+                          <p
+                            className="text-[10px] font-medium mb-0.5"
+                            style={{ color: "#F59E0B" }}
+                          >
+                            Saldo pendiente
+                          </p>
+                          <p
+                            className="text-base font-bold"
+                            style={{ color: "#F59E0B" }}
+                          >
+                            {fmtM(pagosData.saldoPendiente)}
+                          </p>
+                        </>
                       ) : (
-                        <div className="text-center py-2 text-gray-400 text-xs">
-                          <Wallet className="w-4 h-4 mx-auto mb-1 text-gray-300" />
-                          <p>No hay pagos registrados</p>
-                        </div>
+                        <>
+                          <p
+                            className="text-[10px] font-medium mb-0.5"
+                            style={{ color: "#10B981" }}
+                          >
+                            Pagado
+                          </p>
+                          <p
+                            className="text-base font-bold"
+                            style={{ color: "#10B981" }}
+                          >
+                            ✓
+                          </p>
+                        </>
                       )}
                     </div>
                   </div>
                 </div>
 
-                {/* Notas Adicionales (editable) */}
-                <div className="bg-white border border-gray-200 rounded p-2">
-                  <div className="flex items-center justify-between gap-1.5 mb-2 pb-1.5 border-b border-gray-200">
-                    <div className="flex items-center gap-1.5">
-                      <AlertCircle className="w-3 h-3 text-gray-700 flex-shrink-0" />
-                      <h3 className="text-sm font-bold text-gray-900 truncate">Notas adicionales</h3>
-                    </div>
-                    {hasUnsavedNotes ? (
-                      <span className="text-[11px] font-medium text-amber-600">Cambios sin guardar</span>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-2">
-                    <textarea
-                      value={notasEditadas}
-                      onChange={(event) => setNotasEditadas(event.target.value)}
-                      rows={3}
-                      className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-800 shadow-inner outline-none focus:border-gray-300 focus:ring-0"
-                      placeholder="Agregar notas de la cita, pagos, detalles de cliente..."
-                      disabled={savingNotas || updating}
-                    />
-                    {notasError ? (
-                      <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700">
-                        {notasError}
-                      </div>
-                    ) : null}
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={handleGuardarNotas}
-                        disabled={savingNotas || updating || (!hasUnsavedNotes && !notasEditadas && !notasOriginales)}
-                        className="inline-flex items-center gap-1 rounded-md bg-black px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm transition hover:bg-gray-900 disabled:opacity-60"
-                      >
-                        {savingNotas ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                        Guardar notas
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNotasEditadas(notasOriginales);
-                          setNotasError(null);
-                        }}
-                        disabled={savingNotas || (!hasUnsavedNotes && notasEditadas === notasOriginales)}
-                        className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-[11px] font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
-                      >
-                        <X className="w-3 h-3" />
-                        Restaurar
-                      </button>
-                    </div>
-                    <p className="text-[11px] text-gray-500">
-                      Se guarda directamente en la cita. Visible para el equipo con acceso a la agenda.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Acciones Finales */}
-              <div className="flex flex-col sm:flex-row justify-between gap-1.5 pt-2 border-t border-gray-200">
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={handleGuardarServicios}
-                    disabled={isServiceActionsDisabled || !hasUnsavedChanges || serviciosSeleccionados.length === 0}
-                    className="flex-1 sm:flex-none px-2 py-1 bg-black text-white rounded hover:bg-gray-800 font-medium flex items-center justify-center gap-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {savingServicios ? (
-                      <>
-                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                        Guardando...
-                      </>
-                    ) : (
-                      'Guardar cambios'
-                    )}
-                  </button>
-
-                  <button
-                    onClick={() => handleUpdateStatus('cancelada')}
-                    disabled={shouldDisableActions()}
-                    className="flex-1 sm:flex-none px-2 py-1 bg-black text-white rounded hover:bg-gray-800 font-medium flex items-center justify-center gap-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <XCircle className="w-2.5 h-2.5" />
-                    Cancelar Cita
-                  </button>
-
-                  <button
-                    onClick={() => handleUpdateStatus('no asistio')}
-                    disabled={shouldDisableActions()}
-                    className="flex-1 sm:flex-none px-2 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 font-medium flex items-center justify-center gap-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <UserX className="w-2.5 h-2.5" />
-                    No Asistió
-                  </button>
-                </div>
-
-                <button
-                  onClick={onClose}
-                  className="px-2 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 font-medium text-xs mt-1 sm:mt-0"
-                  disabled={updating || savingServicios}
+                {/* ══ TABS ════════════════════════════════════════════════════ */}
+                <div
+                  className="shrink-0 flex px-5"
+                  style={{
+                    borderBottom: "1px solid #E2E8F0",
+                    background: "#fff",
+                  }}
                 >
-                  Cerrar
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+                  {(["cita", "pagos", "notas"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setActiveTab(tab)}
+                      className="relative px-4 py-3 text-sm border-b-2 -mb-px transition-colors focus:outline-none"
+                      style={{
+                        borderBottomColor:
+                          activeTab === tab ? "#1E293B" : "transparent",
+                        color: activeTab === tab ? "#1E293B" : "#94A3B8",
+                        fontWeight: activeTab === tab ? 600 : 400,
+                        background: "transparent",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {tab === "cita"
+                        ? "Cita"
+                        : tab === "pagos"
+                          ? "Pagos"
+                          : "Notas"}
+                      {tab === "pagos" && pagosData.saldoPendiente > 0 && (
+                        <span
+                          className="absolute rounded-full"
+                          style={{
+                            width: 6,
+                            height: 6,
+                            background: "#F59E0B",
+                            top: 8,
+                            right: 2,
+                          }}
+                        />
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {/* ══ TAB CONTENT ═════════════════════════════════════════════ */}
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+                  {/* Debug panel */}
+                  {showDebug && (
+                    <div className="bg-black text-white p-2 rounded-xl text-[9px] max-h-40 overflow-y-auto">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="font-bold flex items-center gap-1">
+                          <Bug className="w-2.5 h-2.5" /> Debug
+                        </span>
+                        <button onClick={() => setShowDebug(false)}>
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+                      <div>
+                        Total: ${pagosData.totalCita} | Abonado: $
+                        {pagosData.abonado} | Saldo: ${pagosData.saldoPendiente}
+                      </div>
+                      <div>
+                        Productos: ${getTotalProductos()} | Comisión: $
+                        {getTotalComision()}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ─ TAB: CITA ─────────────────────────────────────────── */}
+                  {activeTab === "cita" && (
+                    <>
+                      {/* Professional card */}
+                      <section>
+                        <p
+                          className="text-[10px] font-bold uppercase tracking-wider mb-2"
+                          style={{ color: "#94A3B8" }}
+                        >
+                          Profesional asignado
+                        </p>
+                        <div
+                          className="flex items-center gap-3 rounded-xl p-3"
+                          style={{ background: "#F8FAFC" }}
+                        >
+                          <div
+                            className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+                            style={{ background: "#1E293B" }}
+                          >
+                            {ini2(profNombre || "?")}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p
+                              className="text-sm font-semibold truncate"
+                              style={{ color: "#1E293B" }}
+                            >
+                              {profNombre || "Sin asignar"}
+                            </p>
+                          </div>
+                          <select
+                            value={profesionalEditadoId}
+                            onChange={(e) => {
+                              setProfesionalEditadoId(e.target.value);
+                              setServiceError(null);
+                            }}
+                            disabled={
+                              isServiceActionsDisabled || loadingProfesionales
+                            }
+                            className="text-[11px] rounded-lg border px-2 py-1.5 focus:ring-0 focus:outline-none disabled:opacity-50"
+                            style={{
+                              borderColor: "#E2E8F0",
+                              color: "#64748B",
+                              background: "#fff",
+                            }}
+                          >
+                            <option value="">
+                              {loadingProfesionales
+                                ? "Cargando..."
+                                : "Cambiar..."}
+                            </option>
+                            {profesionalesDisponibles.map((p) => (
+                              <option
+                                key={p.profesional_id}
+                                value={p.profesional_id}
+                                disabled={
+                                  p.hasSchedule === false || p.invalidAgendaId
+                                }
+                              >
+                                {p.nombre}
+                                {p.invalidAgendaId
+                                  ? " (Sin ID)"
+                                  : p.hasSchedule === false
+                                    ? " (Sin horario)"
+                                    : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        {tieneOpcionesSinHorario && (
+                          <p
+                            className="text-[10px] mt-1.5"
+                            style={{ color: "#F59E0B" }}
+                          >
+                            Algunos profesionales no tienen horario configurado.
+                          </p>
+                        )}
+                        {tieneOpcionesSinIdAgenda && (
+                          <p
+                            className="text-[10px] mt-1"
+                            style={{ color: "#EF4444" }}
+                          >
+                            Algunos profesionales requieren configuración de ID
+                            agenda.
+                          </p>
+                        )}
+                      </section>
+
+                      {/* Schedule */}
+                      <section>
+                        <p
+                          className="text-[10px] font-bold uppercase tracking-wider mb-2"
+                          style={{ color: "#94A3B8" }}
+                        >
+                          Horario
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div
+                            className="rounded-xl p-3"
+                            style={{ background: "#F8FAFC" }}
+                          >
+                            <p
+                              className="text-[10px] mb-1.5"
+                              style={{ color: "#94A3B8" }}
+                            >
+                              Fecha
+                            </p>
+                            <input
+                              type="date"
+                              value={fechaEditada}
+                              onChange={(e) => setFechaEditada(e.target.value)}
+                              disabled={isServiceActionsDisabled}
+                              className="w-full bg-transparent text-sm font-medium focus:ring-0 focus:outline-none disabled:opacity-50 border-0 p-0"
+                              style={{ color: "#1E293B" }}
+                            />
+                          </div>
+                          <div
+                            className="rounded-xl p-3"
+                            style={{ background: "#F8FAFC" }}
+                          >
+                            <p
+                              className="text-[10px] mb-1.5"
+                              style={{ color: "#94A3B8" }}
+                            >
+                              Duración
+                            </p>
+                            <p
+                              className="text-sm font-medium"
+                              style={{ color: "#1E293B" }}
+                            >
+                              {duracionProgramadaActual > 0
+                                ? duracionProgramadaActual
+                                : duracionReferenciaHorario}{" "}
+                              min
+                            </p>
+                          </div>
+                          <div
+                            className="rounded-xl p-3"
+                            style={{ background: "#F8FAFC" }}
+                          >
+                            <p
+                              className="text-[10px] mb-1.5"
+                              style={{ color: "#94A3B8" }}
+                            >
+                              Inicio
+                            </p>
+                            <TimeInputWithPicker
+                              value={horaInicioEditada}
+                              onChange={(e) =>
+                                setHoraInicioEditada(e.target.value)
+                              }
+                              disabled={isServiceActionsDisabled}
+                              inputClassName="w-full bg-transparent text-sm font-medium focus:ring-0 focus:outline-none disabled:opacity-50 border-0 p-0"
+                              buttonClassName="h-4 w-4"
+                            />
+                          </div>
+                          <div
+                            className="rounded-xl p-3"
+                            style={{ background: "#F8FAFC" }}
+                          >
+                            <div className="flex items-center justify-between mb-1.5">
+                              <p
+                                className="text-[10px]"
+                                style={{ color: "#94A3B8" }}
+                              >
+                                Fin
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!horaInicioEditada) return;
+                                  const duracionParaAuto =
+                                    duracionReferenciaHorario > 0
+                                      ? duracionReferenciaHorario
+                                      : 30;
+                                  setHoraFinEditada(
+                                    sumarMinutosAHora(
+                                      horaInicioEditada,
+                                      duracionParaAuto,
+                                    ),
+                                  );
+                                  setHoraFinManual(false);
+                                }}
+                                disabled={
+                                  isServiceActionsDisabled || !horaInicioEditada
+                                }
+                                className="inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 disabled:opacity-40 transition-colors"
+                                style={{
+                                  fontSize: 9,
+                                  color: "#64748B",
+                                  borderColor: "#E2E8F0",
+                                  background: "#fff",
+                                }}
+                              >
+                                <Wand2 className="h-2.5 w-2.5" />
+                                Auto
+                              </button>
+                            </div>
+                            <TimeInputWithPicker
+                              value={horaFinEditada}
+                              onChange={(e) => {
+                                setHoraFinEditada(e.target.value);
+                                setHoraFinManual(true);
+                              }}
+                              disabled={isServiceActionsDisabled}
+                              inputClassName="w-full bg-transparent text-sm font-medium focus:ring-0 focus:outline-none disabled:opacity-50 border-0 p-0"
+                              buttonClassName="h-4 w-4"
+                            />
+                          </div>
+                        </div>
+                        {serviceError && (
+                          <div
+                            className="mt-2 rounded-xl p-3 text-xs"
+                            style={{
+                              background: "#FEF2F2",
+                              color: "#EF4444",
+                              border: "1px solid #FCA5A5",
+                            }}
+                          >
+                            {serviceError}
+                          </div>
+                        )}
+                      </section>
+
+                      {/* Services editor */}
+                      <section>
+                        <p
+                          className="text-[10px] font-bold uppercase tracking-wider mb-2"
+                          style={{ color: "#94A3B8" }}
+                        >
+                          Servicios{" "}
+                          {serviciosSeleccionados.length > 0 &&
+                            `(${serviciosSeleccionados.length})`}
+                        </p>
+                        {renderServiciosEditor()}
+                      </section>
+
+                      {/* Products editor */}
+                      <section>
+                        <p
+                          className="text-[10px] font-bold uppercase tracking-wider mb-2"
+                          style={{ color: "#94A3B8" }}
+                        >
+                          Productos{" "}
+                          {productos.length > 0 && `(${productos.length})`}
+                        </p>
+                        {renderProductos()}
+                      </section>
+                    </>
+                  )}
+
+                  {/* ─ TAB: PAGOS ────────────────────────────────────────── */}
+                  {activeTab === "pagos" && (
+                    <>
+                      {/* Summary cards */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div
+                          className="rounded-xl p-3 text-center"
+                          style={{ background: "#F8FAFC" }}
+                        >
+                          <p
+                            className="text-[10px] font-medium mb-0.5"
+                            style={{ color: "#94A3B8" }}
+                          >
+                            Total
+                          </p>
+                          <p
+                            className="text-sm font-bold"
+                            style={{ color: "#1E293B" }}
+                          >
+                            {fmtM(
+                              hasUnsavedChanges
+                                ? totalCitaCalculado
+                                : pagosData.totalCita,
+                            )}
+                          </p>
+                        </div>
+                        <div
+                          className="rounded-xl p-3 text-center"
+                          style={{ background: "#EFF6FF" }}
+                        >
+                          <p
+                            className="text-[10px] font-medium mb-0.5"
+                            style={{ color: "#3B82F6", opacity: 0.8 }}
+                          >
+                            Abonado
+                          </p>
+                          <p
+                            className="text-sm font-bold"
+                            style={{ color: "#3B82F6" }}
+                          >
+                            {fmtM(pagosData.abonado)}
+                          </p>
+                        </div>
+                        <div
+                          className="rounded-xl p-3 text-center"
+                          style={{
+                            background:
+                              pagosData.saldoPendiente > 0
+                                ? "#FFFBEB"
+                                : "#ECFDF5",
+                          }}
+                        >
+                          <p
+                            className="text-[10px] font-medium mb-0.5"
+                            style={{
+                              color:
+                                pagosData.saldoPendiente > 0
+                                  ? "#F59E0B"
+                                  : "#10B981",
+                              opacity: 0.8,
+                            }}
+                          >
+                            {pagosData.saldoPendiente > 0 ? "Saldo" : "Pagado"}
+                          </p>
+                          <p
+                            className="text-sm font-bold"
+                            style={{
+                              color:
+                                pagosData.saldoPendiente > 0
+                                  ? "#F59E0B"
+                                  : "#10B981",
+                            }}
+                          >
+                            {pagosData.estaPagadoCompleto
+                              ? "✓"
+                              : fmtM(pagosData.saldoPendiente)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Payment action buttons */}
+                      {!pagosData.estaPagadoCompleto && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() =>
+                              setPagoModal({
+                                show: true,
+                                tipo: "abono",
+                                monto: 0,
+                                metodoPago: "efectivo",
+                                codigoGiftcard: "",
+                              })
+                            }
+                            disabled={
+                              pagosData.estaPagadoCompleto ||
+                              registrandoPago ||
+                              hasUnsavedChanges
+                            }
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold disabled:opacity-50"
+                            style={{
+                              border: "1px solid #E2E8F0",
+                              color: "#475569",
+                              background: "#fff",
+                            }}
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Agregar Abono
+                          </button>
+                          <button
+                            onClick={() =>
+                              setPagoModal({
+                                show: true,
+                                tipo: "pago",
+                                monto: pagosData.saldoPendiente,
+                                metodoPago: "efectivo",
+                                codigoGiftcard: "",
+                              })
+                            }
+                            disabled={
+                              pagosData.estaPagadoCompleto ||
+                              registrandoPago ||
+                              hasUnsavedChanges
+                            }
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
+                            style={{ background: "#1E293B" }}
+                          >
+                            <DollarSign className="w-3.5 h-3.5" />
+                            Registrar Pago
+                          </button>
+                        </div>
+                      )}
+
+                      {hasUnsavedChanges && (
+                        <div
+                          className="rounded-xl p-3 text-xs"
+                          style={{
+                            background: "#F8FAFC",
+                            color: "#64748B",
+                            border: "1px solid #E2E8F0",
+                          }}
+                        >
+                          Guarda los cambios pendientes antes de registrar pagos
+                          o abonos.
+                        </div>
+                      )}
+
+                      {/* Inline payment / abono form */}
+                      {renderPagoModal()}
+
+                      {/* Payment history */}
+                      <section>
+                        <p
+                          className="text-[10px] font-bold uppercase tracking-wider mb-2"
+                          style={{ color: "#94A3B8" }}
+                        >
+                          Historial de pagos
+                        </p>
+                        {pagosData.pagos.length > 0 ? (
+                          <div className="space-y-2">
+                            {pagosData.pagos.map((pago, idx) => (
+                              <div
+                                key={idx}
+                                className="flex items-center gap-3 rounded-xl p-3"
+                                style={{ background: "#F8FAFC" }}
+                              >
+                                <div
+                                  className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                                  style={{
+                                    background: "#fff",
+                                    border: "1px solid #E2E8F0",
+                                  }}
+                                >
+                                  {pago.metodo === "Efectivo" ? (
+                                    <Wallet
+                                      className="w-3.5 h-3.5"
+                                      style={{ color: "#64748B" }}
+                                    />
+                                  ) : (
+                                    <CardIcon
+                                      className="w-3.5 h-3.5"
+                                      style={{ color: "#64748B" }}
+                                    />
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p
+                                    className="text-xs font-semibold truncate"
+                                    style={{ color: "#1E293B" }}
+                                  >
+                                    {pago.tipo} · {fmtM(pago.monto)}
+                                  </p>
+                                  <p
+                                    className="text-[10px] truncate"
+                                    style={{ color: "#94A3B8" }}
+                                  >
+                                    {pago.fecha}
+                                    {pago.metodo ? ` · ${pago.metodo}` : ""}
+                                    {pago.registradoPor
+                                      ? ` · ${pago.registradoPor}`
+                                      : ""}
+                                  </p>
+                                </div>
+                                <CheckCircle
+                                  className="w-4 h-4 shrink-0"
+                                  style={{ color: "#10B981" }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div
+                            className="flex flex-col items-center justify-center py-8 rounded-xl"
+                            style={{ background: "#F8FAFC" }}
+                          >
+                            <Wallet
+                              className="w-6 h-6 mb-2"
+                              style={{ color: "#CBD5E1" }}
+                            />
+                            <p className="text-xs" style={{ color: "#94A3B8" }}>
+                              No hay pagos registrados
+                            </p>
+                          </div>
+                        )}
+                      </section>
+                    </>
+                  )}
+
+                  {/* ─ TAB: NOTAS ────────────────────────────────────────── */}
+                  {activeTab === "notas" && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p
+                          className="text-[10px] font-bold uppercase tracking-wider"
+                          style={{ color: "#94A3B8" }}
+                        >
+                          Notas adicionales
+                        </p>
+                        {hasUnsavedNotes && (
+                          <span
+                            className="text-[10px] font-medium"
+                            style={{ color: "#F59E0B" }}
+                          >
+                            Cambios sin guardar
+                          </span>
+                        )}
+                      </div>
+                      <textarea
+                        value={notasEditadas}
+                        onChange={(event) =>
+                          setNotasEditadas(event.target.value)
+                        }
+                        rows={6}
+                        className="w-full rounded-xl text-sm resize-none focus:outline-none"
+                        style={{
+                          border: "1px solid #E2E8F0",
+                          padding: "12px 14px",
+                          color: "#1E293B",
+                          lineHeight: 1.6,
+                        }}
+                        placeholder="Notas de la cita, pagos, detalles del cliente..."
+                        disabled={savingNotas || updating}
+                      />
+                      {notasError && (
+                        <div
+                          className="rounded-xl p-3 text-xs"
+                          style={{
+                            background: "#FEF2F2",
+                            color: "#EF4444",
+                            border: "1px solid #FCA5A5",
+                          }}
+                        >
+                          {notasError}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={handleGuardarNotas}
+                          disabled={
+                            savingNotas ||
+                            updating ||
+                            (!hasUnsavedNotes &&
+                              !notasEditadas &&
+                              !notasOriginales)
+                          }
+                          className="flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50"
+                          style={{ background: "#1E293B" }}
+                        >
+                          {savingNotas ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Save className="w-3 h-3" />
+                          )}
+                          Guardar notas
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNotasEditadas(notasOriginales);
+                            setNotasError(null);
+                          }}
+                          disabled={
+                            savingNotas ||
+                            (!hasUnsavedNotes &&
+                              notasEditadas === notasOriginales)
+                          }
+                          className="flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-semibold disabled:opacity-50"
+                          style={{
+                            border: "1px solid #E2E8F0",
+                            color: "#475569",
+                            background: "#fff",
+                          }}
+                        >
+                          <X className="w-3 h-3" />
+                          Restaurar
+                        </button>
+                      </div>
+                      <p className="text-[10px]" style={{ color: "#94A3B8" }}>
+                        Visible para el equipo con acceso a la agenda.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* ══ FOOTER ══════════════════════════════════════════════════ */}
+                <div
+                  className="shrink-0 px-5 py-4 flex gap-2"
+                  style={{ borderTop: "1px solid #E2E8F0", background: "#fff" }}
+                >
+                  {hasUnsavedChanges ? (
+                    /* Save pending edits to schedule / services / products */
+                    <button
+                      onClick={handleGuardarServicios}
+                      disabled={
+                        isServiceActionsDisabled ||
+                        serviciosSeleccionados.length === 0
+                      }
+                      className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                      style={{ background: "#1E293B" }}
+                    >
+                      {savingServicios ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />{" "}
+                          Guardando...
+                        </>
+                      ) : (
+                        "Guardar cambios"
+                      )}
+                    </button>
+                  ) : !shouldDisableActions() ? (
+                    /* Advance to completed when no pending changes */
+                    <button
+                      onClick={() => handleUpdateStatus("completada")}
+                      className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white"
+                      style={{ background: "#1E293B" }}
+                    >
+                      Completar cita
+                    </button>
+                  ) : (
+                    /* Fallback close when actions are disabled */
+                    <button
+                      onClick={onClose}
+                      className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold"
+                      style={{
+                        border: "1px solid #E2E8F0",
+                        color: "#64748B",
+                        background: "#F8FAFC",
+                      }}
+                    >
+                      Cerrar
+                    </button>
+                  )}
+
+                  {!shouldDisableActions() && (
+                    <button
+                      onClick={() => handleUpdateStatus("cancelada")}
+                      className="flex-1 flex items-center justify-center py-3 rounded-xl text-sm font-semibold"
+                      style={{
+                        border: "1px solid #FCA5A5",
+                        color: "#EF4444",
+                        background: "transparent",
+                      }}
+                    >
+                      Cancelar cita
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         );
+
         return panelMode ? (
           innerContent
         ) : (
@@ -2424,9 +3663,6 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           </Modal>
         );
       })()}
-
-      {/* Modal para registrar pago/abono */}
-      {renderPagoModal()}
     </>
   );
 };

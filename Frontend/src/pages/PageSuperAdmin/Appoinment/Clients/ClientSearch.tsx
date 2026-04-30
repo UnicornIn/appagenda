@@ -188,28 +188,30 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
           </div>
         ) : (
           /* Search input */
-          <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Buscar cliente..."
-              value={clientSearch}
-              onChange={e => setClientSearch(e.target.value)}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setTimeout(() => setIsFocused(false), 150)}
-              className="w-full border border-gray-300 rounded px-8 py-2 text-sm focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none"
-            />
-            <button
-              onClick={() => setShowClientModal(true)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
-              title="Crear nuevo cliente"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
+          <div>
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Buscar cliente..."
+                value={clientSearch}
+                onChange={e => setClientSearch(e.target.value)}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setTimeout(() => setIsFocused(false), 150)}
+                className="w-full border border-gray-300 rounded px-8 py-2 text-sm focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none"
+              />
+              <button
+                onClick={() => setShowClientModal(true)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                title="Crear nuevo cliente"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
 
-            {/* Results dropdown */}
+            {/* Results — in normal flow so modal grows vertically */}
             {showDropdown && (
-              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded shadow-lg max-h-56 overflow-y-auto">
+              <div className="w-full mt-1 bg-white border border-gray-300 rounded shadow-lg overflow-y-auto scrollbar-hide">
                 {loadingClientes && (
                   <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
@@ -241,13 +243,13 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
                       <User className="w-3 h-3 text-gray-600" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900 truncate">
+                      <div className="text-sm font-medium text-gray-900">
                         {highlight(c.nombre, clientSearch)}
                       </div>
-                      <div className="text-[11px] text-gray-500 flex gap-2 truncate">
+                      <div className="text-[11px] text-gray-500 flex flex-wrap gap-x-2 gap-y-0.5">
                         {c.telefono && <span>{highlight(c.telefono, clientSearch)}</span>}
                         {c.cedula && <span>{highlight(c.cedula, clientSearch)}</span>}
-                        {c.correo && <span className="text-gray-400 truncate">{c.correo}</span>}
+                        {c.correo && <span className="text-gray-400">{c.correo}</span>}
                       </div>
                     </div>
                   </button>

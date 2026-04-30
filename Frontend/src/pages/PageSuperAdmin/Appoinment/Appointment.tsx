@@ -143,6 +143,11 @@ const CalendarScheduler: React.FC = () => {
     return `${year}-${month}-${day}`;
   }, [selectedDate]);
 
+  const todayLabel = useMemo(() => {
+    if (selectedDate.toDateString() === today.toDateString()) return 'Hoy';
+    return selectedDate.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' });
+  }, [selectedDate, today]);
+
   const sedeIdActual = useMemo(() => {
     return selectedSede?.sede_id || '';
   }, [selectedSede]);
@@ -1302,7 +1307,7 @@ const CalendarScheduler: React.FC = () => {
                 className="text-xs font-medium transition-colors"
                 style={{ padding: '0 8px', color: '#334155' }}
               >
-                Hoy
+                {todayLabel}
               </button>
               <button
                 onClick={() => setSelectedDate(d => { const n = new Date(d); n.setDate(n.getDate() + 1); return n; })}
@@ -1314,6 +1319,23 @@ const CalendarScheduler: React.FC = () => {
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
+
+            <select
+              className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white shadow-sm focus:ring-1 focus:ring-gray-900 focus:border-gray-900 transition-all"
+              value={selectedSede?._id || ''}
+              onChange={(e) => {
+                const sede = sedes.find(s => s._id === e.target.value);
+                setSelectedSede(sede || null);
+                if (sede?.sede_id) setActiveSedeId(sede.sede_id);
+              }}
+            >
+              <option value="">Sede...</option>
+              {sedes.map(sede => (
+                <option key={sede._id} value={sede._id}>
+                  {formatSedeNombre(sede.nombre)}
+                </option>
+              ))}
+            </select>
 
             <button
               onClick={() => { setSelectedCell(null); setShowAppointmentModal(true); }}
@@ -1329,118 +1351,6 @@ const CalendarScheduler: React.FC = () => {
         </div>
 
         <div className="flex-1 flex overflow-hidden">
-          {/* SIDEBAR IZQUIERDA - CON SELECTOR DE SEDE */}
-          <div className="w-64 bg-gradient-to-b from-white to-gray-50 border-r border-gray-200 p-4 overflow-y-auto">
-            <h2 className="text-lg font-bold text-gray-900 mb-3">Filtros</h2>
-
-            {/* SELECTOR DE SEDE EN LA SIDEBAR */}
-            <div className="mb-4">
-              <label className="block text-xs font-semibold text-gray-700 mb-2">Sede</label>
-              <select
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white shadow-sm focus:ring-1 focus:ring-gray-900 focus:border-gray-900 transition-all"
-                value={selectedSede?._id || ''}
-                onChange={(e) => {
-                  const sede = sedes.find(s => s._id === e.target.value);
-                  setSelectedSede(sede || null);
-                  if (sede?.sede_id) {
-                    setActiveSedeId(sede.sede_id);
-                  }
-                }}
-              >
-                  <option value="">Selecciona una sede</option>
-                  {sedes.map(sede => (
-                    <option key={sede._id} value={sede._id}>
-                      {formatSedeNombre(sede.nombre)}
-                    </option>
-                  ))}
-                </select>
-            </div>
-
-            <div className="mb-4">
-              <MiniCalendar />
-            </div>
-
-            <div className="mb-4">
-              {estilistas.length === 0 && selectedSede && (
-                <div className="mt-1 text-[10px] text-gray-600 bg-gray-50 px-2 py-1.5 rounded-lg">
-                  No hay estilistas en esta sede
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white rounded-xl p-3 border border-gray-200 shadow-sm mb-3">
-              <h3 className="font-semibold text-gray-900 mb-2 text-sm">Resumen del día</h3>
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs"><span className="text-gray-600">Citas:</span><span className="font-semibold text-gray-900">{rfActiveApts.length}</span></div>
-                <div className="flex justify-between text-xs"><span className="text-gray-600">Estilistas:</span><span className="font-semibold text-gray-900">{estilistas.length}</span></div>
-                <div className="flex justify-between text-xs"><span className="text-gray-600">Estimado:</span><span className="font-semibold text-gray-900">{formatCOP(rfSummary.total)}</span></div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-3 border border-gray-200 shadow-sm mb-3">
-              <h3 className="font-semibold text-gray-900 mb-2 text-sm">Estados</h3>
-              <div className="space-y-1.5">
-                {(Object.keys(RF_STATUSES) as RFStatusKey[]).map((key) => {
-                  const s = RF_STATUSES[key];
-                  return (
-                    <div key={key} className="flex items-center gap-1.5">
-                      <div style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flexShrink: 0 }} />
-                      <span className="text-xs text-gray-700">{s.label}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-3 border border-gray-200 shadow-sm">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-gray-900 text-sm">Bloqueos</h3>
-                <span className="text-[10px] text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                  {bloqueos.length}
-                </span>
-              </div>
-              {bloqueos.length === 0 ? (
-                <p className="text-xs text-gray-500 text-center py-1.5">
-                  No hay bloqueos
-                </p>
-              ) : (
-                <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                  {bloqueos.map((bloqueo) => {
-                    const estilista = estilistas.find(e => e.profesional_id === bloqueo.profesional_id);
-                    return (
-                      <div key={bloqueo._id} className="p-1.5 bg-gray-50 border border-gray-100 rounded-lg">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-medium text-gray-700 truncate">
-                            🔒 {bloqueo.motivo}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-gray-600 mt-0.5">
-                          <div className="flex justify-between">
-                            <span className="truncate max-w-[70px]">{estilista?.nombre || bloqueo.profesional_id}</span>
-                            <span>{bloqueo.hora_inicio}-{bloqueo.hora_fin}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {isInitialLoad && (
-              <div className="mt-3 flex items-center justify-center gap-1 text-xs text-gray-600">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Cargando datos iniciales...
-              </div>
-            )}
-            {loading && !isInitialLoad && (
-              <div className="mt-3 flex items-center justify-center gap-1 text-xs text-gray-600">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Cargando...
-              </div>
-            )}
-          </div>
-
           {/* CALENDARIO PRINCIPAL */}
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* ── Summary bar ─────────────────────────────────────────────── */}
@@ -1580,6 +1490,10 @@ const CalendarScheduler: React.FC = () => {
               <span className="flex items-center gap-1">
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: '#10B981', display: 'inline-block' }} />
                 Completada
+              </span>
+              <span className="flex items-center gap-1">
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: '#EF4444', display: 'inline-block' }} />
+                Cancelada
               </span>
               <span className="flex items-center gap-1">
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />

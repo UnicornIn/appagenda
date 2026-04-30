@@ -156,11 +156,6 @@ export interface PDFInfoResponse {
 }
 
 // Helper functions
-const obtenerRizotipoAleatorio = (): string => {
-  const rizotipos = ['1A', '1B', '1C', '2A', '2B', '2C', '3A', '3B', '3C', '4A', '4B', '4C'];
-  return rizotipos[Math.floor(Math.random() * rizotipos.length)];
-};
-
 const transformarHistorialCabello = (historialCitas: any[]): any[] => {
   return historialCitas.map(cita => ({
     tipo: cita.servicio,
@@ -232,9 +227,12 @@ const mapCliente = (cliente: any): Cliente => ({
   diasSinComprar: cliente.dias_sin_visitar || 0,
   ltv: cliente.total_gastado || 0,
   ticketPromedio: cliente.ticket_promedio || 0,
-  rizotipo: obtenerRizotipoAleatorio(),
+  rizotipo: cliente.rizotipo || '',
   nota: cliente.notas_historial?.[0]?.contenido || cliente.notas || '',
+  notas_historial: cliente.notas_historial || [],
   sede_id: cliente.sede_id || '',
+  fecha_creacion: cliente.fecha_creacion || '',
+  ultima_visita: cliente.ultima_visita || cliente.fecha_ultima_visita || '',
   historialCitas: [],
   historialCabello: [],
   historialProductos: []
@@ -464,6 +462,12 @@ export const clientesService = {
       this.getFichasCliente(token, clienteId)
     ]);
 
+    const rizotipoFicha = fichas?.[0]?.datos_especificos?.rizotipo
+      || fichas?.[0]?.datos_especificos?.tipo_rizotipo
+      || fichas?.[0]?.datos_especificos?.rizotipo_final
+      || (cliente as any).rizotipo
+      || '';
+
     return {
       id: cliente.cliente_id,
       nombre: cliente.nombre,
@@ -475,9 +479,12 @@ export const clientesService = {
       diasSinComprar: cliente.dias_sin_visitar || 0,
       ltv: cliente.total_gastado || 0,
       ticketPromedio: cliente.ticket_promedio || 0,
-      rizotipo: obtenerRizotipoAleatorio(),
-      nota: cliente.notas_historial?.[0]?.contenido || '',
+      rizotipo: rizotipoFicha,
+      nota: (cliente as any).notas_historial?.[0]?.contenido || '',
+      notas_historial: (cliente as any).notas_historial || [],
       sede_id: cliente.sede_id,
+      fecha_creacion: cliente.fecha_creacion || '',
+      ultima_visita: (cliente as any).ultima_visita || '',
       historialCitas,
       historialCabello: transformarHistorialCabello(historialCitas),
       historialProductos,
@@ -938,6 +945,7 @@ export const clientesService = {
         return {
           fecha: cita.fecha,
           servicio: servicio,
+          profesional: profesional,
           estilista: profesional,
           notas: notas,
           metodo_pago: metodoPago,
