@@ -266,6 +266,9 @@ export default function DashboardPage() {
     start_date: "",
     end_date: "",
   });
+  const [financialTab, setFinancialTab] = useState<'pl' | 'cajas' | 'traslados' | 'registrar'>('pl');
+  const [registrarSubTab, setRegistrarSubTab] = useState<'egreso-mayor' | 'ingreso-mayor' | 'traslado' | 'egreso-menor'>('egreso-mayor');
+  const [transferDir, setTransferDir] = useState<'menor-mayor' | 'mayor-menor'>('menor-mayor');
 
   const monedaUsuario = normalizeCurrencyCode(
     user?.moneda || getStoredCurrency("COP")
@@ -1032,13 +1035,13 @@ export default function DashboardPage() {
     sub,
     barPct,
   }: {
-    name: string;
+    name: React.ReactNode;
     value: string;
     sub?: string;
     barPct?: number;
   }) => (
     <div className="flex justify-between items-center py-2 text-xs border-b border-slate-100 last:border-b-0">
-      <span className="font-medium text-slate-700 flex-shrink-0">{name}</span>
+      <span className="font-medium text-slate-700 flex-shrink-0 flex items-center">{name}</span>
       {barPct !== undefined && (
         <div className="flex-1 mx-3 h-1 bg-slate-100 rounded min-w-[40px]">
           <div
@@ -1496,109 +1499,372 @@ export default function DashboardPage() {
               </div>
 
               {/* ══ ESTADO FINANCIERO ════════════════════════════════ */}
-              <SectionTitle
-                note="→ Contabilidad real, NO flujo de caja"
-              >
+              <SectionTitle note="→ Contabilidad real, NO flujo de caja">
                 Estado financiero de la operación
               </SectionTitle>
 
-              <div className="p-3 px-3.5 bg-slate-50 border border-slate-100 rounded-lg text-[11px] text-slate-500 leading-relaxed mb-3.5">
-                Los ingresos operacionales se calculan a partir de las facturas
-                del período. Los costos directos (comisiones, insumos), gastos
-                fijos (arriendo, nómina) y gastos operativos no están disponibles
-                en la API actual — deben registrarse en el módulo de contabilidad
-                para aparecer aquí.
+              {/* Financial Tabs */}
+              <div className="flex gap-0 mb-4 border-b border-slate-200">
+                {([
+                  { id: 'pl' as const, label: 'Estado de Resultados' },
+                  { id: 'cajas' as const, label: 'Cajas' },
+                  { id: 'traslados' as const, label: 'Traslados' },
+                  { id: 'registrar' as const, label: 'Registrar movimientos' },
+                ]).map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setFinancialTab(tab.id)}
+                    className={`px-5 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${
+                      financialTab === tab.id
+                        ? 'text-slate-800 font-semibold border-slate-800'
+                        : 'text-slate-500 border-transparent hover:text-slate-700'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3.5">
-                <KPICard
-                  featured
-                  label="Ingresos operacionales"
-                  value={formatCurrency(metricas.ventas_totales)}
-                  sub="Servicios + Productos"
-                />
-                <KPICard
-                  label="Costos directos"
-                  value="–"
-                  sub="No disponible"
-                />
-                <KPICard
-                  label="Gastos fijos + operativos"
-                  value="–"
-                  sub="No disponible"
-                />
-                <KPICard
-                  label="Utilidad neta"
-                  value="–"
-                  sub="Requiere datos de costos"
-                />
-              </div>
+              {/* ── Tab: Estado de Resultados ── */}
+              {financialTab === 'pl' && (
+                <>
+                  <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-lg text-[11px] text-slate-500 leading-relaxed mb-4">
+                    <span className="font-semibold text-slate-700">Estado de Resultados (P&L)</span> — Rentabilidad real de la operación. Los traslados entre cajas NO aparecen aquí. Comisiones, arriendo y nómina SÍ aparecen aunque se paguen desde caja mayor.
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 mb-3.5">
+                    <KPICard featured label="Ingresos" value={formatCurrency(metricas.ventas_totales)} sub="Servicios + Productos" />
+                    <KPICard label="Costos directos" value="–" sub="Comisiones + Insumos" />
+                    <KPICard label="Utilidad bruta" value="–" sub="Margen: –" />
+                    <KPICard label="Gastos totales" value="–" sub="Fijos + Operativos" />
+                    <KPICard label="Utilidad neta" value="–" sub="Margen: –" />
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+                    <Card title="Estado de Resultados" titleSub={getPeriodDisplay()}>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 pt-1 mb-1">Ingresos operacionales</div>
+                      <RowItem name={<>Servicios <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto · Facturación</span></>} value={formatCurrency(metricas.ventas_servicios)} />
+                      <RowItem name={<>Productos vendidos <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto · Facturación</span></>} value={formatCurrency(metricas.ventas_productos)} />
+                      <div className="flex justify-between pt-2 pb-1 text-[13px] font-bold border-t border-slate-200 mt-1">
+                        <span>Total ingresos</span><span>{formatCurrency(metricas.ventas_totales)}</span>
+                      </div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mt-3 mb-1">Costos directos</div>
+                      <RowItem name={<>Comisiones estilistas <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto · Citas</span></>} value="–" />
+                      <RowItem name={<>Insumos usados <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Caja Mayor</span></>} value="–" />
+                      <div className="flex justify-between pt-2 pb-1 text-[13px] font-bold border-t border-slate-200 mt-1">
+                        <span>Utilidad bruta</span><span>–</span>
+                      </div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mt-3 mb-1">Gastos fijos</div>
+                      <RowItem name={<>Arriendo <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Caja Mayor</span></>} value="–" />
+                      <RowItem name={<>Nómina administrativa <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Caja Mayor</span></>} value="–" />
+                      <RowItem name={<>Servicios públicos <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Caja Mayor</span></>} value="–" />
+                      <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mt-3 mb-1">Gastos operativos</div>
+                      <RowItem name={<>Gastos varios <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto · Caja Menor</span></>} value="–" />
+                      <RowItem name={<>Domicilios <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto · Caja Menor</span></>} value="–" />
+                      <RowItem name={<>Alimentación <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto · Caja Menor</span></>} value="–" />
+                      <RowItem name={<>Mantenimiento <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Caja Mayor</span></>} value="–" />
+                      <RowItem name={<>Software <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Caja Mayor</span></>} value="–" />
+                      <RowItem name={<>Marketing <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Caja Mayor</span></>} value="–" />
+                      <RowItem name={<>Impuestos <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Caja Mayor</span></>} value="–" />
+                      <div className="flex justify-between pt-2 pb-1 text-[13px] font-bold border-t border-slate-200 mt-1">
+                        <span>Total gastos</span><span>–</span>
+                      </div>
+                      <div className="flex justify-between pt-3 text-[16px] font-bold text-slate-800 border-t-2 border-slate-800 mt-1">
+                        <span>Utilidad neta</span><span>–</span>
+                      </div>
+                    </Card>
 
-              <div className="grid grid-cols-1 ">
-                {/* P&L detallado */}
-                <Card title="Estado de resultados (P&L)" titleSub={getPeriodDisplay()}>
-                  <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mb-1.5">
-                    Ingresos
+                    <div className="flex flex-col gap-3.5">
+                      <Card title="Gastos por categoría" titleSub="% del total">
+                        {(['Comisiones', 'Arriendo', 'Nómina admin', 'Insumos', 'Impuestos', 'Servicios públicos', 'Otros']).map(name => (
+                          <RowItem key={name} name={name} barPct={0} value="–" sub="–%" />
+                        ))}
+                      </Card>
+                      <Card title="Origen de los datos">
+                        <div className="text-[11px] text-slate-500 leading-relaxed space-y-2.5">
+                          <div><span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400">Auto · Facturación</span> — Se calcula automáticamente de las ventas cobradas en el módulo de Facturación.</div>
+                          <div><span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400">Auto · Citas</span> — Se calcula automáticamente del % de comisión configurado por estilista.</div>
+                          <div><span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400">Auto · Caja Menor</span> — Viene de los egresos registrados por recepción en la caja del punto de venta.</div>
+                          <div><span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500">Manual · Caja Mayor</span> — Lo registra el administrador en la pestaña <span className="font-semibold text-slate-700">"Registrar movimientos"</span>. Son gastos que no pasan por la caja registradora: arriendo, nómina, impuestos, proveedores, etc.</div>
+                        </div>
+                      </Card>
+                    </div>
                   </div>
-                  <RowItem
-                    name="Servicios"
-                    value={formatCurrency(metricas.ventas_servicios)}
-                  />
-                  <RowItem
-                    name="Productos vendidos"
-                    value={formatCurrency(metricas.ventas_productos)}
-                  />
-                  <div className="flex justify-between pt-2.5 pb-1 text-[13px] font-bold border-t-2 border-slate-200 mt-1">
-                    <span>Total ingresos</span>
-                    <span>{formatCurrency(metricas.ventas_totales)}</span>
+                </>
+              )}
+
+              {/* ── Tab: Cajas ── */}
+              {financialTab === 'cajas' && (
+                <>
+                  <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-lg text-[11px] text-slate-500 leading-relaxed mb-4">
+                    <span className="font-semibold text-slate-700">Caja Menor</span> = efectivo en la sede. Se alimenta automáticamente de los cobros en efectivo. <span className="font-semibold text-slate-700">Caja Mayor</span> = cuenta principal del negocio. Recibe pagos digitales automáticamente + los movimientos que el administrador registra manualmente.
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 mb-3.5">
+                    <Card title="Caja Menor" titleSub="Efectivo en sede · Auto + manual">
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        {[['Saldo', '–'], ['Entradas', formatCurrency(metricas.metodos_pago?.efectivo ?? 0)], ['Salidas', '–']].map(([lbl, val]) => (
+                          <div key={lbl} className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-2.5">
+                            <div className="text-[9px] text-slate-400 font-semibold uppercase tracking-[0.4px] mb-1">{lbl}</div>
+                            <div className="text-[17px] font-bold text-slate-800">{val}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mb-1">Entradas</div>
+                      <RowItem name={<>Cobros efectivo <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto</span></>} value={formatCurrency(metricas.metodos_pago?.efectivo ?? 0)} />
+                      <RowItem name={<>Base de Caja Mayor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual</span></>} value="–" />
+                      <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mt-3 mb-1">Salidas</div>
+                      <RowItem name={<>Gastos operativos <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Recepción</span></>} value="–" />
+                      <RowItem name={<>Propinas <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Recepción</span></>} value="–" />
+                      <RowItem name={<span className="text-slate-400">⇄ Entregas a Caja Mayor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-400 ml-1.5">Manual</span></span>} value="–" />
+                      <div className="flex justify-between pt-3 text-[15px] font-bold text-slate-800 border-t-2 border-slate-800 mt-2">
+                        <span>Saldo caja menor</span><span>–</span>
+                      </div>
+                    </Card>
+
+                    <Card title="Caja Mayor" titleSub="Cuenta principal · Auto + manual">
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        {[['Saldo', '–'], ['Entradas', formatCurrency((metricas.metodos_pago?.transferencia ?? 0) + (metricas.metodos_pago?.tarjeta ?? 0) + (metricas.metodos_pago?.tarjeta_credito ?? 0) + (metricas.metodos_pago?.tarjeta_debito ?? 0))], ['Salidas', '–']].map(([lbl, val]) => (
+                          <div key={lbl} className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-2.5">
+                            <div className="text-[9px] text-slate-400 font-semibold uppercase tracking-[0.4px] mb-1">{lbl}</div>
+                            <div className="text-[17px] font-bold text-slate-800">{val}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mb-1">Entradas</div>
+                      <RowItem name={<>Transferencias <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto</span></>} value={formatCurrency(metricas.metodos_pago?.transferencia ?? 0)} />
+                      <RowItem name={<>Tarjeta <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto</span></>} value={formatCurrency((metricas.metodos_pago?.tarjeta ?? 0) + (metricas.metodos_pago?.tarjeta_credito ?? 0) + (metricas.metodos_pago?.tarjeta_debito ?? 0))} />
+                      <RowItem name={<>Nequi / Daviplata <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto</span></>} value={formatCurrency(metricas.metodos_pago?.otros ?? 0)} />
+                      <RowItem name={<span className="text-slate-400">⇄ Recibido de Caja Menor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-400 ml-1.5">Manual</span></span>} value="–" />
+                      <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mt-3 mb-1">Salidas</div>
+                      <RowItem name={<>Comisiones <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Admin</span></>} value="–" />
+                      <RowItem name={<>Arriendo <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Admin</span></>} value="–" />
+                      <RowItem name={<>Nómina <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Admin</span></>} value="–" />
+                      <RowItem name={<>Insumos <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Admin</span></>} value="–" />
+                      <RowItem name={<span className="text-slate-400">⇄ Base a Caja Menor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-400 ml-1.5">Manual</span></span>} value="–" />
+                      <div className="flex justify-between pt-3 text-[15px] font-bold text-slate-800 border-t-2 border-slate-800 mt-2">
+                        <span>Saldo caja mayor</span><span>–</span>
+                      </div>
+                    </Card>
                   </div>
 
-                  <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mt-3 mb-1.5">
-                    Costos directos
+                  <Card title="Posición consolidada">
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <div className="bg-white border border-slate-200 rounded-[10px] px-4 py-3.5">
+                        <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-[0.4px] mb-1.5">Caja Menor</div>
+                        <div className="text-[22px] font-bold text-slate-800">–</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">Efectivo en sede</div>
+                      </div>
+                      <div className="bg-white border border-slate-200 rounded-[10px] px-4 py-3.5">
+                        <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-[0.4px] mb-1.5">Caja Mayor</div>
+                        <div className="text-[22px] font-bold text-slate-800">–</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">Cuenta principal</div>
+                      </div>
+                      <div className="bg-white border-2 border-slate-800 rounded-[10px] px-4 py-3.5">
+                        <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-[0.4px] mb-1.5">Total del negocio</div>
+                        <div className="text-[22px] font-bold text-slate-800">{formatCurrency(metricas.ventas_totales)}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">Los traslados no cambian este número</div>
+                      </div>
+                    </div>
+                  </Card>
+                </>
+              )}
+
+              {/* ── Tab: Traslados ── */}
+              {financialTab === 'traslados' && (
+                <>
+                  <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-lg text-[11px] text-slate-500 leading-relaxed mb-4">
+                    Traslados entre cajas = movimientos internos. <span className="font-semibold text-slate-700">No son ingresos ni gastos.</span> El total del negocio no cambia.
                   </div>
-                  <RowItem name="Comisiones estilistas" value="–" />
-                  <RowItem name="Insumos / productos usados en servicio" value="–" />
-                  <div className="flex justify-between pt-2.5 pb-1 text-[13px] font-bold border-t-2 border-slate-200 mt-1">
-                    <span>Utilidad bruta</span>
-                    <span>–</span>
+                  <div className="grid grid-cols-3 gap-2.5 mb-3.5">
+                    <KPICard label="Menor → Mayor" value="–" sub="Entregas" />
+                    <KPICard label="Mayor → Menor" value="–" sub="Envíos de base" />
+                    <KPICard label="Neto trasladado" value="–" sub="de Menor a Mayor" />
+                  </div>
+                  <Card title="Detalle de traslados">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr>
+                          {['Fecha', 'Dirección', 'Concepto', 'Registrado por', 'Monto'].map((h, i) => (
+                            <th key={h} className={`text-left text-[9px] font-bold uppercase tracking-[0.5px] text-slate-400 pb-2 border-b border-slate-200 ${i === 4 ? 'text-right' : ''}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-[11px] text-slate-400">
+                            No hay traslados registrados para este período. Regístralos en "Registrar movimientos".
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </Card>
+                </>
+              )}
+
+              {/* ── Tab: Registrar movimientos ── */}
+              {financialTab === 'registrar' && (
+                <>
+                  <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-lg text-[11px] text-slate-500 leading-relaxed mb-4">
+                    Aquí el administrador registra los movimientos que <span className="font-semibold text-slate-700">no pasan por la caja registradora</span>: arriendo, nómina, comisiones, impuestos, proveedores, ingresos extras. También se registran los traslados entre Caja Menor y Caja Mayor. Los cobros a clientes (efectivo, tarjeta, Nequi, etc.) se registran automáticamente desde Facturación.
                   </div>
 
-                  <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mt-3 mb-1.5">
-                    Gastos fijos
+                  <div className="flex gap-1.5 mb-4 flex-wrap">
+                    {([
+                      { id: 'egreso-mayor' as const, label: 'Egreso Caja Mayor' },
+                      { id: 'ingreso-mayor' as const, label: 'Ingreso Caja Mayor' },
+                      { id: 'traslado' as const, label: 'Traslado entre cajas' },
+                      { id: 'egreso-menor' as const, label: 'Egreso Caja Menor' },
+                    ]).map(st => (
+                      <button
+                        key={st.id}
+                        onClick={() => setRegistrarSubTab(st.id)}
+                        className={`px-4 py-2 border rounded-lg text-[11px] font-medium transition-colors ${
+                          registrarSubTab === st.id
+                            ? 'bg-slate-800 text-white border-slate-800'
+                            : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                        }`}
+                      >
+                        {st.label}
+                      </button>
+                    ))}
                   </div>
-                  <RowItem name="Arriendo local" value="–" />
-                  <RowItem name="Nómina administrativa" value="–" />
-                  <RowItem name="Servicios públicos" value="–" />
 
-                  <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mt-3 mb-1.5">
-                    Gastos operativos
-                  </div>
-                  <RowItem name="Gastos varios (caja menor)" value="–" />
-                  <RowItem name="Domicilios y mensajería" value="–" />
-                  <RowItem name="Marketing" value="–" />
-                  <RowItem name="Otros" value="–" />
+                  {registrarSubTab === 'egreso-mayor' && (
+                    <div className="bg-white border border-slate-200 rounded-[10px] p-5 mb-4">
+                      <div className="text-[14px] font-bold text-slate-800 mb-1">Registrar egreso — Caja Mayor</div>
+                      <div className="text-[11px] text-slate-500 mb-4 leading-relaxed">Para gastos que se pagan desde la cuenta principal: arriendo, nómina, comisiones, impuestos, proveedores, servicios públicos. Estos gastos alimentan automáticamente el Estado de Resultados (P&L).</div>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Concepto</label><input className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="Ej: Arriendo local abril 2026" /></div>
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Monto</label><input className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="$0" /></div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Categoría de gasto</label>
+                          <select className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800">
+                            <option value="">Seleccionar categoría...</option>
+                            <option>Arriendo</option><option>Nómina administrativa</option><option>Comisiones estilistas</option><option>Servicios públicos</option><option>Impuestos</option><option>Insumos / Proveedores</option><option>Mantenimiento</option><option>Marketing y publicidad</option><option>Software y herramientas</option><option>Otro gasto fijo</option><option>Otro gasto operativo</option>
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Método de pago</label>
+                          <select className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800">
+                            <option>Transferencia bancaria</option><option>Débito automático</option><option>Tarjeta corporativa</option><option>Cheque</option><option>Efectivo (desde caja mayor)</option><option>PSE</option>
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><input type="date" className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" /></div>
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Referencia / N° factura</label><input className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="Opcional" /></div>
+                        <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Observaciones</label><textarea className="px-3 py-2 border border-slate-200 rounded-md text-[12px] resize-y min-h-[56px] leading-relaxed focus:outline-none focus:border-slate-800" placeholder="Detalles adicionales..." /></div>
+                      </div>
+                      <div className="flex gap-2 justify-end mt-4">
+                        <button className="px-4 py-2 border border-slate-200 rounded-md text-[12px] font-semibold text-slate-500 hover:bg-slate-50">Cancelar</button>
+                        <button className="px-4 py-2 bg-slate-800 text-white rounded-md text-[12px] font-semibold hover:bg-slate-700">Registrar egreso</button>
+                      </div>
+                    </div>
+                  )}
 
-                  <div className="border-t border-slate-200 mt-1" />
-                  <div className="flex justify-between pt-2.5 text-[15px] font-bold text-slate-800">
-                    <span>Utilidad neta</span>
-                    <span>–</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-1">
-                    Para ver el P&amp;L completo, registra costos y gastos en el
-                    módulo de contabilidad
-                  </div>
-                </Card>
+                  {registrarSubTab === 'ingreso-mayor' && (
+                    <div className="bg-white border border-slate-200 rounded-[10px] p-5 mb-4">
+                      <div className="text-[14px] font-bold text-slate-800 mb-1">Registrar ingreso — Caja Mayor</div>
+                      <div className="text-[11px] text-slate-500 mb-4 leading-relaxed">Para ingresos que no vienen de ventas a clientes: devoluciones de proveedores, intereses bancarios, ingresos extraordinarios. Los cobros a clientes ya se registran automáticamente desde Facturación.</div>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Concepto</label><input className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="Ej: Devolución proveedor XYZ" /></div>
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Monto</label><input className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="$0" /></div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Tipo de ingreso</label>
+                          <select className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800">
+                            <option value="">Seleccionar tipo...</option><option>Devolución de proveedor</option><option>Intereses bancarios</option><option>Ingreso extraordinario</option><option>Ajuste contable</option><option>Otro</option>
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Método</label>
+                          <select className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800">
+                            <option>Transferencia bancaria</option><option>Consignación</option><option>Otro</option>
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><input type="date" className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" /></div>
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Referencia</label><input className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="Opcional" /></div>
+                        <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Observaciones</label><textarea className="px-3 py-2 border border-slate-200 rounded-md text-[12px] resize-y min-h-[56px] leading-relaxed focus:outline-none focus:border-slate-800" placeholder="Detalles adicionales..." /></div>
+                      </div>
+                      <div className="flex gap-2 justify-end mt-4">
+                        <button className="px-4 py-2 border border-slate-200 rounded-md text-[12px] font-semibold text-slate-500 hover:bg-slate-50">Cancelar</button>
+                        <button className="px-4 py-2 bg-slate-800 text-white rounded-md text-[12px] font-semibold hover:bg-slate-700">Registrar ingreso</button>
+                      </div>
+                    </div>
+                  )}
 
-                {/* Gastos por categoría
-                <Card title="Gastos por categoría" titleSub="% del gasto total">
-                  <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-[11px] text-slate-500 leading-relaxed">
-                    Los datos de gastos por categoría (comisiones, arriendo,
-                    nómina, insumos, etc.) no están disponibles en los endpoints
-                    actuales. Registra los egresos en el módulo de contabilidad
-                    para ver esta sección.
-                  </div>
-                </Card> */}
-              </div>
+                  {registrarSubTab === 'traslado' && (
+                    <div className="bg-white border border-slate-200 rounded-[10px] p-5 mb-4">
+                      <div className="text-[14px] font-bold text-slate-800 mb-1">Registrar traslado entre cajas</div>
+                      <div className="text-[11px] text-slate-500 mb-4 leading-relaxed">Para mover dinero entre Caja Menor (efectivo en sede) y Caja Mayor (cuenta principal). Este movimiento NO es un gasto ni un ingreso — solo cambia la ubicación del dinero. No afecta el P&L.</div>
+                      <div className="flex items-center gap-2.5 p-3 bg-slate-50 border border-slate-100 rounded-lg mb-4">
+                        <div className="flex-1 text-center bg-white border border-slate-200 rounded-md px-3 py-2.5">
+                          <div className="text-[9px] text-slate-400 font-semibold uppercase tracking-[0.3px]">Origen</div>
+                          <div className="text-[14px] font-bold text-slate-800 mt-0.5">{transferDir === 'menor-mayor' ? 'Caja Menor' : 'Caja Mayor'}</div>
+                        </div>
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-slate-300 text-xl">→</span>
+                          <button onClick={() => setTransferDir(d => d === 'menor-mayor' ? 'mayor-menor' : 'menor-mayor')} className="text-[9px] text-slate-500 underline hover:text-slate-700">Invertir</button>
+                        </div>
+                        <div className="flex-1 text-center bg-white border border-slate-200 rounded-md px-3 py-2.5">
+                          <div className="text-[9px] text-slate-400 font-semibold uppercase tracking-[0.3px]">Destino</div>
+                          <div className="text-[14px] font-bold text-slate-800 mt-0.5">{transferDir === 'menor-mayor' ? 'Caja Mayor' : 'Caja Menor'}</div>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Monto a trasladar</label><input className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="$0" /></div>
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><input type="date" className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" /></div>
+                        <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Concepto</label><input className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="Ej: Entrega excedente diario / Base de apertura" /></div>
+                        <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Observaciones</label><textarea className="px-3 py-2 border border-slate-200 rounded-md text-[12px] resize-y min-h-[56px] leading-relaxed focus:outline-none focus:border-slate-800" placeholder="Opcional" /></div>
+                      </div>
+                      <div className="flex gap-2 justify-end mt-4">
+                        <button className="px-4 py-2 border border-slate-200 rounded-md text-[12px] font-semibold text-slate-500 hover:bg-slate-50">Cancelar</button>
+                        <button className="px-4 py-2 bg-slate-800 text-white rounded-md text-[12px] font-semibold hover:bg-slate-700">Registrar traslado</button>
+                      </div>
+                      <div className="mt-4 p-3.5 bg-slate-50 border border-slate-100 rounded-lg text-[11px] text-slate-500 leading-relaxed">
+                        Al registrar el traslado, el sistema automáticamente: resta el monto de la caja origen, suma el monto a la caja destino, registra el movimiento en ambas cajas como "Traslado" y NO lo suma como gasto ni ingreso en el P&L.
+                      </div>
+                    </div>
+                  )}
+
+                  {registrarSubTab === 'egreso-menor' && (
+                    <div className="bg-white border border-slate-200 rounded-[10px] p-5 mb-4">
+                      <div className="text-[14px] font-bold text-slate-800 mb-1">Registrar egreso — Caja Menor</div>
+                      <div className="text-[11px] text-slate-500 mb-4 leading-relaxed">Para gastos pequeños del día a día que se pagan desde la caja del punto de venta: almuerzos, domicilios, propinas, papelería, etc. Normalmente lo registra el recepcionista, pero el admin también puede hacerlo aquí.</div>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Concepto</label><input className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="Ej: Almuerzo Delcy" /></div>
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Monto</label><input className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="$0" /></div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Categoría</label>
+                          <select className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800">
+                            <option>Gasto operativo</option><option>Propina</option><option>Alimentación</option><option>Domicilio / mensajería</option><option>Papelería / insumos menores</option><option>Otro</option>
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><input type="date" className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" /></div>
+                        <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Observaciones</label><textarea className="px-3 py-2 border border-slate-200 rounded-md text-[12px] resize-y min-h-[56px] leading-relaxed focus:outline-none focus:border-slate-800" placeholder="Opcional" /></div>
+                      </div>
+                      <div className="flex gap-2 justify-end mt-4">
+                        <button className="px-4 py-2 border border-slate-200 rounded-md text-[12px] font-semibold text-slate-500 hover:bg-slate-50">Cancelar</button>
+                        <button className="px-4 py-2 bg-slate-800 text-white rounded-md text-[12px] font-semibold hover:bg-slate-700">Registrar egreso</button>
+                      </div>
+                    </div>
+                  )}
+
+                  <Card title="Últimos movimientos registrados manualmente" titleSub="10 más recientes" scrollable>
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr>
+                          {['Fecha', 'Caja', 'Tipo', 'Concepto', 'Categoría', 'Monto', ''].map((h, i) => (
+                            <th key={i} className={`text-left text-[9px] font-bold uppercase tracking-[0.5px] text-slate-400 pb-2 border-b border-slate-200 ${i === 5 ? 'text-right' : ''}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-[11px] text-slate-400">
+                            No hay movimientos registrados aún. Usa los formularios de arriba para registrar egresos, ingresos o traslados.
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </Card>
+                </>
+              )}
             </>
           )}
         </div>
