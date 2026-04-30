@@ -49,6 +49,12 @@ export interface Cliente {
     metodo_pago?: string;
   }>;
   
+  notas_historial?: Array<{
+    contenido: string;
+    fecha: string;
+    autor?: string;
+  }>;
+
   fichas?: Array<{
     _id: string;
     cliente_id: string;

@@ -25,7 +25,7 @@ interface ClientsListProps {
   sedeName?: string
 }
 
-type FilterType = 'Todos' | 'Activos' | 'Inactivos 30d+' | 'Nuevos' | 'VIP'
+type FilterType = 'Todos' | 'Inactivos 180d+' | 'Nuevos' 
 
 const fmt = (n: number) => "$" + Math.round(n).toLocaleString("es-CO")
 const ini = (n: string) =>
@@ -209,7 +209,7 @@ function ClientsListComponent({
 
       {/* Filters */}
       <div style={S.filtersRow}>
-        {(['Todos', 'Activos', 'Inactivos 30d+', 'Nuevos', 'VIP'] as FilterType[]).map(filterBtn)}
+        {(['Todos', 'Inactivos 180d+', 'Nuevos'] as FilterType[]).map(filterBtn)}
       </div>
 
       {/* Count */}
