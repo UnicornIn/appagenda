@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Calendar, Plus, User, Clock, X, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, User, X, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Sidebar } from '../../../components/Layout/Sidebar';
-import { PageHeader } from '../../../components/Layout/PageHeader';
 import Bloqueos from "../../../components/Quotes/Bloqueos";
 import AppointmentScheduler from "../../../components/Quotes/AppointmentForm";
 import Modal from "../../../components/ui/modal";
@@ -12,7 +11,6 @@ import AppointmentDetailsModal from './AppointmentDetailsModal';
 import { useAuth } from '../../../components/Auth/AuthContext';
 import { getBloqueosMultiplesProfesionales, type Bloqueo } from '../../../components/Quotes/bloqueosApi';
 import { formatSedeNombre } from "../../../lib/sede";
-import { formatDateDMY } from "../../../lib/dateFormat";
 import { extractAgendaAdditionalNotes } from "../../../lib/agenda";
 
 interface Appointment {
@@ -44,23 +42,63 @@ interface BloqueoCalendario extends Bloqueo {
   _id: string;
 }
 
-// MISMAS CONSTANTES QUE EL CALENDARIO DE SEDE
 const SLOT_INTERVAL_MINUTES = 60;
 const START_HOUR = 5;
 const END_HOUR = 19;
-const TIME_COLUMN_WIDTH = 64;
-const APPOINTMENT_VERTICAL_OFFSET = 6;
+const TIME_COLUMN_WIDTH = 56;
+const APPOINTMENT_VERTICAL_OFFSET = 3;
 const HOURS = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => {
   const hour = START_HOUR + i;
   return `${hour.toString().padStart(2, '0')}:00`;
 });
 
 const COLORS = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-amber-500', 'bg-indigo-500', 'bg-teal-500', 'bg-pink-500', 'bg-cyan-500'];
-const CELL_HEIGHT = 36;
-const CELL_WIDTH = 96;
-const MAX_STYLIST_COLUMN_WIDTH = 240;
+const CELL_HEIGHT = 68;
+const CELL_WIDTH = 150;
+const MAX_STYLIST_COLUMN_WIDTH = 280;
+const MIN_APPOINTMENT_HEIGHT = 44;
+const APPOINTMENT_BORDER_WIDTH = 3;
 const CITA_TOOLTIP_WIDTH = 300;
 const TOOLTIP_MARGIN = 10;
+
+// ── RF design status system ──────────────────────────────────────────────────
+const RF_STATUSES = {
+  'pre-cita':    { color: '#9CA3AF', bg: '#F3F4F6', label: 'Pre-cita' },
+  'confirmed':   { color: '#3B82F6', bg: '#EFF6FF', label: 'Confirmada' },
+  'in-progress': { color: '#8B5CF6', bg: '#F5F3FF', label: 'En curso' },
+  'completed':   { color: '#10B981', bg: '#ECFDF5', label: 'Completada' },
+  'cancelled':   { color: '#EF4444', bg: '#FEF2F2', label: 'Cancelada' },
+} as const;
+type RFStatusKey = keyof typeof RF_STATUSES;
+
+const resolveRFStatus = (estado: string): RFStatusKey => {
+  const v = (estado || '').toLowerCase().trim();
+  if (v.includes('cancel')) return 'cancelled';
+  if (['pre-cita', 'pre_cita', 'precita'].some(s => v.includes(s))) return 'pre-cita';
+  if (['en proc', 'en_proc', 'proceso', 'en curso', 'en_curso', 'en-curso', 'progres', 'in-prog'].some(s => v.includes(s))) return 'in-progress';
+  if (['complet', 'finaliz', 'terminad', 'realizad', 'factur'].some(s => v.includes(s))) return 'completed';
+  return 'confirmed';
+};
+
+const fmtH = (hour: number): string => {
+  const h = Math.floor(hour);
+  const m = Math.round((hour % 1) * 60);
+  const ap = h >= 12 ? 'p.m.' : 'a.m.';
+  const d = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return `${d}:${m === 0 ? '00' : String(m).padStart(2, '0')} ${ap}`;
+};
+
+const shortName = (name: string): string =>
+  name.trim().split(' ').filter(Boolean).slice(0, 2).join(' ');
+
+const formatCOP = (amount: number): string =>
+  '$' + Math.round(amount).toLocaleString('es-CO');
+
+const hourLabelFromStr = (hourStr: string): string => {
+  const h = parseInt(hourStr.split(':')[0], 10);
+  const d = h > 12 ? h - 12 : h;
+  return `${d}:00`;
+};
 const normalizeRole = (role: string | null | undefined) =>
   String(role ?? "")
     .trim()
@@ -104,6 +142,11 @@ const CalendarScheduler: React.FC = () => {
     const day = selectedDate.getDate().toString().padStart(2, '0');
     return `${year}-${month}-${day}`;
   }, [selectedDate]);
+
+  const todayLabel = useMemo(() => {
+    if (selectedDate.toDateString() === today.toDateString()) return 'Hoy';
+    return selectedDate.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' });
+  }, [selectedDate, today]);
 
   const sedeIdActual = useMemo(() => {
     return selectedSede?.sede_id || '';
@@ -196,141 +239,6 @@ const CalendarScheduler: React.FC = () => {
     setSelectedAppointment(apt);
     setShowAppointmentDetails(true);
   }, []);
-
-  // Paleta acordada: naranja = finalizada, gris = completada/facturada, rojo = cancelada, verde = agendada, amarillo = no show
-  type EstadoCategoria = 'agendada' | 'finalizado' | 'facturado' | 'cancelado' | 'no_show' | 'default';
-
-  const ESTADO_STYLE_MAP: Record<EstadoCategoria, {
-    label: string;
-    solidBg: string;
-    selectedBg: string;
-    hover: string;
-    border: string;
-    icon: string;
-    chipBg: string;
-    chipText: string;
-    chipDot: string;
-  }> = {
-    agendada: {
-      label: 'Agendada / Confirmada',
-      solidBg: 'bg-green-500',
-      selectedBg: 'bg-green-400',
-      hover: 'hover:bg-green-600',
-      border: 'border-green-600',
-      icon: '✓',
-      chipBg: 'bg-green-100',
-      chipText: 'text-green-700',
-      chipDot: 'bg-green-500',
-    },
-    // Finalizada -> naranja
-    finalizado: {
-      label: 'Finalizada',
-      solidBg: 'bg-orange-500',
-      selectedBg: 'bg-orange-400',
-      hover: 'hover:bg-orange-600',
-      border: 'border-orange-600',
-      icon: '✓',
-      chipBg: 'bg-orange-100',
-      chipText: 'text-orange-800',
-      chipDot: 'bg-orange-500',
-    },
-    // Completada / Facturada -> gris
-    facturado: {
-      label: 'Completada / Facturada',
-      solidBg: 'bg-gray-500',
-      selectedBg: 'bg-gray-400',
-      hover: 'hover:bg-gray-600',
-      border: 'border-gray-600',
-      icon: '💵',
-      chipBg: 'bg-gray-100',
-      chipText: 'text-gray-700',
-      chipDot: 'bg-gray-500',
-    },
-    cancelado: {
-      label: 'Cancelado',
-      solidBg: 'bg-red-500',
-      selectedBg: 'bg-red-400',
-      hover: 'hover:bg-red-600',
-      border: 'border-red-600',
-      icon: '✗',
-      chipBg: 'bg-red-100',
-      chipText: 'text-red-700',
-      chipDot: 'bg-red-500',
-    },
-    no_show: {
-      label: 'No asistió',
-      solidBg: 'bg-yellow-500',
-      selectedBg: 'bg-yellow-400',
-      hover: 'hover:bg-yellow-600',
-      border: 'border-yellow-600',
-      icon: '⚠',
-      chipBg: 'bg-yellow-100',
-      chipText: 'text-yellow-800',
-      chipDot: 'bg-yellow-500',
-    },
-    default: {
-      label: 'Agendada',
-      solidBg: 'bg-green-500',
-      selectedBg: 'bg-green-400',
-      hover: 'hover:bg-green-600',
-      border: 'border-green-600',
-      icon: '•',
-      chipBg: 'bg-green-100',
-      chipText: 'text-green-700',
-      chipDot: 'bg-green-500',
-    },
-  };
-
-  const resolveEstadoCategoria = (estado: string): EstadoCategoria => {
-    const value = (estado || '').toLowerCase().trim();
-
-    if (value.includes('cancel')) return 'cancelado';
-    if (value.includes('factur')) return 'facturado';
-    if (
-      value.includes('no asist') ||
-      value.includes('no_asist') ||
-      value.includes('no-show') ||
-      value.includes('no_show')
-    ) return 'no_show';
-    // Finalizada -> naranja
-    if (['finalizado', 'finalizada', 'terminado', 'terminada', 'realizado', 'realizada'].some(flag => value.includes(flag))) {
-      return 'finalizado';
-    }
-    // Completada -> gris (mismo estilo facturado)
-    if (['completado', 'completada'].some(flag => value.includes(flag))) {
-      return 'facturado';
-    }
-    if (['confirmada', 'confirmado', 'agendada', 'agendado', 'reservada', 'reservado', 'pendiente', 'en proceso', 'en_proceso', 'proceso'].some(flag => value.includes(flag))) {
-      return 'agendada';
-    }
-    return 'default';
-  };
-
-  const getEstadoTokens = (estado: string) => {
-    const key = resolveEstadoCategoria(estado);
-    const palette = ESTADO_STYLE_MAP[key] || ESTADO_STYLE_MAP.default;
-    return { key, ...palette };
-  };
-
-  // MISMA FUNCIÓN DE ESTILOS QUE EN SEDE
-  const getCitaStyles = (estado: string, isSelected: boolean = false) => {
-    const tokens = getEstadoTokens(estado);
-    const baseBg = tokens.solidBg || 'bg-emerald-500';
-    const selectedBg = tokens.selectedBg || baseBg;
-    const baseBorder = tokens.border || 'border-emerald-600';
-    return {
-      bg: isSelected ? selectedBg : baseBg,
-      hover: tokens.hover,
-      border: isSelected ? 'border border-white' : baseBorder,
-      text: 'text-white',
-      icon: tokens.icon,
-      shadow: isSelected ? 'shadow ring-1 ring-white ring-opacity-50' : 'shadow-sm',
-      chipBg: tokens.chipBg,
-      chipText: tokens.chipText,
-      chipDot: tokens.chipDot,
-      label: tokens.label,
-    };
-  };
 
   // OPTIMIZADO: Cargar bloqueos con caché
   const cargarBloqueos = useCallback(async () => {
@@ -721,7 +629,7 @@ const CalendarScheduler: React.FC = () => {
       return startMinutesFrom5AM < bloqueoFin && endMinutesFrom5AM > bloqueoInicio;
     });
 
-    const minHeight = Math.max(totalBlocks * CELL_HEIGHT - 4, 20);
+    const minHeight = Math.max(totalBlocks * CELL_HEIGHT - 4, MIN_APPOINTMENT_HEIGHT);
 
     const aptKey = `${apt.id}-${apt.start}-${apt.end}-${citaProfesionalId}`;
     const layoutInfo = appointmentLayoutByProfessional.get(citaProfesionalId)?.get(aptKey);
@@ -730,7 +638,7 @@ const CalendarScheduler: React.FC = () => {
 
     const leftBase = profIndex * effectiveCellWidth;
     const topPosition = (startBlock * CELL_HEIGHT) + APPOINTMENT_VERTICAL_OFFSET;
-    const anchoTotalCelda = effectiveCellWidth - 1;
+    const anchoTotalCelda = effectiveCellWidth - APPOINTMENT_BORDER_WIDTH;
     const totalColumns = appointmentColumns + (tieneBloqueoSolapado ? 1 : 0);
     const anchoCita = Math.max(anchoTotalCelda / totalColumns, 24);
     const leftPosition = leftBase + (appointmentColumnIndex * anchoCita);
@@ -790,6 +698,17 @@ const CalendarScheduler: React.FC = () => {
     });
   }, [citas, selectedDateString, estilistas]);
 
+  const rfActiveApts = useMemo(
+    () => appointments.filter(a => resolveRFStatus(a.estado) !== 'cancelled'),
+    [appointments]
+  );
+  const rfSummary = useMemo(() => ({
+    pre:        rfActiveApts.filter(a => resolveRFStatus(a.estado) === 'pre-cita').length,
+    confirmed:  rfActiveApts.filter(a => resolveRFStatus(a.estado) === 'confirmed').length,
+    inProgress: rfActiveApts.filter(a => resolveRFStatus(a.estado) === 'in-progress').length,
+    total:      appointments.reduce((s, a) => s + (parseFloat(a.rawData?.valor_total || '0') || 0), 0),
+  }), [rfActiveApts, appointments]);
+
   const getBloqueoPosition = useCallback((bloqueo: BloqueoCalendario) => {
     const profIndex = profesionales.findIndex(
       (profesional) => profesional.estilista.profesional_id === bloqueo.profesional_id
@@ -820,7 +739,7 @@ const CalendarScheduler: React.FC = () => {
       });
     }
 
-    const anchoTotalCelda = effectiveCellWidth - 1;
+    const anchoTotalCelda = effectiveCellWidth - APPOINTMENT_BORDER_WIDTH;
     const totalColumns = maxAppointmentColumns > 0 ? maxAppointmentColumns + 1 : 1;
     const anchoBloqueo = Math.max(anchoTotalCelda / totalColumns, 24);
     const leftBase = profIndex * effectiveCellWidth;
@@ -1195,13 +1114,15 @@ const CalendarScheduler: React.FC = () => {
         onClick={handleCellClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={`h-9 border-l border-gray-100 relative transition-all duration-150 ${tieneCitaEnEstaHora || tieneBloqueoEnEstaHora
-          ? tieneBloqueoEnEstaHora && !tieneCitaEnEstaHora
-            ? 'bg-red-50/30 hover:bg-red-50/50 border-red-100 cursor-pointer'
-            : 'bg-white/30 hover:bg-gray-100/50 border-gray-200 cursor-pointer'
-          : 'bg-white hover:bg-gray-50 hover:shadow-sm cursor-pointer'
-          }`}
-        style={{ width: `${effectiveCellWidth}px` }}
+        className="relative cursor-pointer transition-colors duration-100"
+        style={{
+          width: `${effectiveCellWidth}px`,
+          height: `${CELL_HEIGHT}px`,
+          borderBottom: '1px solid #F1F5F9',
+          background: tieneBloqueoEnEstaHora && !tieneCitaEnEstaHora
+            ? 'rgba(239,68,68,.03)'
+            : 'transparent',
+        }}
       >
         {!tieneCitaEnEstaHora && showButtons && (
           <div
@@ -1237,148 +1158,51 @@ const CalendarScheduler: React.FC = () => {
     );
   });
 
-  // COMPONENTE DE CITA - EXACTAMENTE IGUAL
   const CitaComponent = React.memo(({ apt }: { apt: Appointment }) => {
     const position = getAppointmentPosition(apt);
     const isSelected = selectedAppointment?.id === apt.id;
-    const styles = getCitaStyles(apt.estado, isSelected);
 
-    if (!position) {
-      return null;
-    }
+    if (!position) return null;
 
-    const citasContiguas = useMemo(() => {
-      if (!apt.rawData?.cliente_id) return [apt];
+    const rfStatus = resolveRFStatus(apt.estado);
+    const statusInfo = RF_STATUSES[rfStatus];
+    const isPrecita = rfStatus === 'pre-cita';
 
-      const mismasCitas = appointments.filter(otherApt =>
-        otherApt.rawData?.cliente_id === apt.rawData?.cliente_id &&
-        otherApt.profesional_id === apt.profesional_id
-      );
+    const totalCita = parseFloat(apt.rawData?.valor_total || '0') || 0;
+    const abonado   = parseFloat(apt.rawData?.abono       || '0') || 0;
+    const rawSaldo  = parseFloat(apt.rawData?.saldo_pendiente);
+    const saldoCalc = isNaN(rawSaldo) ? Math.max(0, totalCita - abonado) : Math.max(0, rawSaldo);
+    const isPaid    = saldoCalc <= 0 && totalCita > 0;
+    const hasAbono  = abonado > 0 && !isPaid;
 
-      return mismasCitas.sort((a, b) => a.start.localeCompare(b.start));
-    }, [apt, appointments]);
+    const clienteNombre = shortName(apt.cliente_nombre || '(Sin nombre)');
+    const serviceText   = apt.servicio_nombre || '(Sin servicio)';
 
-    const renderCitaContent = () => {
-      const alturaDisponible = position.height;
-
-      if (citasContiguas.length > 1) {
-        const totalDuracion = citasContiguas.reduce((sum, cita) => sum + cita.duracion, 0);
-        const servicios = [...new Set(citasContiguas.map(c => c.servicio_nombre))].join(' + ');
-
-        return (
-          <div className="p-1.5 h-full flex flex-col">
-            <div className="text-[9px] font-bold text-white truncate mb-0.5">
-              {apt.cliente_nombre}
-            </div>
-            <div className="text-[8px] text-white/80 truncate mb-0.5">
-              {servicios}
-            </div>
-            <div className="mt-auto text-[8px] text-white/90 flex justify-between">
-              <span>{citasContiguas.length} servicios</span>
-              <span>{totalDuracion}min</span>
-            </div>
-          </div>
-        );
-      }
-
-      if (alturaDisponible <= 30) {
-        return (
-          <div className="p-1 h-full">
-            <div className="flex items-center justify-between h-full">
-              <div className="text-[8px] font-semibold text-white truncate pr-0.5">
-                {apt.cliente_nombre.split(' ')[0]}
-              </div>
-              <div className="text-[7px] text-white/70 bg-black/30 px-0.5 py-0.25 rounded">
-                {apt.start.split(':')[0]}:{apt.start.split(':')[1]}
-              </div>
-            </div>
-          </div>
-        );
-      }
-
-      if (alturaDisponible <= 60) {
-        return (
-          <div className="p-1.5 h-full flex flex-col">
-            <div className="text-[10px] font-bold text-white truncate mb-0.5">
-              {apt.cliente_nombre}
-            </div>
-
-            <div className="grid grid-cols-2 gap-0.5 mt-auto">
-              <div className="text-[8px] text-white/80 truncate">
-                {apt.servicio_nombre.split(' ')[0]}
-              </div>
-              <div className="text-[8px] text-white font-medium text-right">
-                {apt.duracion}min
-              </div>
-              <div className="text-[7px] text-white/70">
-                {apt.estilista_nombre.split(' ')[0]}
-              </div>
-              <div className="text-[7px] text-white/90 text-right">
-                {styles.icon}
-              </div>
-            </div>
-          </div>
-        );
-      }
-
-      return (
-        <div className="p-2 h-full">
-          <div className="mb-2">
-            <div className="text-xs font-bold text-white truncate">
-              {apt.cliente_nombre}
-            </div>
-            <div className="text-[10px] text-white/80 mt-0.5">
-              {apt.servicio_nombre}
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex items-center gap-1">
-              <div className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center">
-                <span className="text-[10px]">💇</span>
-              </div>
-              <div className="text-[10px] text-white/90 truncate">
-                {apt.estilista_nombre}
-              </div>
-            </div>
-
-            <div className="bg-white/10 rounded p-1">
-              <div className="flex justify-between items-center">
-                <div className="text-[10px] text-white">
-                  {apt.start} - {apt.end}
-                </div>
-                <div className="text-[10px] font-bold text-white">
-                  {apt.duracion} min
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-center">
-              <div className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${styles.chipBg} ${styles.chipText}`}>
-                {styles.icon} {apt.estado}
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    };
+    const [sh, sm] = apt.start.split(':').map(Number);
+    const [eh, em] = apt.end.split(':').map(Number);
+    const startH = sh + sm / 60;
+    const endH   = eh + em / 60;
 
     return (
       <div
-        className={`absolute rounded-md shadow-sm cursor-pointer overflow-hidden 
-                 transition-all duration-150 z-10 ${styles.bg} bg-opacity-100 ${styles.hover} ${styles.shadow}
-                 hover:shadow hover:scale-[1.01] hover:z-20 border-l-[3px] ${styles.border}
-                 group pointer-events-auto active:scale-95 active:shadow-inner`}
-        style={position}
+        className="absolute cursor-pointer overflow-hidden transition-shadow hover:shadow-md pointer-events-auto"
+        style={{
+          ...position,
+          background: statusInfo.bg,
+          borderLeft: `3px solid ${statusInfo.color}`,
+          borderRadius: 6,
+          padding: '6px 8px',
+          boxShadow: isSelected
+            ? `0 0 0 2px ${statusInfo.color}, 0 1px 3px rgba(0,0,0,.08)`
+            : '0 1px 3px rgba(0,0,0,.04)',
+          opacity: isPrecita ? 0.75 : 1,
+          minHeight: MIN_APPOINTMENT_HEIGHT,
+          zIndex: 20,
+        }}
         onClick={() => handleCitaClick(apt)}
         onMouseEnter={(e) => {
           if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
-          setCitaTooltip({
-            visible: true,
-            x: e.clientX,
-            y: e.clientY,
-            cita: apt
-          });
+          setCitaTooltip({ visible: true, x: e.clientX, y: e.clientY, cita: apt });
         }}
         onMouseLeave={() => {
           if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
@@ -1387,17 +1211,27 @@ const CalendarScheduler: React.FC = () => {
           }, 300);
         }}
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-black/10 pointer-events-none"></div>
-
-        <div className={`absolute top-1 right-1 w-2 h-2 rounded-full ${styles.chipDot} 
-                      border border-white shadow-sm`}></div>
-
-        {renderCitaContent()}
-
-        <div className="absolute inset-0 opacity-0 group-hover:opacity-20 bg-white transition-opacity duration-150"></div>
-
-        {isSelected && (
-          <div className="absolute inset-0 border-1 border-white shadow-inner pointer-events-none"></div>
+        {isPrecita && (
+          <div style={{ color: statusInfo.color, fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 1 }}>
+            Pre-cita
+          </div>
+        )}
+        <div style={{ fontSize: 11, fontWeight: 600, color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {clienteNombre}
+        </div>
+        <div style={{ fontSize: 10, fontWeight: 500, color: statusInfo.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {serviceText}
+        </div>
+        {position.height >= 58 && (
+          <div style={{ fontSize: 9, color: '#94A3B8', marginTop: 2 }}>
+            {fmtH(startH)} – {fmtH(endH)}
+          </div>
+        )}
+        {(isPaid || hasAbono) && (
+          <div className="absolute flex gap-0.5" style={{ top: 6, right: 6 }}>
+            {isPaid   && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981' }} />}
+            {hasAbono && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#F59E0B' }} />}
+          </div>
         )}
       </div>
     );
@@ -1434,227 +1268,180 @@ const CalendarScheduler: React.FC = () => {
   });
 
   return (
-    <div className="flex flex-col h-screen bg-gradient-to-br from-white to-gray-50/30">
+    <div className="flex flex-col h-screen bg-white">
       <Sidebar />
 
-      <div className="flex-1 lg:ml-0 flex flex-col overflow-hidden">
-        {/* HEADER - SIN SELECTOR DE SEDE (ahora está en la sidebar) */}
-        <div className="bg-white/80 backdrop-blur-lg border-b border-gray-200/60 p-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <PageHeader
-              title="Agenda"
-              subtitle={`${formatDateDMY(selectedDate)} • ${selectedSede?.nombre || "Selecciona una sede"}${
-                loading ? " · Actualizando..." : ""
-              }${loadingBloqueos ? " · Bloqueos..." : ""}`}
-              className="mb-0"
-            />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* ── Top bar ───────────────────────────────────────────────────── */}
+        <div
+          className="shrink-0 flex justify-between items-center bg-white"
+          style={{ padding: '14px 22px', borderBottom: '1px solid #E2E8F0' }}
+        >
+          <div>
+            <h1 className="text-xl font-bold tracking-tight" style={{ color: '#1E293B', letterSpacing: '-.3px' }}>
+              Agenda
+            </h1>
+            <div className="text-xs mt-0.5" style={{ color: '#64748B' }}>
+              {selectedDate.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}
+              {' · '}{selectedSede?.nombre || 'Selecciona una sede'}
+              {(loading || loadingBloqueos) && ' · Actualizando...'}
+            </div>
+          </div>
 
-            <div className="flex items-center gap-2">
-              <button onClick={() => setSelectedDate(today)} disabled={loading} className="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-xs hover:bg-gray-50 transition-colors flex items-center gap-1">
-                <Calendar className="w-3 h-3" />Hoy
+          <div className="flex items-center gap-2">
+            <div
+              className="flex items-center gap-0.5 rounded-lg"
+              style={{ background: '#F8FAFC', padding: 3 }}
+            >
+              <button
+                onClick={() => setSelectedDate(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n; })}
+                className="flex items-center rounded-md transition-colors"
+                style={{ padding: '5px 7px', color: '#64748B' }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#E2E8F0')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setSelectedDate(today)}
+                className="text-xs font-medium transition-colors"
+                style={{ padding: '0 8px', color: '#334155' }}
+              >
+                {todayLabel}
+              </button>
+              <button
+                onClick={() => setSelectedDate(d => { const n = new Date(d); n.setDate(n.getDate() + 1); return n; })}
+                className="flex items-center rounded-md transition-colors"
+                style={{ padding: '5px 7px', color: '#64748B' }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#E2E8F0')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <ChevronRight className="w-4 h-4" />
               </button>
             </div>
+
+            <select
+              className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white shadow-sm focus:ring-1 focus:ring-gray-900 focus:border-gray-900 transition-all"
+              value={selectedSede?._id || ''}
+              onChange={(e) => {
+                const sede = sedes.find(s => s._id === e.target.value);
+                setSelectedSede(sede || null);
+                if (sede?.sede_id) setActiveSedeId(sede.sede_id);
+              }}
+            >
+              <option value="">Sede...</option>
+              {sedes.map(sede => (
+                <option key={sede._id} value={sede._id}>
+                  {formatSedeNombre(sede.nombre)}
+                </option>
+              ))}
+            </select>
+
+            <button
+              onClick={() => { setSelectedCell(null); setShowAppointmentModal(true); }}
+              className="flex items-center gap-1.5 text-white rounded-lg text-xs font-medium transition-colors"
+              style={{ padding: '9px 16px', background: '#1E293B' }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#334155')}
+              onMouseLeave={e => (e.currentTarget.style.background = '#1E293B')}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Nueva cita
+            </button>
           </div>
         </div>
 
         <div className="flex-1 flex overflow-hidden">
-          {/* SIDEBAR IZQUIERDA - CON SELECTOR DE SEDE */}
-          <div className="w-64 bg-gradient-to-b from-white to-gray-50 border-r border-gray-200 p-4 overflow-y-auto">
-            <h2 className="text-lg font-bold text-gray-900 mb-3">Filtros</h2>
-
-            {/* SELECTOR DE SEDE EN LA SIDEBAR */}
-            <div className="mb-4">
-              <label className="block text-xs font-semibold text-gray-700 mb-2">Sede</label>
-              <select
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white shadow-sm focus:ring-1 focus:ring-gray-900 focus:border-gray-900 transition-all"
-                value={selectedSede?._id || ''}
-                onChange={(e) => {
-                  const sede = sedes.find(s => s._id === e.target.value);
-                  setSelectedSede(sede || null);
-                  if (sede?.sede_id) {
-                    setActiveSedeId(sede.sede_id);
-                  }
-                }}
-              >
-                  <option value="">Selecciona una sede</option>
-                  {sedes.map(sede => (
-                    <option key={sede._id} value={sede._id}>
-                      {formatSedeNombre(sede.nombre)}
-                    </option>
-                  ))}
-                </select>
-            </div>
-
-            <div className="mb-4">
-              <MiniCalendar />
-            </div>
-
-            <div className="mb-4">
-              {estilistas.length === 0 && selectedSede && (
-                <div className="mt-1 text-[10px] text-gray-600 bg-gray-50 px-2 py-1.5 rounded-lg">
-                  No hay estilistas en esta sede
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white rounded-xl p-3 border border-gray-200 shadow-sm mb-3">
-              <h3 className="font-semibold text-gray-900 mb-2 text-sm">Resumen del día</h3>
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs"><span className="text-gray-600">Citas:</span><span className="font-semibold text-gray-900">{appointments.length}</span></div>
-                <div className="flex justify-between text-xs"><span className="text-gray-600">Estilistas:</span><span className="font-semibold text-gray-900">{estilistas.length}</span></div>
-                <div className="flex justify-between text-xs"><span className="text-gray-600">Horas:</span><span className="font-semibold text-gray-900">{Math.round(appointments.reduce((acc, apt) => acc + apt.duracion, 0) / 60)}h</span></div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-3 border border-gray-200 shadow-sm mb-3">
-              <h3 className="font-semibold text-gray-900 mb-2 text-sm">Estados</h3>
-              <div className="space-y-1.5">
-                {['agendada', 'finalizado', 'facturado', 'cancelado', 'no_show'].map((estadoKey) => {
-                  const tokens = getEstadoTokens(estadoKey);
-                  return (
-                    <div key={estadoKey} className="flex items-center gap-1.5">
-                      <div className={`w-2.5 h-2.5 rounded-full ${tokens.chipDot}`}></div>
-                      <span className="text-xs text-gray-700">{tokens.label}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-3 border border-gray-200 shadow-sm">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-gray-900 text-sm">Bloqueos</h3>
-                <span className="text-[10px] text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                  {bloqueos.length}
-                </span>
-              </div>
-              {bloqueos.length === 0 ? (
-                <p className="text-xs text-gray-500 text-center py-1.5">
-                  No hay bloqueos
-                </p>
-              ) : (
-                <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                  {bloqueos.map((bloqueo) => {
-                    const estilista = estilistas.find(e => e.profesional_id === bloqueo.profesional_id);
-                    return (
-                      <div key={bloqueo._id} className="p-1.5 bg-gray-50 border border-gray-100 rounded-lg">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-medium text-gray-700 truncate">
-                            🔒 {bloqueo.motivo}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-gray-600 mt-0.5">
-                          <div className="flex justify-between">
-                            <span className="truncate max-w-[70px]">{estilista?.nombre || bloqueo.profesional_id}</span>
-                            <span>{bloqueo.hora_inicio}-{bloqueo.hora_fin}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {isInitialLoad && (
-              <div className="mt-3 flex items-center justify-center gap-1 text-xs text-gray-600">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Cargando datos iniciales...
-              </div>
-            )}
-            {loading && !isInitialLoad && (
-              <div className="mt-3 flex items-center justify-center gap-1 text-xs text-gray-600">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Cargando...
-              </div>
-            )}
-          </div>
-
-          {/* CALENDARIO PRINCIPAL - EXACTAMENTE IGUAL */}
+          {/* CALENDARIO PRINCIPAL */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div ref={calendarViewportRef} className="flex-1 overflow-auto bg-white/60 backdrop-blur-sm">
+            {/* ── Summary bar ─────────────────────────────────────────────── */}
+            <div
+              className="shrink-0 flex flex-wrap gap-5 text-xs bg-white"
+              style={{ padding: '8px 22px', borderBottom: '1px solid #F1F5F9', color: '#64748B' }}
+            >
+              <span><b className="font-semibold" style={{ color: '#1E293B' }}>{rfActiveApts.length}</b> citas</span>
+              <span><b className="font-semibold" style={{ color: '#9CA3AF' }}>{rfSummary.pre}</b> pre-citas</span>
+              <span><b className="font-semibold" style={{ color: '#3B82F6' }}>{rfSummary.confirmed}</b> confirmadas</span>
+              <span><b className="font-semibold" style={{ color: '#8B5CF6' }}>{rfSummary.inProgress}</b> en curso</span>
+              <span className="ml-auto"><b className="font-semibold" style={{ color: '#1E293B' }}>{formatCOP(rfSummary.total)}</b> estimado</span>
+            </div>
+
+            <div ref={calendarViewportRef} className="flex-1 overflow-auto bg-white">
               <div className="min-w-max" style={{ minWidth: `${calendarMinWidth}px` }}>
                 {/* ENCABEZADO DE ESTILISTAS */}
-                <div className="flex bg-white/95 backdrop-blur-lg border-b border-gray-200/60 sticky top-0 z-20 shadow-sm">
-                  <div className="w-16 flex-shrink-0" />
+                <div
+                  className="flex sticky top-0 z-20 bg-white"
+                  style={{ borderBottom: '1px solid #E2E8F0' }}
+                >
+                  <div style={{ width: TIME_COLUMN_WIDTH, flexShrink: 0, borderRight: '1px solid #F1F5F9' }} />
                   {profesionales.length > 0 ? (
                     <div className="flex" style={{ width: `${professionalsTrackWidth}px` }}>
                       {profesionales.map((prof) => (
                         <div
                           key={prof.estilista.unique_key}
-                          className="flex-shrink-0 p-2 border-l border-gray-200/60 text-center bg-white/80"
-                          style={{ width: `${effectiveCellWidth}px` }}
+                          className="flex items-center justify-center gap-1.5 shrink-0"
+                          style={{
+                            width: `${effectiveCellWidth}px`,
+                            height: 52,
+                            borderRight: '1px solid #F1F5F9',
+                            padding: '0 6px',
+                          }}
                         >
-                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 mx-auto mb-1 flex items-center justify-center text-xs font-bold text-white shadow-sm">{prof.initials}</div>
-                          <div className="text-xs font-semibold text-gray-900 truncate px-1">{prof.name}</div>
-                          <div className="text-[9px] text-gray-500 mt-0.5">{appointments.filter(apt => apt.profesional_id === prof.estilista.profesional_id).length} citas</div>
+                          <div
+                            className="flex items-center justify-center shrink-0 rounded-full text-white"
+                            style={{ width: 30, height: 30, background: '#1E293B', fontSize: 10, fontWeight: 700 }}
+                          >
+                            {prof.initials}
+                          </div>
+                          <div className="overflow-hidden">
+                            <div className="truncate" style={{ fontSize: 11, fontWeight: 600, color: '#1E293B' }}>
+                              {prof.name}
+                            </div>
+                            <div style={{ fontSize: 9, color: '#94A3B8' }}>
+                              {appointments.filter(apt => apt.profesional_id === prof.estilista.profesional_id).length} citas
+                            </div>
+                          </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="w-full p-6 text-center">
-                      {selectedSede ? (
-                        <>
-                          <div className="text-gray-500 text-sm mb-1">
-                            No hay estilistas en esta sede
-                          </div>
-                          <div className="text-xs text-gray-400">
-                            Agrega estilistas para comenzar a programar
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="text-gray-500 text-sm mb-1">
-                            Selecciona una sede
-                          </div>
-                          <div className="text-xs text-gray-400">
-                            Para ver los estilistas disponibles
-                          </div>
-                        </>
-                      )}
+                    <div className="flex-1 flex items-center justify-center py-4">
+                      <span className="text-sm" style={{ color: '#64748B' }}>
+                        {selectedSede ? 'No hay estilistas en esta sede' : 'Selecciona una sede'}
+                      </span>
                     </div>
                   )}
                 </div>
 
                 {profesionales.length > 0 && (
                   <div className="relative">
-                    {(() => {
-                      const now = new Date();
-                      const currentHour = now.getHours();
-                      const currentMinute = now.getMinutes();
-                      const isTodaySelected = selectedDate.toDateString() === today.toDateString();
-                      const currentMinutesFromStart = (currentHour - START_HOUR) * 60 + currentMinute;
-
-                      return HOURS.map((hour, hourIndex) => {
-                        const rowStart = hourIndex * SLOT_INTERVAL_MINUTES;
-                        const rowEnd = rowStart + SLOT_INTERVAL_MINUTES;
-                        const showCurrentTimeDot =
-                          isTodaySelected &&
-                          currentHour >= START_HOUR &&
-                          currentHour <= END_HOUR &&
-                          currentMinutesFromStart >= rowStart &&
-                          currentMinutesFromStart < rowEnd;
-                        const dotTop = ((currentMinutesFromStart - rowStart) / SLOT_INTERVAL_MINUTES) * CELL_HEIGHT;
-
-                        return (
-                          <div key={hour}
-                            className={`flex border-b border-gray-100/80 group relative ${hourIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-gray-50/30 transition-colors`}>
-                            <div className="w-16 flex-shrink-0 text-xs text-gray-600 p-2 text-right border-r border-gray-200/60 bg-white/95 backdrop-blur-sm sticky left-0 z-50 font-medium relative">
-                              {hour}
-                              {showCurrentTimeDot && (
-                                <div
-                                  className="pointer-events-none absolute right-2 z-40 h-2 w-2 -translate-y-1/2 rounded-full bg-gray-900 animate-pulse"
-                                  style={{ top: `${dotTop}px` }}
-                                />
-                              )}
-                            </div>
-                            {profesionales.map((prof) => (
-                              <CalendarCell key={`${hour}-${prof.estilista.unique_key}`} prof={prof} hour={hour} />
-                            ))}
-                          </div>
-                        );
-                      });
-                    })()}
+                    {HOURS.map((hour) => (
+                      <div
+                        key={hour}
+                        className="flex relative"
+                        style={{ borderBottom: '1px solid #F1F5F9' }}
+                      >
+                        <div
+                          className="shrink-0 sticky left-0 z-10 bg-white"
+                          style={{
+                            width: TIME_COLUMN_WIDTH,
+                            height: CELL_HEIGHT,
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            justifyContent: 'flex-end',
+                            paddingRight: 10,
+                            paddingTop: 4,
+                            borderRight: '1px solid #F1F5F9',
+                          }}
+                        >
+                          <span style={{ fontSize: 10, color: '#94A3B8', fontWeight: 500 }}>
+                            {hourLabelFromStr(hour)}
+                          </span>
+                        </div>
+                        {profesionales.map((prof) => (
+                          <CalendarCell key={`${hour}-${prof.estilista.unique_key}`} prof={prof} hour={hour} />
+                        ))}
+                      </div>
+                    ))}
 
                     {/* BLOQUEOS */}
                     <div
@@ -1682,75 +1469,122 @@ const CalendarScheduler: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* ── Legend ────────────────────────────────────────────────── */}
+            <div
+              className="shrink-0 flex flex-wrap gap-4 bg-white"
+              style={{ padding: '10px 22px', borderTop: '1px solid #F1F5F9', fontSize: 10, color: '#64748B' }}
+            >
+              <span className="flex items-center gap-1">
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: '#9CA3AF', opacity: .6, display: 'inline-block' }} />
+                Pre-cita
+              </span>
+              <span className="flex items-center gap-1">
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: '#3B82F6', display: 'inline-block' }} />
+                Confirmada
+              </span>
+              <span className="flex items-center gap-1">
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: '#8B5CF6', display: 'inline-block' }} />
+                En curso
+              </span>
+              <span className="flex items-center gap-1">
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: '#10B981', display: 'inline-block' }} />
+                Completada
+              </span>
+              <span className="flex items-center gap-1">
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: '#EF4444', display: 'inline-block' }} />
+                Cancelada
+              </span>
+              <span className="flex items-center gap-1">
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />
+                Pagado
+              </span>
+              <span className="flex items-center gap-1">
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#F59E0B', display: 'inline-block' }} />
+                Abono parcial
+              </span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* TOOLTIP DE CITA - EXACTAMENTE IGUAL */}
+      {/* ── Right panel overlay ───────────────────────────────────────── */}
+      <div
+        className="fixed inset-0 z-40 transition-opacity duration-200"
+        style={{
+          background: 'rgba(0,0,0,.15)',
+          opacity: showAppointmentDetails ? 1 : 0,
+          pointerEvents: showAppointmentDetails ? 'auto' : 'none',
+        }}
+        onClick={() => { setShowAppointmentDetails(false); setSelectedAppointment(null); }}
+      />
+      <div
+        className="fixed top-0 right-0 bottom-0 bg-white flex flex-col z-50"
+        style={{
+          width: 460,
+          boxShadow: '-8px 0 30px rgba(0,0,0,.08)',
+          transform: showAppointmentDetails ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform .25s ease',
+        }}
+      >
+        {showAppointmentDetails && selectedAppointment && (
+          <AppointmentDetailsModal
+            open={true}
+            onClose={() => { setShowAppointmentDetails(false); setSelectedAppointment(null); }}
+            appointment={selectedAppointment}
+            onRefresh={() => {
+              if (selectedSede) {
+                const cacheKey = `citas_${selectedSede.sede_id}_${selectedDateString}`;
+                dataCacheRef.current.delete(cacheKey);
+              }
+              cargarCitas();
+              setRefreshTrigger(prev => prev + 1);
+            }}
+            panelMode={true}
+          />
+        )}
+      </div>
+
+      {/* TOOLTIP DE CITA */}
       {citaTooltip.visible && citaTooltip.cita && (
         <div
-          className="pointer-events-none fixed z-50 bg-white/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-lg p-2.5 max-w-[18rem] transform -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
+          className="pointer-events-none fixed z-50 bg-white rounded-xl shadow-lg p-2.5 max-w-[18rem] -translate-y-1/2"
           style={{
             left: `${getTooltipLeft(citaTooltip.x, CITA_TOOLTIP_WIDTH)}px`,
-            top: `${citaTooltip.y}px`
+            top: `${citaTooltip.y}px`,
+            border: '1px solid #E2E8F0',
           }}
         >
           <div className="flex items-center gap-1.5 mb-1.5">
-            <div className="w-7 h-7 bg-gradient-to-br from-gray-700 to-gray-900 rounded-lg flex items-center justify-center shadow-sm">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#1E293B' }}>
               <User className="w-3.5 h-3.5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="font-bold text-gray-900 text-[13px] truncate">
+              <h3 className="font-bold text-[13px] truncate" style={{ color: '#1E293B' }}>
                 {citaTooltip.cita.cliente_nombre}
               </h3>
-              <p className="text-xs text-gray-600 truncate">
-                {citaTooltip.cita.servicio_nombre}
+              <p className="text-xs truncate" style={{ color: '#64748B' }}>
+                {citaTooltip.cita.start} – {citaTooltip.cita.end}
               </p>
             </div>
           </div>
-
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2 text-xs">
-              <Clock className="w-3 h-3 text-gray-600" />
-              <span className="font-medium text-gray-700">
-                {citaTooltip.cita.start} - {citaTooltip.cita.end}
-              </span>
-              <span className="text-gray-500">({citaTooltip.cita.duracion}min)</span>
-            </div>
-
-            <div className="flex items-center gap-2 text-xs">
-              <svg className="w-3 h-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              <span className="text-gray-700 truncate">
-                <strong>Estilista:</strong> {citaTooltip.cita.estilista_nombre}
-              </span>
-            </div>
-
-            {citaTooltip.cita.notas_adicionales && (
-              <div className="flex items-start gap-2 text-xs">
-                <svg className="w-3 h-3 text-gray-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <span className="text-gray-700 break-words">
-                  <strong>Notas:</strong> {citaTooltip.cita.notas_adicionales}
-                </span>
+          <div className="space-y-1" style={{ fontSize: 11, color: '#475569' }}>
+            <div>{citaTooltip.cita.servicio_nombre}</div>
+            <div style={{ color: '#64748B' }}>{citaTooltip.cita.estilista_nombre}</div>
+          </div>
+          {(() => {
+            const rfSt = resolveRFStatus(citaTooltip.cita.estado);
+            const si = RF_STATUSES[rfSt];
+            return (
+              <div
+                className="inline-flex items-center gap-1 rounded-full text-[10px] font-medium mt-2"
+                style={{ padding: '3px 8px', background: si.bg, color: si.color }}
+              >
+                <div style={{ width: 5, height: 5, borderRadius: '50%', background: si.color }} />
+                {si.label}
               </div>
-            )}
-          </div>
-
-          <div className="mt-1.5 pt-1.5 border-t border-gray-100">
-            {(() => {
-              const estadoTokens = getEstadoTokens(citaTooltip.cita.estado);
-              const estadoLabel = String(citaTooltip.cita.estado || estadoTokens.label);
-              return (
-                <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium ${estadoTokens.chipBg} ${estadoTokens.chipText}`}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${estadoTokens.chipDot}`}></div>
-                  {estadoLabel}
-                </div>
-              );
-            })()}
-          </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1767,7 +1601,7 @@ const CalendarScheduler: React.FC = () => {
       )}
 
       {showAppointmentModal && (
-        <Modal open={showAppointmentModal} onClose={handleClose} title="Nueva Reserva" className="w-full max-w-[70vw] max-h-[85vh]">
+        <Modal open={showAppointmentModal} onClose={handleClose} title="Nueva Cita" className="w-full max-w-[70vw] max-h-[85vh]">
           <div className="">
             <AppointmentScheduler
               sedeId={sedeIdActual}
@@ -1781,25 +1615,6 @@ const CalendarScheduler: React.FC = () => {
         </Modal>
       )}
 
-      {showAppointmentDetails && (
-        <AppointmentDetailsModal
-          open={showAppointmentDetails}
-          onClose={() => {
-            setShowAppointmentDetails(false);
-            setSelectedAppointment(null);
-          }}
-          appointment={selectedAppointment}
-          onRefresh={() => {
-            // Invalidar caché de citas
-            if (selectedSede) {
-              const cacheKey = `citas_${selectedSede.sede_id}_${selectedDateString}`;
-              dataCacheRef.current.delete(cacheKey);
-            }
-            cargarCitas();
-            setRefreshTrigger(prev => prev + 1);
-          }}
-        />
-      )}
     </div>
   );
 };

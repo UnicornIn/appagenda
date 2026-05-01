@@ -206,6 +206,7 @@ export function ProductsList() {
     setProductoEditando(null);
     setStockTemporal("");
     setGuardandoStock(null);
+    setError(null);
   };
 
   const parseApiError = (error: unknown): string => {
@@ -307,7 +308,7 @@ export function ProductsList() {
     }
 
     const nuevoValor = Number(stockTemporal);
-    if (Number.isNaN(nuevoValor)) {
+    if (Number.isNaN(nuevoValor) || stockTemporal.trim() === "") {
       setError("Ingresa un valor numérico de stock");
       return;
     }
@@ -318,8 +319,9 @@ export function ProductsList() {
       return;
     }
 
+    setError(null);
+    setGuardandoStock(producto._id);
     try {
-      setGuardandoStock(producto._id);
       const result = await inventarioService.ajustarInventario(
         producto._id,
         delta,
@@ -330,11 +332,12 @@ export function ProductsList() {
         return;
       }
       setSuccessMessage(result.message || "Stock actualizado");
+      resetEdicionStock();
       await cargarInventario();
     } catch (err) {
       setError(parseApiError(err));
     } finally {
-      resetEdicionStock();
+      setGuardandoStock(null);
     }
   };
 
@@ -657,13 +660,13 @@ export function ProductsList() {
         {activeProductsTab !== "lista" ? (
           <div className="p-8">
             {activeProductsTab === "dashboard" && (
-              <InventoryDashboardTab productos={productos} sedeLabel={sedeLabel} />
+              <InventoryDashboardTab productos={productos} sedeLabel={sedeLabel} sedeId={sedeId} />
             )}
             {activeProductsTab === "movimientos" && (
-              <InventoryMovimientosTab productos={productos} sedeLabel={sedeLabel} />
+              <InventoryMovimientosTab productos={productos} sedeLabel={sedeLabel} sedeId={sedeId} />
             )}
             {activeProductsTab === "kardex" && (
-              <InventoryKardexTab productos={productos} />
+              <InventoryKardexTab productos={productos} sedeId={sedeId} />
             )}
           </div>
         ) : (
@@ -1485,6 +1488,117 @@ export function ProductsList() {
         </div>
         )}
       </main>
+
+      {/* ─── Modal Editar Stock ─────────────────────────────── */}
+      {productoEditando && (() => {
+        const producto = productos.find((p) => p._id === productoEditando);
+        if (!producto) return null;
+        const actual = Number(producto.stock_actual ?? 0);
+        const minimo = Number(producto.stock_minimo ?? 0);
+        const nuevo = Number(stockTemporal) || 0;
+        const delta = Number(stockTemporal.trim() !== "" ? nuevo - actual : 0);
+        const dotCls =
+          nuevo <= 0 ? "bg-gray-400" : nuevo <= minimo ? "bg-red-500" : nuevo <= minimo * 1.5 ? "bg-amber-500" : "bg-emerald-500";
+        const numCls =
+          nuevo <= 0 ? "text-gray-400" : nuevo <= minimo ? "text-red-600" : nuevo <= minimo * 1.5 ? "text-amber-600" : "text-emerald-600";
+        const isSaving = guardandoStock === producto._id;
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/35"
+            onClick={resetEdicionStock}
+          >
+            <div
+              className="w-full max-w-sm rounded-2xl bg-white shadow-2xl p-6 mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between mb-5">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Editar stock</h2>
+                  <p className="text-xs text-gray-400 mt-0.5">Ajusta el stock actual del producto.</p>
+                </div>
+                <button onClick={resetEdicionStock} className="text-gray-400 hover:text-gray-600 transition-colors">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="rounded-lg bg-gray-50 border border-gray-100 px-4 py-3">
+                  <p className="text-sm font-semibold text-gray-800">
+                    {producto.producto_nombre || producto.nombre}
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    SKU: {producto.producto_codigo || "—"} · {producto.categoria || "—"}
+                  </p>
+                  <div className="mt-3 flex items-center gap-4">
+                    <div>
+                      <p className="text-[10px] text-gray-400">Stock actual</p>
+                      <p className="text-sm font-bold text-gray-700 mt-0.5">{actual}</p>
+                    </div>
+                    {stockTemporal.trim() !== "" && delta !== 0 && (
+                      <>
+                        <span className="text-gray-300 text-lg">→</span>
+                        <div>
+                          <p className="text-[10px] text-gray-400">Nuevo stock</p>
+                          <span className={cn("flex items-center gap-1 text-sm font-bold mt-0.5", numCls)}>
+                            <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", dotCls)} />
+                            {nuevo}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-gray-400">Ajuste</p>
+                          <p className={cn("text-sm font-bold mt-0.5", delta > 0 ? "text-emerald-600" : "text-red-600")}>
+                            {delta > 0 ? `+${delta}` : delta}
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Nuevo stock</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={stockTemporal}
+                    onChange={(e) => setStockTemporal(e.target.value)}
+                    placeholder={String(actual)}
+                    className="border-gray-200 bg-white text-sm"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void guardarStock(producto);
+                      if (e.key === "Escape") resetEdicionStock();
+                    }}
+                  />
+                </div>
+
+                {error && <p className="text-xs text-red-600">{error}</p>}
+
+                <div className="flex justify-end gap-2 pt-1 border-t border-gray-100">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-gray-200 text-gray-600 text-xs"
+                    onClick={resetEdicionStock}
+                    disabled={isSaving}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-gray-900 text-white hover:bg-gray-800 text-xs"
+                    onClick={() => void guardarStock(producto)}
+                    disabled={isSaving}
+                  >
+                    {isSaving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                    Guardar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -1211,16 +1211,21 @@ export function ProductsList() {
               <InventoryDashboardTab
                 productos={productos}
                 sedeLabel={selectedSedeName || selectedDashboardSede || "Sede"}
+                sedeId={resolveSedeId(selectedDashboardSede)}
               />
             )}
             {activeProductsTab === "movimientos" && (
               <InventoryMovimientosTab
                 productos={productos}
                 sedeLabel={selectedSedeName || "Sede"}
+                sedeId={resolveSedeId(selectedDashboardSede)}
               />
             )}
             {activeProductsTab === "kardex" && (
-              <InventoryKardexTab productos={productos} />
+              <InventoryKardexTab
+                productos={productos}
+                sedeId={resolveSedeId(selectedDashboardSede)}
+              />
             )}
           </div>
         ) : (

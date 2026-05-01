@@ -103,7 +103,7 @@ const TECHNICAL_METADATA: Record<TechnicalField, TechnicalMetadata> = {
     defaultAction: "Mantener seguimiento profesional para ajustar el tratamiento.",
   },
   permeabilidad: {
-    definition: "Facilidad con la que agua y activos penetran la fibra capilar.",
+    definition: "Capacidad del cabello para absorber y retener humedad.",
     actions: {
       ALTA: "Sellar con productos de pH ácido y mantener rutina anti-frizz.",
       MEDIA: "Sostener rutina balanceada de hidratación y sellado.",
@@ -113,7 +113,7 @@ const TECHNICAL_METADATA: Record<TechnicalField, TechnicalMetadata> = {
     defaultAction: "Ajustar productos según respuesta real del cabello.",
   },
   porosidad: {
-    definition: "Capacidad del cabello para absorber y retener humedad.",
+    definition: "Facilidad con la que agua y activos penetran la fibra capilar.",
     actions: {
       ALTA: "Enfocar en sellado de cutícula y productos de larga hidratación.",
       BAJA: "Aplicar productos ligeros y activar absorción con calor controlado.",

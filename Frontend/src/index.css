@@ -145,6 +145,15 @@ body {
   display: none;
 }
 
+/* Oculta scrollbar visualmente pero permite scroll */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Quita flechas/spinners nativos en campos numéricos (global) */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {

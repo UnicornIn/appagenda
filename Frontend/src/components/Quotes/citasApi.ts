@@ -75,6 +75,7 @@ export async function crearCita(data: any, token: string) {
     
     // Opcional
     notas: data.notas || "",
+    ...(data.estado ? { estado: data.estado } : {}),
     ...(codigoGiftcard ? { codigo_giftcard: codigoGiftcard } : {})
   };
 
