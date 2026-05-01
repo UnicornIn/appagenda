@@ -14,6 +14,8 @@ import {
   getSalesMetrics,
   formatCurrencyMetric,
   extractMainMetrics,
+  extractPaymentMethods,
+  type PaymentMethodTotals,
 } from "./salesMetricsApi"
 import { API_BASE_URL } from "../../../types/config"
 import { getStoredCurrency } from "../../../lib/currency"
@@ -178,6 +180,14 @@ export default function Billing() {
     ventas_servicios: 0,
     ventas_productos: 0,
   })
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodTotals>({
+    efectivo: 0,
+    transferencia: 0,
+    tarjeta: 0,
+    nequi: 0,
+    daviplata: 0,
+    otros: 0,
+  })
   const [loadingMetrics, setLoadingMetrics] = useState(true)
   const [currency, setCurrency] = useState(getStoredCurrency("USD"))
   const [metricsRefreshKey, setMetricsRefreshKey] = useState(0)
@@ -304,6 +314,7 @@ export default function Billing() {
         ventas_servicios: servicios,
         ventas_productos: productos,
       })
+      setPaymentMethods(extractPaymentMethods(data))
     } catch (err) {
       console.error("Error loading metrics:", err)
     } finally {
@@ -584,28 +595,36 @@ export default function Billing() {
                 ))}
               </div>
 
-              {/* Row 2: Payment methods
-                  TODO: payment method breakdown requires per-appointment payment records.
-                  The current scheduling/quotes/ endpoint does not return individual payment
-                  method entries. When available, compute totals from the appointments array.
-              */}
+              {/* Row 2: Payment methods — from api/sales-dashboard/ventas/dashboard */}
               <div className="grid grid-cols-5 gap-1.5">
-                {[
-                  "Efectivo",
-                  "Transferencia",
-                  "Tarjeta",
-                  "Nequi",
-                  "Daviplata",
-                ].map((method) => (
+                {(
+                  [
+                    { label: "Efectivo",      value: paymentMethods.efectivo },
+                    { label: "Transferencia", value: paymentMethods.transferencia },
+                    { label: "Tarjeta",       value: paymentMethods.tarjeta },
+                    // Nequi y Daviplata no tienen campo propio en el backend; se muestran si el
+                    // backend los agrega como campos separados en el futuro.
+                    { label: "Nequi",         value: paymentMethods.nequi },
+                    { label: "Daviplata",     value: paymentMethods.daviplata },
+                  ] as { label: string; value: number }[]
+                ).map((m) => (
                   <div
-                    key={method}
+                    key={m.label}
                     className="p-2.5 border border-gray-200 rounded-lg text-center bg-white"
                   >
                     <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-0.5 leading-tight">
-                      {method}
+                      {m.label}
                     </div>
-                    <div className="text-sm font-bold text-gray-300">$0</div>
-                    <div className="text-[9px] text-gray-300">0 pagos</div>
+                    {loadingMetrics ? (
+                      <div className="h-4 w-12 mx-auto bg-gray-100 rounded animate-pulse my-0.5" />
+                    ) : (
+                      <div className={`text-sm font-bold ${m.value > 0 ? "text-gray-800" : "text-gray-300"}`}>
+                        {fmtCOP(m.value)}
+                      </div>
+                    )}
+                    <div className="text-[9px] text-gray-300">
+                      {m.value > 0 ? fmt(m.value) : "—"}
+                    </div>
                   </div>
                 ))}
               </div>

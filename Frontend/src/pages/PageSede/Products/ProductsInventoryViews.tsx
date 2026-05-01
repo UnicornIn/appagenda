@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
   AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
   Package,
   Search,
   X,
@@ -31,7 +34,22 @@ import {
   TableHeader,
   TableRow,
 } from "../../../components/ui/table";
+import { Alert, AlertDescription } from "../../../components/ui/alert";
 import type { InventarioProducto } from "./inventario";
+import {
+  crearEntrada,
+  crearSalida,
+  getMovimientos,
+  getTopProductos,
+  getSinMovimiento,
+  type FiltroTiempo,
+  type Movimiento,
+  type MovimientosResponse,
+  type TopProducto,
+  type ProductoSinMovimiento,
+  RANGOS_RELATIVOS,
+} from "./inventarioApi";
+import { useAuth } from "../../../components/Auth/AuthContext";
 import { cn } from "../../../lib/utils";
 
 // ─── Shared helpers ────────────────────────────────────────────────────────
@@ -61,14 +79,55 @@ const formatDate = (iso?: string) => {
   }).format(d);
 };
 
+const resolveToken = (user: any): string | null =>
+  user?.access_token ||
+  user?.token ||
+  window.sessionStorage.getItem("access_token") ||
+  window.localStorage.getItem("access_token") ||
+  null;
+
+const resolveSedeId = (user: any, activeSedeId?: string | null, overrideSedeId?: string): string =>
+  (overrideSedeId && overrideSedeId !== "all" ? overrideSedeId : null) ||
+  activeSedeId ||
+  user?.sede_id ||
+  window.sessionStorage.getItem("beaux-sede_id") ||
+  window.localStorage.getItem("beaux-sede_id") ||
+  "";
+
 // ─── DASHBOARD TAB ──────────────────────────────────────────────────────────
 
 interface DashboardTabProps {
   productos: InventarioProducto[];
   sedeLabel?: string;
+  sedeId?: string;
 }
 
-export function InventoryDashboardTab({ productos, sedeLabel = "Sede" }: DashboardTabProps) {
+export function InventoryDashboardTab({ productos, sedeLabel = "Sede", sedeId: sedeIdProp }: DashboardTabProps) {
+  const { user, activeSedeId } = useAuth();
+  const [topProductos, setTopProductos] = useState<TopProducto[]>([]);
+  const [sinMovimiento, setSinMovimiento] = useState<ProductoSinMovimiento[]>([]);
+  const [loadingTop, setLoadingTop] = useState(false);
+  const [loadingSlow, setLoadingSlow] = useState(false);
+  const [filtro] = useState<FiltroTiempo>({ modo: "relativo", dias: 30 });
+
+  useEffect(() => {
+    const token = resolveToken(user);
+    const sedeId = resolveSedeId(user, activeSedeId, sedeIdProp);
+    if (!token || !sedeId) return;
+
+    setLoadingTop(true);
+    getTopProductos(token, filtro, 5, sedeId)
+      .then(setTopProductos)
+      .catch(() => setTopProductos([]))
+      .finally(() => setLoadingTop(false));
+
+    setLoadingSlow(true);
+    getSinMovimiento(token, filtro, sedeId)
+      .then((data) => setSinMovimiento(data.slice(0, 4)))
+      .catch(() => setSinMovimiento([]))
+      .finally(() => setLoadingSlow(false));
+  }, [user, activeSedeId, sedeIdProp]);
+
   const totalProductos = productos.length;
   const totalUnidades = productos.reduce((a, p) => a + Number(p.stock_actual ?? 0), 0);
   const criticos = productos.filter(
@@ -76,19 +135,10 @@ export function InventoryDashboardTab({ productos, sedeLabel = "Sede" }: Dashboa
   ).length;
   const sinStock = productos.filter((p) => Number(p.stock_actual ?? 0) <= 0).length;
 
-  // Sort by stock ratio to find slow movers (high stock vs low sales) and critical
-  const críticos = [...productos]
+  const críticosProductos = [...productos]
     .filter((p) => Number(p.stock_actual) <= Number(p.stock_minimo))
     .sort((a, b) => Number(a.stock_actual) - Number(b.stock_actual))
     .slice(0, 5);
-
-  const topProductos = [...productos]
-    .sort((a, b) => Number(b.ventas ?? 0) - Number(a.ventas ?? 0))
-    .slice(0, 5);
-
-  const slowMovers = [...productos]
-    .filter((p) => Number(p.stock_actual) > 0 && !Number(p.ventas))
-    .slice(0, 4);
 
   return (
     <div className="space-y-6">
@@ -106,14 +156,14 @@ export function InventoryDashboardTab({ productos, sedeLabel = "Sede" }: Dashboa
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold text-gray-700">Productos bajo stock</CardTitle>
             <Badge variant="outline" className="text-xs border-gray-200 text-gray-500">
-              {críticos.length} alertas
+              {críticosProductos.length} alertas
             </Badge>
           </CardHeader>
           <CardContent className="p-0">
-            {críticos.length === 0 ? (
+            {críticosProductos.length === 0 ? (
               <p className="px-4 py-6 text-sm text-center text-gray-400">Sin alertas activas</p>
             ) : (
-              críticos.map((p) => {
+              críticosProductos.map((p) => {
                 const actual = Number(p.stock_actual ?? 0);
                 const min = Number(p.stock_minimo ?? 0);
                 const deficit = min - actual;
@@ -130,12 +180,7 @@ export function InventoryDashboardTab({ productos, sedeLabel = "Sede" }: Dashboa
                         Mín: {min} · Déficit: {deficit > 0 ? deficit : 0}
                       </p>
                     </div>
-                    <span
-                      className={cn(
-                        "flex items-center gap-1.5 text-sm font-semibold",
-                        stockColor(actual, min)
-                      )}
-                    >
+                    <span className={cn("flex items-center gap-1.5 text-sm font-semibold", stockColor(actual, min))}>
                       <span className={cn("w-1.5 h-1.5 rounded-full", stockDot(actual, min))} />
                       {actual}
                     </span>
@@ -151,27 +196,28 @@ export function InventoryDashboardTab({ productos, sedeLabel = "Sede" }: Dashboa
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold text-gray-700">Top más vendidos</CardTitle>
             <Badge variant="outline" className="text-xs border-gray-200 text-gray-500">
-              {sedeLabel}
+              {sedeLabel} · últimos 30 días
             </Badge>
           </CardHeader>
           <CardContent className="p-0">
-            {topProductos.length === 0 ? (
+            {loadingTop ? (
+              <div className="flex items-center justify-center py-6 gap-2 text-sm text-gray-400">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Cargando...
+              </div>
+            ) : topProductos.length === 0 ? (
               <p className="px-4 py-6 text-sm text-center text-gray-400">Sin datos de ventas</p>
             ) : (
               topProductos.map((p, i) => (
                 <div
-                  key={p._id}
+                  key={p.producto_id}
                   className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 last:border-0 hover:bg-gray-50"
                 >
                   <span className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold bg-gray-100 text-gray-500 shrink-0">
                     {i + 1}
                   </span>
-                  <span className="flex-1 text-sm text-gray-800 truncate">
-                    {p.producto_nombre || p.nombre}
-                  </span>
-                  <span className="text-sm font-semibold text-gray-700">
-                    {Number(p.ventas ?? 0)}
-                  </span>
+                  <span className="flex-1 text-sm text-gray-800 truncate">{p.nombre_producto}</span>
+                  <span className="text-sm font-semibold text-gray-700">{p.total_vendido}</span>
                 </div>
               ))
             )}
@@ -179,49 +225,46 @@ export function InventoryDashboardTab({ productos, sedeLabel = "Sede" }: Dashboa
         </Card>
       </div>
 
-      {/* Slow movers */}
-      {slowMovers.length > 0 && (
+      {/* Productos sin movimiento */}
+      {(loadingSlow || sinMovimiento.length > 0) && (
         <Card className="border-gray-200">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-gray-700">
-              Productos sin ventas registradas
+              Productos sin ventas (últimos 30 días)
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <Table>
-              <TableHeader className="bg-gray-50">
-                <TableRow>
-                  <TableHead className="text-xs font-semibold text-gray-500">Producto</TableHead>
-                  <TableHead className="text-xs font-semibold text-gray-500">Línea</TableHead>
-                  <TableHead className="text-xs font-semibold text-gray-500 text-right">
-                    Stock actual
-                  </TableHead>
-                  <TableHead className="text-xs font-semibold text-gray-500 text-right">
-                    Stock mínimo
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {slowMovers.map((p) => (
-                  <TableRow key={p._id} className="hover:bg-gray-50">
-                    <TableCell className="font-medium text-gray-800">
-                      {p.producto_nombre || p.nombre}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs border-gray-200 text-gray-600">
-                        {p.categoria || "—"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right text-gray-700">
-                      {p.stock_actual ?? 0}
-                    </TableCell>
-                    <TableCell className="text-right text-gray-500">
-                      {p.stock_minimo ?? 0}
-                    </TableCell>
+            {loadingSlow ? (
+              <div className="flex items-center justify-center py-6 gap-2 text-sm text-gray-400">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Cargando...
+              </div>
+            ) : (
+              <Table>
+                <TableHeader className="bg-gray-50">
+                  <TableRow>
+                    <TableHead className="text-xs font-semibold text-gray-500">Producto</TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-500">Línea</TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-500 text-right">Stock actual</TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-500 text-right">Stock mínimo</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {sinMovimiento.map((p) => (
+                    <TableRow key={p.producto_id} className="hover:bg-gray-50">
+                      <TableCell className="font-medium text-gray-800">{p.nombre_producto}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs border-gray-200 text-gray-600">
+                          {p.categoria || "—"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right text-gray-700">{p.stock_actual}</TableCell>
+                      <TableCell className="text-right text-gray-500">{p.stock_minimo}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       )}
@@ -229,15 +272,7 @@ export function InventoryDashboardTab({ productos, sedeLabel = "Sede" }: Dashboa
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  alert = false,
-}: {
-  label: string;
-  value: number;
-  alert?: boolean;
-}) {
+function KpiCard({ label, value, alert = false }: { label: string; value: number; alert?: boolean }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4">
       <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</p>
@@ -253,96 +288,87 @@ function KpiCard({
 interface MovimientosTabProps {
   productos: InventarioProducto[];
   sedeLabel?: string;
+  sedeId?: string;
 }
 
-type MovTipo = "Entrada" | "Salida";
+type MovFiltroTipo = "todos" | "Entrada" | "Salida";
 
-interface Movimiento {
-  id: string;
-  producto: string;
-  tipo: MovTipo;
-  cantidad: number;
-  saldo: number;
-  motivo: string;
-  usuario: string;
-  fecha: string;
-  sede: string;
-}
-
-// Generate mock movements from products list for display purposes
-function buildMovimientos(
-  productos: InventarioProducto[],
-  sedeLabel: string
-): Movimiento[] {
-  const motivos: Record<MovTipo, string[]> = {
-    Salida: ["Venta", "Uso interno", "Muestra", "Pérdida"],
-    Entrada: ["Compra", "Ajuste manual", "Transferencia"],
-  };
-
-  return productos.slice(0, 20).flatMap((p, idx) => {
-    const fecha = new Date();
-    fecha.setDate(fecha.getDate() - idx);
-    const tipo: MovTipo = idx % 3 === 0 ? "Entrada" : "Salida";
-    const cantidad = tipo === "Entrada" ? Math.max(1, (idx % 5) + 1) * 5 : Math.max(1, idx % 4) + 1;
-    const saldo = Number(p.stock_actual ?? 0);
-    const motivoList = motivos[tipo];
-    const motivo = motivoList[idx % motivoList.length];
-
-    return [
-      {
-        id: `${p._id}-${idx}`,
-        producto: p.producto_nombre || p.nombre || "Producto",
-        tipo,
-        cantidad,
-        saldo,
-        motivo,
-        usuario: idx % 2 === 0 ? "Admin" : "Recepcionista",
-        fecha: fecha.toISOString(),
-        sede: sedeLabel,
-      },
-    ];
-  });
-}
-
-type MovFiltroTipo = "todos" | "entradas" | "salidas";
-
-export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: MovimientosTabProps) {
+export function InventoryMovimientosTab({ productos, sedeLabel = "Sede", sedeId: sedeIdProp }: MovimientosTabProps) {
+  const { user, activeSedeId } = useAuth();
   const [filtroTipo, setFiltroTipo] = useState<MovFiltroTipo>("todos");
   const [search, setSearch] = useState("");
+  const [filtro, setFiltro] = useState<FiltroTiempo>({ modo: "relativo", dias: 7 });
+  const [page, setPage] = useState(1);
+  const [response, setResponse] = useState<MovimientosResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showEntradaModal, setShowEntradaModal] = useState(false);
   const [showSalidaModal, setShowSalidaModal] = useState(false);
 
-  const movimientos = buildMovimientos(productos, sedeLabel);
+  const fetchMovimientos = () => {
+    const token = resolveToken(user);
+    const sedeId = resolveSedeId(user, activeSedeId, sedeIdProp);
+    if (!token || !sedeId) return;
 
-  const filtered = movimientos.filter((m) => {
-    if (filtroTipo === "entradas" && m.tipo !== "Entrada") return false;
-    if (filtroTipo === "salidas" && m.tipo !== "Salida") return false;
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      return (
-        m.producto.toLowerCase().includes(s) ||
-        m.motivo.toLowerCase().includes(s) ||
-        m.usuario.toLowerCase().includes(s)
-      );
-    }
-    return true;
-  });
+    setLoading(true);
+    setError(null);
+
+    getMovimientos(token, {
+      filtro,
+      tipo: filtroTipo !== "todos" ? filtroTipo : undefined,
+      page,
+      page_size: 20,
+      sede_id: sedeId,
+    })
+      .then(setResponse)
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Error cargando movimientos")
+      )
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchMovimientos();
+  }, [filtroTipo, filtro, page, user, activeSedeId, sedeIdProp]);
+
+  const handleFiltroTipo = (tipo: MovFiltroTipo) => {
+    setFiltroTipo(tipo);
+    setPage(1);
+  };
+
+  const handleDias = (dias: string) => {
+    setFiltro({ modo: "relativo", dias: Number(dias) });
+    setPage(1);
+  };
+
+  const movimientos = response?.data ?? [];
+
+  const filtered = search.trim()
+    ? movimientos.filter((m) => {
+        const s = search.toLowerCase();
+        return (
+          m.producto.toLowerCase().includes(s) ||
+          m.motivo.toLowerCase().includes(s) ||
+          m.usuario.toLowerCase().includes(s)
+        );
+      })
+    : movimientos;
 
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex gap-1.5 flex-wrap">
+        <div className="flex gap-1.5 flex-wrap items-center">
           {(
             [
               { id: "todos", label: "Todos" },
-              { id: "entradas", label: "Entradas" },
-              { id: "salidas", label: "Salidas" },
+              { id: "Entrada", label: "Entradas" },
+              { id: "Salida", label: "Salidas" },
             ] as { id: MovFiltroTipo; label: string }[]
           ).map((f) => (
             <button
               key={f.id}
-              onClick={() => setFiltroTipo(f.id)}
+              onClick={() => handleFiltroTipo(f.id)}
               className={cn(
                 "px-3 py-1.5 rounded-md border text-xs font-medium transition-colors",
                 filtroTipo === f.id
@@ -353,7 +379,24 @@ export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: Movim
               {f.label}
             </button>
           ))}
+
+          <Select
+            value={String(filtro.dias ?? 7)}
+            onValueChange={handleDias}
+          >
+            <SelectTrigger className="h-8 w-36 border-gray-200 bg-white text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-white border-gray-200">
+              {RANGOS_RELATIVOS.map((r) => (
+                <SelectItem key={r.dias} value={String(r.dias)} className="text-xs">
+                  {r.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
+
         <div className="flex gap-2">
           <Button
             size="sm"
@@ -386,6 +429,12 @@ export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: Movim
         />
       </div>
 
+      {error && (
+        <Alert variant="destructive" className="border-gray-300 bg-gray-50 text-gray-800">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
       {/* Table */}
       <Card className="border-gray-200">
         <CardContent className="p-0">
@@ -396,24 +445,26 @@ export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: Movim
                 <TableHead className="text-xs font-semibold text-gray-500">Producto</TableHead>
                 <TableHead className="text-xs font-semibold text-gray-500">Tipo</TableHead>
                 <TableHead className="text-xs font-semibold text-gray-500">Motivo</TableHead>
-                <TableHead className="text-xs font-semibold text-gray-500 text-center">
-                  Cantidad
-                </TableHead>
-                <TableHead className="text-xs font-semibold text-gray-500 text-center">
-                  Saldo
-                </TableHead>
+                <TableHead className="text-xs font-semibold text-gray-500 text-center">Cantidad</TableHead>
+                <TableHead className="text-xs font-semibold text-gray-500 text-center">Saldo</TableHead>
                 <TableHead className="text-xs font-semibold text-gray-500">Usuario</TableHead>
                 <TableHead className="text-xs font-semibold text-gray-500">Fecha</TableHead>
                 <TableHead className="text-xs font-semibold text-gray-500">Sede</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
+              {loading ? (
                 <TableRow>
-                  <TableCell
-                    colSpan={9}
-                    className="py-10 text-center text-sm text-gray-400"
-                  >
+                  <TableCell colSpan={9} className="py-10 text-center text-sm text-gray-400">
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Cargando movimientos...
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} className="py-10 text-center text-sm text-gray-400">
                     No hay movimientos para mostrar
                   </TableCell>
                 </TableRow>
@@ -429,9 +480,7 @@ export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: Movim
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="font-medium text-gray-800 py-2.5">
-                      {m.producto}
-                    </TableCell>
+                    <TableCell className="font-medium text-gray-800 py-2.5">{m.producto}</TableCell>
                     <TableCell className="py-2.5">
                       <Badge
                         variant="outline"
@@ -447,9 +496,7 @@ export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: Movim
                     </TableCell>
                     <TableCell className="text-sm text-gray-600 py-2.5">{m.motivo}</TableCell>
                     <TableCell className="text-center font-semibold text-sm py-2.5">
-                      <span
-                        className={m.tipo === "Entrada" ? "text-emerald-600" : "text-red-600"}
-                      >
+                      <span className={m.tipo === "Entrada" ? "text-emerald-600" : "text-red-600"}>
                         {m.tipo === "Entrada" ? "+" : "-"}
                         {m.cantidad}
                       </span>
@@ -460,19 +507,45 @@ export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: Movim
                       </span>
                     </TableCell>
                     <TableCell className="text-xs text-gray-400 py-2.5">{m.usuario}</TableCell>
-                    <TableCell className="text-xs text-gray-400 py-2.5">
-                      {formatDate(m.fecha)}
-                    </TableCell>
+                    <TableCell className="text-xs text-gray-400 py-2.5">{formatDate(m.fecha)}</TableCell>
                     <TableCell className="text-xs text-gray-400 py-2.5">{m.sede}</TableCell>
                   </TableRow>
                 ))
               )}
             </TableBody>
           </Table>
+
+          {/* Pagination */}
+          {response && response.total_pages > 1 && (
+            <div className="flex items-center justify-between border-t border-gray-200 px-4 py-3 text-sm text-gray-600">
+              <span>
+                Página {response.page} de {response.total_pages} · {response.total} movimientos
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!response.tiene_anterior}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!response.tiene_siguiente}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Siguiente
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Entrada modal */}
       {showEntradaModal && (
         <MovimientoModal
           titulo="Registrar entrada"
@@ -480,10 +553,13 @@ export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: Movim
           productos={productos}
           tipo="Entrada"
           onClose={() => setShowEntradaModal(false)}
+          onSuccess={() => {
+            setShowEntradaModal(false);
+            fetchMovimientos();
+          }}
         />
       )}
 
-      {/* Salida modal */}
       {showSalidaModal && (
         <MovimientoModal
           titulo="Registrar salida"
@@ -491,6 +567,10 @@ export function InventoryMovimientosTab({ productos, sedeLabel = "Sede" }: Movim
           productos={productos}
           tipo="Salida"
           onClose={() => setShowSalidaModal(false)}
+          onSuccess={() => {
+            setShowSalidaModal(false);
+            fetchMovimientos();
+          }}
         />
       )}
     </div>
@@ -503,17 +583,22 @@ function MovimientoModal({
   productos,
   tipo,
   onClose,
+  onSuccess,
 }: {
   titulo: string;
   descripcion: string;
   productos: InventarioProducto[];
-  tipo: MovTipo;
+  tipo: "Entrada" | "Salida";
   onClose: () => void;
+  onSuccess: () => void;
 }) {
+  const { user, activeSedeId } = useAuth();
   const [selectedProductId, setSelectedProductId] = useState("");
   const [cantidad, setCantidad] = useState("");
   const [motivo, setMotivo] = useState("");
   const [observaciones, setObservaciones] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const selectedProduct = productos.find(
     (p) => p._id === selectedProductId || p.producto_id === selectedProductId
@@ -527,6 +612,37 @@ function MovimientoModal({
   const motivosSalida = ["Venta", "Uso interno", "Obsequio", "Muestra", "Pérdida", "Ajuste manual"];
   const motivosEntrada = ["Compra a proveedor", "Ajuste manual", "Devolución cliente", "Transferencia", "Stock inicial"];
 
+  const handleConfirm = async () => {
+    const token = resolveToken(user);
+    if (!token) { setError("No se encontró token de autenticación"); return; }
+    if (!selectedProduct) { setError("Selecciona un producto"); return; }
+    if (cantidadNum <= 0) { setError("La cantidad debe ser mayor a 0"); return; }
+    if (!motivo) { setError("Selecciona un motivo"); return; }
+
+    const sedeId = resolveSedeId(user, activeSedeId);
+    const body = {
+      motivo,
+      ...(sedeId ? { sede_id: sedeId } : {}),
+      ...(observaciones.trim() ? { observaciones: observaciones.trim() } : {}),
+      items: [{ producto_id: selectedProduct.producto_id, cantidad: cantidadNum }],
+    };
+
+    setSaving(true);
+    setError(null);
+    try {
+      if (tipo === "Entrada") {
+        await crearEntrada(token, body);
+      } else {
+        await crearSalida(token, body);
+      }
+      onSuccess();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Error al registrar movimiento");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/35"
@@ -536,21 +652,16 @@ function MovimientoModal({
         className="w-full max-w-md rounded-2xl bg-white shadow-2xl p-6 mx-4"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-start justify-between mb-5">
           <div>
             <h2 className="text-lg font-bold text-gray-900">{titulo}</h2>
             <p className="text-xs text-gray-400 mt-0.5">{descripcion}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-          >
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Product selector */}
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1.5">Producto</label>
@@ -580,15 +691,8 @@ function MovimientoModal({
               </div>
               <div className="text-right">
                 <p className="text-[10px] text-gray-400">Stock actual</p>
-                <span
-                  className={cn(
-                    "flex items-center gap-1 text-sm font-semibold",
-                    stockColor(stockActual, stockMinimo)
-                  )}
-                >
-                  <span
-                    className={cn("w-1.5 h-1.5 rounded-full", stockDot(stockActual, stockMinimo))}
-                  />
+                <span className={cn("flex items-center gap-1 text-sm font-semibold", stockColor(stockActual, stockMinimo))}>
+                  <span className={cn("w-1.5 h-1.5 rounded-full", stockDot(stockActual, stockMinimo))} />
                   {stockActual}
                 </span>
               </div>
@@ -615,9 +719,7 @@ function MovimientoModal({
                 </SelectTrigger>
                 <SelectContent className="bg-white border-gray-200">
                   {(tipo === "Salida" ? motivosSalida : motivosEntrada).map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
+                    <SelectItem key={m} value={m}>{m}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -645,20 +747,25 @@ function MovimientoModal({
             </div>
           )}
 
+          {error && <p className="text-xs text-red-600">{error}</p>}
+
           <div className="flex justify-end gap-2 pt-1 border-t border-gray-100">
             <Button
               variant="outline"
               size="sm"
               className="border-gray-200 text-gray-600 text-xs"
               onClick={onClose}
+              disabled={saving}
             >
               Cancelar
             </Button>
             <Button
               size="sm"
               className="bg-gray-900 text-white hover:bg-gray-800 text-xs"
-              onClick={onClose}
+              onClick={handleConfirm}
+              disabled={saving}
             >
+              {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
               Confirmar {tipo === "Entrada" ? "entrada" : "salida"}
             </Button>
           </div>
@@ -672,88 +779,63 @@ function MovimientoModal({
 
 interface KardexTabProps {
   productos: InventarioProducto[];
-}
-
-interface KardexRow {
-  fecha: string;
-  tipo: string;
-  referencia: string;
-  entrada?: number;
-  salida?: number;
-  saldo: number;
-  usuario: string;
-}
-
-function buildKardex(producto: InventarioProducto): KardexRow[] {
-  const stock = Number(producto.stock_actual ?? 0);
-  const rows: KardexRow[] = [
-    {
-      fecha: new Date(Date.now() - 1 * 86400000).toISOString(),
-      tipo: "Venta",
-      referencia: "Venta #1892",
-      salida: 2,
-      saldo: stock,
-      usuario: "Recepcionista",
-    },
-    {
-      fecha: new Date(Date.now() - 2 * 86400000).toISOString(),
-      tipo: "Venta",
-      referencia: "Venta #1887",
-      salida: 1,
-      saldo: stock + 2,
-      usuario: "Recepcionista",
-    },
-    {
-      fecha: new Date(Date.now() - 4 * 86400000).toISOString(),
-      tipo: "Compra",
-      referencia: "OC #0234",
-      entrada: 12,
-      saldo: stock + 3,
-      usuario: "Admin",
-    },
-    {
-      fecha: new Date(Date.now() - 6 * 86400000).toISOString(),
-      tipo: "Uso interno",
-      referencia: "Servicio",
-      salida: 2,
-      saldo: stock + 3 - 12,
-      usuario: "Estilista",
-    },
-    {
-      fecha: new Date(Date.now() - 11 * 86400000).toISOString(),
-      tipo: "Compra",
-      referencia: "OC #0228",
-      entrada: 20,
-      saldo: stock + 3 - 12 + 2,
-      usuario: "Admin",
-    },
-    {
-      fecha: new Date(Date.now() - 13 * 86400000).toISOString(),
-      tipo: "Stock inicial",
-      referencia: "Apertura",
-      saldo: stock + 3 - 12 + 2 - 20,
-      usuario: "Sistema",
-    },
-  ];
-  return rows;
+  sedeId?: string;
 }
 
 const kardexTypeBadge = (tipo: string) => {
-  if (tipo === "Venta" || tipo === "Uso interno") {
-    return "border-red-200 bg-red-50 text-red-700";
-  }
-  if (tipo === "Compra" || tipo === "Stock inicial") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  }
+  if (tipo === "Salida") return "border-red-200 bg-red-50 text-red-700";
+  if (tipo === "Entrada") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   return "border-gray-200 bg-gray-50 text-gray-600";
 };
 
-export function InventoryKardexTab({ productos }: KardexTabProps) {
+export function InventoryKardexTab({ productos, sedeId: sedeIdProp }: KardexTabProps) {
+  const { user, activeSedeId } = useAuth();
   const [selectedId, setSelectedId] = useState(productos[0]?._id ?? "");
   const [search, setSearch] = useState("");
+  const [filtro, setFiltro] = useState<FiltroTiempo>({ modo: "relativo", dias: 30 });
+  const [page, setPage] = useState(1);
+  const [response, setResponse] = useState<MovimientosResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const selectedProduct = productos.find((p) => p._id === selectedId);
-  const kardex = selectedProduct ? buildKardex(selectedProduct) : [];
+
+  useEffect(() => {
+    if (!selectedProduct) return;
+    const token = resolveToken(user);
+    const sedeId = resolveSedeId(user, activeSedeId, sedeIdProp);
+    if (!token || !sedeId) return;
+
+    setLoading(true);
+    setError(null);
+
+    getMovimientos(token, {
+      filtro,
+      producto_id: selectedProduct.producto_id,
+      page,
+      page_size: 20,
+      sede_id: sedeId,
+    })
+      .then(setResponse)
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Error cargando kardex")
+      )
+      .finally(() => setLoading(false));
+  }, [selectedId, filtro, page, user, activeSedeId, sedeIdProp]);
+
+  const handleSelectProduct = (id: string) => {
+    setSelectedId(id);
+    setPage(1);
+  };
+
+  const handleDias = (dias: string) => {
+    setFiltro({ modo: "relativo", dias: Number(dias) });
+    setPage(1);
+  };
+
+  const movimientos: Movimiento[] = response?.data ?? [];
+  const stockActual = Number(selectedProduct?.stock_actual ?? 0);
+  const stockMinimo = Number(selectedProduct?.stock_minimo ?? 0);
 
   const filteredProductos = productos.filter((p) => {
     if (!search.trim()) return true;
@@ -764,12 +846,9 @@ export function InventoryKardexTab({ productos }: KardexTabProps) {
     );
   });
 
-  const stockActual = Number(selectedProduct?.stock_actual ?? 0);
-  const stockMinimo = Number(selectedProduct?.stock_minimo ?? 0);
-
   return (
     <div className="space-y-4">
-      {/* Product search */}
+      {/* Product + period selectors */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -780,7 +859,7 @@ export function InventoryKardexTab({ productos }: KardexTabProps) {
             className="pl-9 border-gray-200 bg-white text-sm"
           />
         </div>
-        <Select value={selectedId} onValueChange={setSelectedId}>
+        <Select value={selectedId} onValueChange={handleSelectProduct}>
           <SelectTrigger className="border-gray-200 bg-white text-sm w-full sm:w-72">
             <SelectValue placeholder="Seleccionar producto" />
           </SelectTrigger>
@@ -788,6 +867,18 @@ export function InventoryKardexTab({ productos }: KardexTabProps) {
             {filteredProductos.map((p) => (
               <SelectItem key={p._id} value={p._id}>
                 {p.producto_nombre || p.nombre}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={String(filtro.dias ?? 30)} onValueChange={handleDias}>
+          <SelectTrigger className="border-gray-200 bg-white text-sm w-full sm:w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-white border-gray-200">
+            {RANGOS_RELATIVOS.map((r) => (
+              <SelectItem key={r.dias} value={String(r.dias)} className="text-xs">
+                {r.label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -809,15 +900,8 @@ export function InventoryKardexTab({ productos }: KardexTabProps) {
             <div className="flex gap-6">
               <div className="text-center">
                 <p className="text-[10px] uppercase tracking-wide text-gray-400">Stock actual</p>
-                <span
-                  className={cn(
-                    "flex items-center gap-1.5 mt-1 text-sm font-bold justify-center",
-                    stockColor(stockActual, stockMinimo)
-                  )}
-                >
-                  <span
-                    className={cn("w-2 h-2 rounded-full", stockDot(stockActual, stockMinimo))}
-                  />
+                <span className={cn("flex items-center gap-1.5 mt-1 text-sm font-bold justify-center", stockColor(stockActual, stockMinimo))}>
+                  <span className={cn("w-2 h-2 rounded-full", stockDot(stockActual, stockMinimo))} />
                   {stockActual}
                 </span>
               </div>
@@ -834,6 +918,12 @@ export function InventoryKardexTab({ productos }: KardexTabProps) {
             </div>
           </div>
 
+          {error && (
+            <Alert variant="destructive" className="border-gray-300 bg-gray-50 text-gray-800">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
           {/* Kardex table */}
           <Card className="border-gray-200">
             <CardContent className="p-0">
@@ -841,51 +931,89 @@ export function InventoryKardexTab({ productos }: KardexTabProps) {
                 <TableHeader className="bg-gray-50">
                   <TableRow>
                     <TableHead className="text-xs font-semibold text-gray-500">Fecha</TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-500">Tipo</TableHead>
                     <TableHead className="text-xs font-semibold text-gray-500">Motivo</TableHead>
-                    <TableHead className="text-xs font-semibold text-gray-500">Referencia</TableHead>
-                    <TableHead className="text-xs font-semibold text-gray-500 text-center">
-                      Entrada
-                    </TableHead>
-                    <TableHead className="text-xs font-semibold text-gray-500 text-center">
-                      Salida
-                    </TableHead>
-                    <TableHead className="text-xs font-semibold text-gray-500 text-center">
-                      Saldo
-                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-500 text-center">Entrada</TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-500 text-center">Salida</TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-500 text-center">Saldo</TableHead>
                     <TableHead className="text-xs font-semibold text-gray-500">Usuario</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {kardex.map((row, i) => (
-                    <TableRow key={i} className="hover:bg-gray-50">
-                      <TableCell className="text-xs text-gray-500 py-3">
-                        {formatDate(row.fecha)}
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="py-10 text-center text-sm text-gray-400">
+                        <div className="flex items-center justify-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Cargando kardex...
+                        </div>
                       </TableCell>
-                      <TableCell className="py-3">
-                        <Badge
-                          variant="outline"
-                          className={cn("text-[11px] font-medium", kardexTypeBadge(row.tipo))}
-                        >
-                          {row.tipo}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-gray-400 py-3">{row.referencia}</TableCell>
-                      <TableCell className="text-center text-sm font-semibold text-emerald-600 py-3">
-                        {row.entrada !== undefined ? `+${row.entrada}` : <span className="text-gray-300">—</span>}
-                      </TableCell>
-                      <TableCell className="text-center text-sm font-semibold text-red-600 py-3">
-                        {row.salida !== undefined ? `-${row.salida}` : <span className="text-gray-300">—</span>}
-                      </TableCell>
-                      <TableCell className="text-center py-3">
-                        <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-700">
-                          {row.saldo}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-xs text-gray-400 py-3">{row.usuario}</TableCell>
                     </TableRow>
-                  ))}
+                  ) : movimientos.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="py-10 text-center text-sm text-gray-400">
+                        Sin movimientos en el período seleccionado
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    movimientos.map((m) => (
+                      <TableRow key={m.id} className="hover:bg-gray-50">
+                        <TableCell className="text-xs text-gray-500 py-3">{formatDate(m.fecha)}</TableCell>
+                        <TableCell className="py-3">
+                          <Badge
+                            variant="outline"
+                            className={cn("text-[11px] font-medium", kardexTypeBadge(m.tipo))}
+                          >
+                            {m.tipo}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-gray-600 py-3">{m.motivo}</TableCell>
+                        <TableCell className="text-center text-sm font-semibold text-emerald-600 py-3">
+                          {m.tipo === "Entrada" ? `+${m.cantidad}` : <span className="text-gray-300">—</span>}
+                        </TableCell>
+                        <TableCell className="text-center text-sm font-semibold text-red-600 py-3">
+                          {m.tipo === "Salida" ? `-${m.cantidad}` : <span className="text-gray-300">—</span>}
+                        </TableCell>
+                        <TableCell className="text-center py-3">
+                          <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-700">
+                            {m.saldo}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-xs text-gray-400 py-3">{m.usuario}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
                 </TableBody>
               </Table>
+
+              {/* Pagination */}
+              {response && response.total_pages > 1 && (
+                <div className="flex items-center justify-between border-t border-gray-200 px-4 py-3 text-sm text-gray-600">
+                  <span>
+                    Página {response.page} de {response.total_pages} · {response.total} movimientos
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!response.tiene_anterior}
+                      onClick={() => setPage((p) => p - 1)}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Anterior
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!response.tiene_siguiente}
+                      onClick={() => setPage((p) => p + 1)}
+                    >
+                      Siguiente
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </>

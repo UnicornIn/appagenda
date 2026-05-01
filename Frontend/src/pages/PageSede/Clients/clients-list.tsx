@@ -1,520 +1,288 @@
-// components/ClientsList.tsx
 "use client"
-import { memo, useCallback, useMemo, useState } from 'react'
-import { 
-  Search, 
-  Plus, 
-  User, 
-  ChevronLeft, 
-  ChevronRight, 
-  Loader2,
-  X
-} from 'lucide-react'
-import { Button } from "../../../components/ui/button"
-import { Input } from "../../../components/ui/input"
-import { Badge } from "../../../components/ui/badge"
-import { PageHeader } from "../../../components/Layout/PageHeader"
+import { memo, useCallback, useMemo, useState, CSSProperties } from 'react'
+import { Search, Plus, ChevronLeft, ChevronRight, Loader2, X } from 'lucide-react'
 import type { Cliente } from "../../../types/cliente"
-import { getLastVisitLabel, type RankedClient } from "../../../lib/client-search"
 
 interface ClientsListProps {
   onSelectClient: (client: Cliente) => void
   onAddClient: () => void
   clientes: Cliente[]
+  selectedId?: string
   metadata?: {
-    total: number;
-    pagina: number;
-    limite: number;
-    total_paginas: number;
-    tiene_siguiente: boolean;
-    tiene_anterior: boolean;
+    total: number
+    pagina: number
+    limite: number
+    total_paginas: number
+    tiene_siguiente: boolean
+    tiene_anterior: boolean
   }
   error?: string | null
   isFetching?: boolean
+  isInitialLoading?: boolean
   onPageChange?: (page: number, filtro?: string) => void
   onSearch?: (filtro: string) => void
   searchValue: string
-  smartResults?: RankedClient[]
-  smartLoading?: boolean
-  smartError?: string | null
+  sedeName?: string
 }
 
-interface TableColumn {
-  key: string
-  label: string
-  className: string
+type FilterType = 'Todos' | 'Inactivos 180d+' | 'Nuevos' 
+
+const fmt = (n: number) => "$" + Math.round(n).toLocaleString("es-CO")
+const ini = (n: string) =>
+  n.split(" ").map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase()
+
+const S: Record<string, CSSProperties> = {
+  shell: {
+    width: '420px', borderRight: '1px solid #E2E8F0',
+    display: 'flex', flexDirection: 'column', flexShrink: 0,
+    height: '100%', overflow: 'hidden',
+    fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif",
+  },
+  header: { padding: '20px 20px 0' },
+  h1: { fontSize: '20px', fontWeight: 700, letterSpacing: '-.3px', color: '#1E293B', margin: 0 },
+  sub: { fontSize: '12px', color: '#64748B', marginTop: '2px' },
+  searchWrap: { margin: '14px 20px 0', position: 'relative' },
+  searchIcon: { position: 'absolute', left: '12px', top: '11px', color: '#94A3B8', width: '15px', height: '15px', pointerEvents: 'none' },
+  searchInput: {
+    width: '100%', padding: '10px 36px 10px 36px',
+    border: '1px solid #E2E8F0', borderRadius: '8px',
+    fontSize: '13px', background: '#F8FAFC', outline: 'none',
+    fontFamily: 'inherit', color: '#1E293B', boxSizing: 'border-box',
+  },
+  clearBtn: {
+    position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+    background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', padding: 0,
+  },
+  filtersRow: { display: 'flex', gap: '4px', padding: '10px 20px', flexWrap: 'wrap' },
+  count: {
+    padding: '4px 20px', fontSize: '10px', color: '#94A3B8',
+    fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px',
+    display: 'flex', alignItems: 'center', gap: '8px',
+  },
+  listScroll: { flex: 1, overflowY: 'auto' as const },
+  row: (selected: boolean): CSSProperties => ({
+    display: 'flex', alignItems: 'center', padding: '10px 20px',
+    cursor: 'pointer', gap: '10px', transition: 'background .1s',
+    borderLeft: selected ? '3px solid #1E293B' : '3px solid transparent',
+    background: selected ? '#F1F5F9' : 'transparent',
+  }),
+  avatar: {
+    width: '36px', height: '36px', borderRadius: '50%', background: '#1E293B',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '11px', fontWeight: 700, color: '#fff', flexShrink: 0,
+  },
+  clInfo: { flex: 1, minWidth: 0 },
+  clName: { fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: '#1E293B' },
+  clMeta: { fontSize: '10px', color: '#64748B', marginTop: '1px', display: 'flex', gap: '8px' },
+  clRight: { textAlign: 'right', flexShrink: 0 },
+  clLtv: { fontSize: '12px', fontWeight: 700, color: '#1E293B' },
+  clLast: { fontSize: '9px', color: '#94A3B8' },
+  pagination: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '8px 20px', borderTop: '1px solid #E2E8F0',
+    fontSize: '11px', color: '#64748B',
+  },
+  pgBtn: (enabled: boolean): CSSProperties => ({
+    background: 'none', border: '1px solid #E2E8F0', borderRadius: '6px',
+    padding: '4px 8px', cursor: enabled ? 'pointer' : 'default',
+    color: enabled ? '#64748B' : '#CBD5E1', fontFamily: 'inherit',
+    display: 'flex', alignItems: 'center',
+  }),
+  addBtn: {
+    width: '100%', padding: '8px', border: '1px dashed #E2E8F0', borderRadius: '8px',
+    fontSize: '12px', color: '#94A3B8', cursor: 'pointer', background: 'none',
+    fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+  },
+  addWrap: { padding: '12px 20px' },
+  skeletonRow: { display: 'flex', alignItems: 'center', padding: '10px 20px', gap: '10px' },
+  skeletonCircle: { width: '36px', height: '36px', borderRadius: '50%', background: '#E2E8F0', flexShrink: 0 },
+  skeletonLine: (w: string, h: string, mb?: string): CSSProperties => ({
+    height: h, background: '#E2E8F0', borderRadius: '4px', width: w, marginBottom: mb,
+  }),
 }
 
 interface ClientRowProps {
   cliente: Cliente
-  onSelectClient: (client: Cliente) => void
+  selected: boolean
+  onSelect: (c: Cliente) => void
 }
 
-const formatTableValue = (value?: string) => {
-  if (!value || value === "No disponible") return "—"
-  return value
-}
-
-const formatCedula = (cedula?: string) => {
-  const value = cedula?.trim()
-  return value ? value : "—"
-}
-
-const ClientRow = memo(function ClientRow({ cliente, onSelectClient }: ClientRowProps) {
-  const handleSelect = useCallback(() => {
-    onSelectClient(cliente)
-  }, [cliente, onSelectClient])
+const ClientRow = memo(function ClientRow({ cliente, selected, onSelect }: ClientRowProps) {
+  const handleClick = useCallback(() => onSelect(cliente), [cliente, onSelect])
+  const daysSince = cliente.diasSinVenir ?? 0
 
   return (
-    <tr
-      onClick={handleSelect}
-      className="border-b border-gray-50 last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors"
+    <div
+      onClick={handleClick}
+      style={S.row(selected)}
+      onMouseEnter={e => { if (!selected) e.currentTarget.style.background = '#F8FAFC' }}
+      onMouseLeave={e => { if (!selected) e.currentTarget.style.background = 'transparent' }}
     >
-      <td className="px-3 py-2">
-        <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-700">
-            {cliente.nombre.charAt(0).toUpperCase()}
-          </div>
-          <div>
-            <div className="font-medium text-gray-900">{cliente.nombre}</div>
-          </div>
+      <div style={S.avatar}>{ini(cliente.nombre)}</div>
+      <div style={S.clInfo}>
+        <div style={S.clName}>{cliente.nombre}</div>
+        <div style={S.clMeta}>
+          {cliente.historialCitas.length > 0 && (
+            <span>{cliente.historialCitas.length} visitas</span>
+          )}
+          <span>{daysSince === 0 ? 'Hoy' : `${daysSince}d sin venir`}</span>
         </div>
-      </td>
-      <td className="px-3 py-2 text-gray-600">{formatTableValue(cliente.telefono)}</td>
-      <td className="px-3 py-2 text-gray-600">{formatTableValue(cliente.email)}</td>
-      <td className="px-3 py-2 text-gray-600">{formatCedula(cliente.cedula)}</td>
-    </tr>
+      </div>
+      <div style={S.clRight}>
+        <div style={S.clLtv}>{fmt(cliente.ltv)}</div>
+        <div style={S.clLast}>{cliente.ultima_visita ?? '—'}</div>
+      </div>
+    </div>
   )
 })
 
-function ClientsListComponent({ 
-  onSelectClient, 
-  onAddClient, 
-  clientes, 
-  metadata,
-  error, 
-  isFetching = false,
-  onPageChange,
-  onSearch,
-  searchValue,
-  smartResults = [],
-  smartLoading = false,
-  smartError = null,
+function ClientsListComponent({
+  onSelectClient, onAddClient, clientes, selectedId,
+  metadata, error, isFetching = false, isInitialLoading = false,
+  onPageChange, onSearch, searchValue, sedeName = 'RF',
 }: ClientsListProps) {
+  const [activeFilter, setActiveFilter] = useState<FilterType>('Todos')
+
   const totalPages = metadata?.total_paginas ?? 1
   const currentPage = metadata?.pagina ?? 1
-  const [isFocused, setIsFocused] = useState(false)
+  const tieneAnterior = metadata?.tiene_anterior ?? currentPage > 1
+  const tieneSiguiente = metadata?.tiene_siguiente ?? currentPage < totalPages
+  const clientCount = metadata?.total ?? clientes.length
 
-  const tableColumns = useMemo<TableColumn[]>(
-    () => [
-      {
-        key: "nombre",
-        label: "Nombre",
-        className: "px-3 py-2 text-left font-medium text-gray-700 text-xs",
-      },
-      {
-        key: "telefono",
-        label: "Teléfono",
-        className: "px-3 py-2 text-left font-medium text-gray-700 text-xs",
-      },
-      {
-        key: "email",
-        label: "Email",
-        className: "px-3 py-2 text-left font-medium text-gray-700 text-xs",
-      },
-      {
-        key: "cedula",
-        label: "Cédula",
-        className: "px-3 py-2 text-left font-medium text-gray-700 text-xs",
-      },
-    ],
-    []
-  )
-
-  const pageNumbers = useMemo(() => {
-    const maxVisiblePages = Math.min(5, totalPages)
-    return Array.from({ length: maxVisiblePages }, (_, i) => {
-      if (totalPages <= 5) {
-        return i + 1
-      }
-      if (currentPage <= 3) {
-        return i + 1
-      }
-      if (currentPage >= totalPages - 2) {
-        return totalPages - 4 + i
-      }
-      return currentPage - 2 + i
-    })
-  }, [currentPage, totalPages])
-
-  const shouldShowLastPageShortcut =
-    totalPages > 5 && currentPage < totalPages - 2
-
-  const showSuggestions = isFocused && Boolean(searchValue.trim())
-  const suggestions = useMemo(() => smartResults.slice(0, 8), [smartResults])
-
-  const highlight = useCallback((text: string, query: string) => {
-    if (!text) return "—"
-    const cleanQuery = query.trim()
-    if (!cleanQuery) return text
-    const lowerText = text.toLowerCase()
-    const lowerQuery = cleanQuery.toLowerCase()
-    const index = lowerText.indexOf(lowerQuery)
-    if (index === -1) return text
-    return (
-      <>
-        {text.slice(0, index)}
-        <span className="bg-yellow-100 text-gray-900">{text.slice(index, index + cleanQuery.length)}</span>
-        {text.slice(index + cleanQuery.length)}
-      </>
-    )
-  }, [])
-
-  const handleSelectSuggestion = useCallback((cliente: Cliente) => {
-    onSelectClient(cliente)
-    if (cliente.nombre) {
-      onSearch?.(cliente.nombre)
-    }
-    setIsFocused(false)
-  }, [onSearch, onSelectClient])
-
-  const clearSearch = useCallback(() => {
-    onSearch?.("")
-  }, [onSearch])
-
-  const handleSearchChange = useCallback((value: string) => {
-    onSearch?.(value)
-  }, [onSearch])
-
-  const handleFocus = useCallback(() => setIsFocused(true), [])
-  const handleBlur = useCallback(() => {
-    // damos tiempo a los clicks en sugerencias antes de cerrar
-    setTimeout(() => setIsFocused(false), 120)
-  }, [])
-
-  const handleRetry = useCallback(() => {
-    onPageChange?.(1, searchValue)
-  }, [onPageChange, searchValue])
-
-  // Manejar cambio de página
   const handlePageChange = useCallback((page: number) => {
-    if (!onPageChange) return
-    const nextPage = Math.max(1, Math.min(page, totalPages))
-    onPageChange(nextPage, searchValue)
+    onPageChange?.(Math.max(1, Math.min(page, totalPages)), searchValue)
   }, [onPageChange, searchValue, totalPages])
 
-  const goToPreviousPage = useCallback(() => {
-    if (metadata?.tiene_anterior && currentPage > 1) {
-      handlePageChange(currentPage - 1)
-    }
-  }, [metadata?.tiene_anterior, currentPage, handlePageChange])
+  const handleSearchChange = useCallback((v: string) => onSearch?.(v), [onSearch])
+  const clearSearch = useCallback(() => onSearch?.(""), [onSearch])
 
-  const goToNextPage = useCallback(() => {
-    if (metadata?.tiene_siguiente && currentPage < totalPages) {
-      handlePageChange(currentPage + 1)
-    }
-  }, [metadata?.tiene_siguiente, currentPage, totalPages, handlePageChange])
+  const rows = useMemo(() => clientes.map(c => (
+    <ClientRow key={c.id} cliente={c} selected={c.id === selectedId} onSelect={onSelectClient} />
+  )), [clientes, selectedId, onSelectClient])
 
-  const goToPage = useCallback((page: number) => {
-    if (page >= 1 && page <= totalPages) {
-      handlePageChange(page)
-    }
-  }, [handlePageChange, totalPages])
-
-  const clientRows = useMemo(() => {
-    return clientes.map((cliente) => (
-      <ClientRow
-        key={cliente.id}
-        cliente={cliente}
-        onSelectClient={onSelectClient}
-      />
-    ))
-  }, [clientes, onSelectClient])
-
-  if (error && clientes.length === 0) {
+  const filterBtn = (f: FilterType) => {
+    const active = activeFilter === f
     return (
-      <div className="flex h-full flex-col items-center justify-center p-4">
-        <div className="text-center">
-          <div className="text-sm text-gray-600 mb-2">Error al cargar clientes</div>
-          <p className="text-xs text-gray-500 mb-3">{error}</p>
-          {onPageChange && (
-            <Button 
-              onClick={handleRetry}
-              variant="outline"
-              className="text-xs border-gray-300 text-gray-700 hover:bg-gray-50"
-            >
-              Reintentar
-            </Button>
-          )}
-        </div>
-      </div>
+      <button
+        key={f}
+        onClick={() => setActiveFilter(f)}
+        style={{
+          padding: '5px 10px',
+          border: `1px solid ${active ? '#1E293B' : '#E2E8F0'}`,
+          borderRadius: '16px', fontSize: '10px',
+          color: active ? '#fff' : '#64748B',
+          fontWeight: 500, cursor: 'pointer',
+          background: active ? '#1E293B' : 'transparent',
+          fontFamily: 'inherit',
+        }}
+      >
+        {f}
+      </button>
     )
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div style={S.shell}>
       {/* Header */}
-      <div className="border-b border-gray-100 px-4 py-3">
-        <PageHeader
-          title="Clientes"
-          subtitle={metadata ? `${metadata.total} clientes` : `${clientes.length} clientes`}
-          actions={
-            <Button
-              onClick={onAddClient}
-              size="sm"
-              className="bg-gray-900 text-white hover:bg-gray-800"
-            >
-              <Plus className="h-3 w-3 mr-1" />
-              <span className="text-xs">Nuevo</span>
-            </Button>
-          }
-          className="mb-3"
+      <div style={S.header}>
+        <h1 style={S.h1}>Clientes</h1>
+        <div style={S.sub}>Base de datos · {sedeName}</div>
+      </div>
+
+      {/* Search */}
+      <div style={S.searchWrap}>
+        <Search style={S.searchIcon} />
+        <input
+          placeholder="Buscar por nombre, teléfono o email..."
+          value={searchValue}
+          onChange={e => handleSearchChange(e.target.value)}
+          style={S.searchInput}
+          onFocus={e => { e.target.style.borderColor = '#1E293B'; e.target.style.background = '#FFF' }}
+          onBlur={e => { e.target.style.borderColor = '#E2E8F0'; e.target.style.background = '#F8FAFC' }}
         />
-        
-        {/* Filtros */}
-        <div className="space-y-2">
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-            <Input
-              placeholder="Buscar por nombre, email, teléfono o cédula..."
-              value={searchValue}
-              onChange={(e) => handleSearchChange(e.target.value)}
-              onFocus={handleFocus}
-              onBlur={handleBlur}
-              className="pl-9 h-8 text-sm border-gray-300"
-            />
-            {searchValue && (
-              <button
-                onClick={clearSearch}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-
-            {showSuggestions && (
-              <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-lg border border-gray-200 bg-white shadow-xl">
-                {smartLoading && (
-                  <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
-                    <span>Buscando clientes...</span>
-                  </div>
-                )}
-
-                {!smartLoading && smartError && (
-                  <div className="px-3 py-2 text-xs text-red-600">No se pudo buscar: {smartError}</div>
-                )}
-
-                {!smartLoading && !smartError && suggestions.length === 0 && (
-                  <div className="px-3 py-2 text-xs text-gray-500">Sin resultados</div>
-                )}
-
-                {suggestions.length > 0 && (
-                  <div className="max-h-72 overflow-auto divide-y divide-gray-100">
-                    {suggestions.map((result) => {
-                      const cliente = result.cliente
-                      const avatar =
-                        (cliente as any).foto ||
-                        (cliente as any).foto_url ||
-                        (cliente as any).imagen ||
-                        (cliente as any).image_url
-                      const initial = cliente.nombre?.charAt(0)?.toUpperCase() || "C"
-                      return (
-                        <button
-                          key={cliente.id}
-                          type="button"
-                          className="w-full px-3 py-2 text-left hover:bg-gray-50 active:bg-gray-100 transition-colors"
-                          onMouseDown={(e) => {
-                            e.preventDefault()
-                            handleSelectSuggestion(cliente)
-                          }}
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden">
-                              {avatar ? (
-                                <img src={avatar} alt={cliente.nombre} className="h-full w-full object-cover" />
-                              ) : (
-                                <span className="text-sm font-semibold text-gray-700">{initial}</span>
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="font-semibold text-gray-900 text-sm truncate">
-                                  {highlight(cliente.nombre, searchValue)}
-                                </div>
-                                <span className="text-[11px] text-gray-500 whitespace-nowrap">
-                                  {getLastVisitLabel(cliente)}
-                                </span>
-                              </div>
-                              <div className="text-xs text-gray-600 flex flex-wrap gap-2">
-                                <span className="truncate max-w-[140px]">{highlight(cliente.telefono || "—", searchValue)}</span>
-                                <span className="truncate max-w-[120px]">{highlight(cliente.cedula || "—", searchValue)}</span>
-                                {cliente.email && (
-                                  <span className="truncate max-w-[140px] text-gray-500">
-                                    {highlight(cliente.email, searchValue)}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Badges de filtros activos */}
         {searchValue && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            <Badge variant="secondary" className="text-xs">
-              Buscando: "{searchValue}"
-            </Badge>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-5 px-2 text-xs text-gray-500 hover:text-gray-700"
-              onClick={clearSearch}
-            >
-              Limpiar filtro
-            </Button>
-          </div>
-        )}
-
-        {error && clientes.length > 0 && (
-          <div className="mt-2 text-xs text-red-600">
-            No se pudieron actualizar los resultados: {error}
-          </div>
+          <button onClick={clearSearch} style={S.clearBtn} aria-label="Limpiar búsqueda">
+            <X style={{ width: '14px', height: '14px' }} />
+          </button>
         )}
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto p-4">
-        {isFetching && (
-          <div className="mb-3 flex items-center gap-2 text-xs text-gray-500">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />
-            <span>Buscando clientes...</span>
-          </div>
-        )}
+      {/* Filters */}
+      <div style={S.filtersRow}>
+        {(['Todos', 'Inactivos 180d+', 'Nuevos'] as FilterType[]).map(filterBtn)}
+      </div>
 
-        {clientes.length === 0 ? (
-          <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-white">
-            <div className="text-center">
-              <User className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-              <p className="text-sm text-gray-600 mb-1">
-                {searchValue ? "No se encontraron resultados" : "No hay clientes"}
-              </p>
-              <p className="text-xs text-gray-500">
-                {searchValue ? "Ajusta tu búsqueda" : "Agrega tu primer cliente"}
-              </p>
-              {!searchValue && (
-                <Button
-                  onClick={onAddClient}
-                  variant="outline"
-                  size="sm"
-                  className="mt-3 text-xs border-gray-300 text-gray-700 hover:bg-gray-50"
-                >
-                  <Plus className="h-3 w-3 mr-1" />
-                  Agregar cliente
-                </Button>
-              )}
+      {/* Count */}
+      <div style={S.count}>
+        {isInitialLoading ? 'Cargando...' : `${clientCount} clientes`}
+        {isFetching && !isInitialLoading && (
+          <Loader2 style={{ width: '10px', height: '10px', animation: 'spin 1s linear infinite' }} />
+        )}
+      </div>
+
+      {/* List scroll */}
+      <div style={S.listScroll}>
+        {error && clientes.length === 0 && !isInitialLoading ? (
+          <div style={{ padding: '40px 20px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>
+            Error al cargar clientes
+            <br />
+            <button
+              onClick={() => onPageChange?.(1, searchValue)}
+              style={{ marginTop: '8px', background: 'none', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '4px 12px', cursor: 'pointer', fontSize: '12px', color: '#64748B', fontFamily: 'inherit' }}
+            >
+              Reintentar
+            </button>
+          </div>
+        ) : isInitialLoading ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} style={S.skeletonRow}>
+              <div style={S.skeletonCircle} />
+              <div style={{ flex: 1 }}>
+                <div style={S.skeletonLine('60%', '13px', '6px')} />
+                <div style={{ ...S.skeletonLine('40%', '10px'), background: '#F1F5F9' }} />
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ ...S.skeletonLine('60px', '12px', '4px') }} />
+                <div style={{ ...S.skeletonLine('40px', '9px'), background: '#F1F5F9' }} />
+              </div>
             </div>
+          ))
+        ) : clientes.length === 0 ? (
+          <div style={{ padding: '40px 20px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>
+            {searchValue ? 'Sin resultados para la búsqueda' : 'Sin clientes registrados'}
           </div>
         ) : (
-          <>
-            <div className="rounded-lg border border-gray-100 bg-white mb-4 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50">
-                    {tableColumns.map((column) => (
-                      <th key={column.key} className={column.className}>
-                        {column.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>{clientRows}</tbody>
-              </table>
-            </div>
-
-            {/* Controles de paginación */}
-            {metadata && metadata.total_paginas > 1 && (
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-1 py-2">
-                <div className="text-xs text-gray-600">
-                  <span className="font-medium">Página {currentPage}</span> de {totalPages} • 
-                  Total: {metadata.total} clientes
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={goToPreviousPage}
-                    disabled={!metadata.tiene_anterior || isFetching}
-                    className="h-8 px-3 border-gray-300 text-gray-700 hover:bg-gray-50"
-                  >
-                    <ChevronLeft className="h-4 w-4 mr-1" />
-                    <span className="text-sm">Anterior</span>
-                  </Button>
-                  
-                  <div className="flex items-center gap-1">
-                    {/* Mostrar números de página */}
-                    {pageNumbers.map((pageNumber) => (
-                      <Button
-                        key={pageNumber}
-                        variant={pageNumber === currentPage ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => goToPage(pageNumber)}
-                        disabled={isFetching}
-                        className={`h-8 w-8 text-sm ${
-                          pageNumber === currentPage
-                            ? "bg-gray-900 text-white hover:bg-gray-800"
-                            : "border-gray-300 text-gray-700 hover:bg-gray-50"
-                        }`}
-                      >
-                        {pageNumber}
-                      </Button>
-                    ))}
-                    
-                    {shouldShowLastPageShortcut && (
-                      <>
-                        <span className="text-gray-400">...</span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => goToPage(totalPages)}
-                          disabled={isFetching}
-                          className="h-8 w-8 text-sm border-gray-300 text-gray-700 hover:bg-gray-50"
-                        >
-                          {totalPages}
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                  
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={goToNextPage}
-                    disabled={!metadata.tiene_siguiente || isFetching}
-                    className="h-8 px-3 border-gray-300 text-gray-700 hover:bg-gray-50"
-                  >
-                    <span className="text-sm">Siguiente</span>
-                    <ChevronRight className="h-4 w-4 ml-1" />
-                  </Button>
-                </div>
-                
-                <div className="text-xs text-gray-600">
-                  Mostrando {metadata.limite} por página
-                </div>
-              </div>
-            )}
-          </>
+          rows
         )}
+
+        {/* Pagination */}
+        {!isInitialLoading && totalPages > 1 && (
+          <div style={S.pagination}>
+            <button
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={!tieneAnterior}
+              style={S.pgBtn(tieneAnterior)}
+            >
+              <ChevronLeft style={{ width: '12px', height: '12px' }} />
+            </button>
+            <span>Pág {currentPage} / {totalPages}</span>
+            <button
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={!tieneSiguiente}
+              style={S.pgBtn(tieneSiguiente)}
+            >
+              <ChevronRight style={{ width: '12px', height: '12px' }} />
+            </button>
+          </div>
+        )}
+
+        {/* Add client */}
+        <div style={S.addWrap}>
+          <button onClick={onAddClient} style={S.addBtn}>
+            <Plus style={{ width: '12px', height: '12px' }} />
+            Nuevo cliente
+          </button>
+        </div>
       </div>
     </div>
   )
