@@ -29,6 +29,11 @@ from app.database.mongo import (
 )
 from app.auth.routes import get_current_user
 
+from app.commissions.comision_engine import (
+    resolver_config_comision, calcular_comision
+)
+from app.commissions.comision_context import construir_contexto, recalcular_comisiones_periodo
+
 router = APIRouter()
 
 class FacturarRequest(BaseModel):
@@ -290,6 +295,7 @@ async def facturar_cita_o_venta(
         comision_ya_calculada = producto.get("comision_ya_calculada")
 
         if comision_ya_calculada is not None:
+            # Venta directa ya comisionada — respetar el valor guardado
             comision_producto = float(comision_ya_calculada)
             total_comision_productos += comision_producto
 
@@ -303,23 +309,40 @@ async def facturar_cita_o_venta(
 
                 ROLES_PRODUCTO_PROPIO = {"recepcionista", "call_center", "admin_sede"}
 
-                # Prioridad: quien agregó el producto vs profesional de la cita
+                # Resolver quién es el vendedor (misma prioridad de antes)
                 if agregado_por_rol in ROLES_PRODUCTO_PROPIO and agregado_por_email:
-                    vendedor_auth = await collection_auth.find_one(
+                    vendedor_doc = await collection_auth.find_one(
                         {"correo_electronico": agregado_por_email}
                     )
-                    porcentaje_producto = obtener_porcentaje_comision_producto(
-                        producto_db_item, vendedor_auth, inventario_db
-                )
                 elif profesional_id:
-                    porcentaje_producto = obtener_porcentaje_comision_producto(
-                        producto_db_item, profesional_db, inventario_db
-                    )
+                    vendedor_doc = profesional_db
                 else:
-                    porcentaje_producto = obtener_porcentaje_comision_producto(
-                        producto_db_item, None, inventario_db
+                    vendedor_doc = None
+
+                # ── Nuevo engine ──────────────────────────────────────
+                config = resolver_config_comision(producto_db_item, vendedor_doc, inventario_db, sede)
+
+                ctx = await construir_contexto(
+                    profesional_id=profesional_id,
+                    sede_id=sede_id,
+                    cantidad_actual=cantidad,
+                    moneda_sede=moneda_sede,
+                )
+
+                resultado = calcular_comision(config, subtotal_producto, ctx)
+                comision_producto = resultado.valor
+
+                if resultado.hubo_cambio_nivel and resultado.nivel_nuevo:
+                    await recalcular_comisiones_periodo(
+                        profesional_id=profesional_id,
+                        sede_id=sede_id,
+                        nuevo_porcentaje=resultado.nivel_nuevo.valor,
+                        nuevo_tipo=resultado.nivel_nuevo.tipo,
+                        inicio_periodo=ctx.inicio_periodo,
+                        fin_periodo=ctx.fin_periodo,
                     )
-                comision_producto = round((subtotal_producto * porcentaje_producto) / 100, 2)
+                # ─────────────────────────────────────────────────────
+
                 total_comision_productos += comision_producto
 
         items.append({

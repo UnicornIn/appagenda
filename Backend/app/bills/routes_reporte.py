@@ -162,8 +162,8 @@ def _nivel_label(total_unidades: int) -> str:
 @router.get("/reporte-comisiones")
 async def reporte_comisiones(
     sede_id:      str           = Query(...,    description="Ej: SD-88809"),
-    fecha_desde:  Optional[str] = Query(None,   description="YYYY-MM-DD o DD/MM/YYYY"),
-    fecha_hasta:  Optional[str] = Query(None,   description="YYYY-MM-DD o DD/MM/YYYY"),
+    fecha_desde:  Optional[str] = Query(None,   description="YYYY-MM-DD o DD-MM-YYYY"),
+    fecha_hasta:  Optional[str] = Query(None,   description="YYYY-MM-DD o DD-MM-YYYY"),
     tipo_item:    str           = Query("ambos", description="servicios | productos | ambos"),
     current_user: dict          = Depends(get_current_user),
 ):
