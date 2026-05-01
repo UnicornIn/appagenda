@@ -8,12 +8,14 @@ from bson import ObjectId
 import uuid
 import boto3
 import json
+import logging
 from dotenv import load_dotenv
 load_dotenv()
 
 from app.scheduling.submodules.fichas.controllers import generar_y_enviar_pdf_ficha
 from app.bills.routes import obtener_porcentaje_comision_producto
 from app.scheduling.models import Cita, ProductoItem, PagoRequest, ServicioEnCita, ServicioEnFicha
+from app.clients_service.routes_clientes import calcular_analytics_cliente
 from app.database.mongo import (
     collection_citas,
     collection_horarios,
@@ -32,6 +34,8 @@ from app.cash.utils_cash import fecha_a_datetime
 from app.auth.routes import get_current_user
 from app.utils.timezone import today_str, today
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -648,7 +652,8 @@ async def crear_cita(
         "fecha": fecha_str,
         "hora_inicio": cita.hora_inicio,
         "hora_fin": cita.hora_fin,
-        "estado": "confirmada",
+        "estado": "confirmada" if abono > 0 else "pre_reservada",
+        "requiere_confirmacion": abono == 0,
     
         # Pagos
         "metodo_pago_inicial": cita.metodo_pago_inicial,
@@ -1177,55 +1182,52 @@ async def crear_cita(
     </body>
     </html>
     """
-    # 1. Formatear la fecha a "Día Mes" (ej: 24 Marzo)
-    meses_es = [
-        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
-        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-    ]
+    # === determinar si la cita quedó confirmada ===
+    estado_guardado = data["estado"]  # "confirmada" o "pre_reservada"
 
-    fecha_dt = datetime.strptime(fecha_str, "%Y-%m-%d")
-    fecha_limpia = f"{fecha_dt.day} {meses_es[fecha_dt.month - 1]}"
+    if estado_guardado == "confirmada":
+        # === Formatear fecha y hora para asunto ===
+        meses_es = [
+            "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+            "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+        ]
+        fecha_dt = datetime.strptime(fecha_str, "%Y-%m-%d")
+        fecha_limpia = f"{fecha_dt.day} {meses_es[fecha_dt.month - 1]}"
+        hora_dt = datetime.strptime(cita.hora_inicio, "%H:%M")
+        hora_limpia = hora_dt.strftime("%I %p").lstrip("0").replace("AM", "Am").replace("PM", "Pm")
+        asunto_limpio = f"Confirmamos tu cita. Para el {fecha_limpia} {hora_limpia}"
 
-    # 2. Formatear la hora a "12h Am/Pm" (ej: 11 Am o 3 Pm)
-    hora_dt = datetime.strptime(cita.hora_inicio, "%H:%M")
-    # %I es hora 12h, %p es AM/PM. Usamos replace para que quede como "Am/Pm"
-    hora_limpia = hora_dt.strftime("%I %p").lstrip("0").replace("AM", "Am").replace("PM", "Pm")
+        # === Al cliente ===
+        cliente_email = cliente.get("email") or cliente.get("correo")
+        if cliente_email:
+            try:
+                enviar_correo(cliente_email, asunto_limpio, mensaje_html)
+                print(f"📧 Confirmación enviada a cliente: {cliente_email}")
+            except Exception as e:
+                print(f"⚠️ Error enviando email al cliente: {e}")
 
-    # 3. Crear el nuevo asunto con el "chulito verde"
-    asunto_limpio = f"Confirmamos tu cita. Para el {fecha_limpia} {hora_limpia}"
-
-    # === enviar emails ===
-    cliente_email = cliente.get("email") or cliente.get("correo")
-    if cliente_email:
+        # === Al profesional ===
         try:
-            enviar_correo(
-                cliente_email, 
-                asunto_limpio,
-                mensaje_html
-            )
-            print(f"📧 Email enviado a cliente: {cliente_email}")
+            prof_email = profesional.get("email")
+            if prof_email:
+                prof_subject = f"📅 Nueva cita asignada - {fecha_str} {cita.hora_inicio} - {cliente.get('nombre')}"
+                enviar_correo(prof_email, prof_subject, mensaje_html)
+                print(f"📧 Confirmación enviada a profesional: {prof_email}")
         except Exception as e:
-            print(f"⚠️ Error enviando email al cliente: {e}")
+            print(f"⚠️ Error enviando email al profesional: {e}")
 
-    # Enviar al profesional si tiene email
-    try:
-        prof_email = profesional.get("email")
-        if prof_email:
-            # Modificar ligeramente el email para el profesional
-            prof_subject = f"📅 Nueva cita asignada - {fecha_str} {cita.hora_inicio} - {cliente.get('nombre')}"
-            enviar_correo(prof_email, prof_subject, mensaje_html)
-            print(f"📧 Email enviado a profesional: {prof_email}")
-    except Exception as e:
-        print(f"⚠️ Error enviando email al profesional: {e}")
+        # === Al admin de sede ===
+        try:
+            admin_sede_email = sede.get("email_contacto")
+            if admin_sede_email and admin_sede_email != current_user.get("email"):
+                admin_subject = f"📋 Nueva cita registrada - {fecha_str} - {cliente.get('nombre')}"
+                enviar_correo(admin_sede_email, admin_subject, mensaje_html)
+        except Exception as e:
+            print(f"⚠️ Error enviando email a admin sede: {e}")
 
-    # También enviar a admin de sede si es diferente del creador
-    try:
-        admin_sede_email = sede.get("email_contacto")
-        if admin_sede_email and admin_sede_email != current_user.get("email"):
-            admin_subject = f"📋 Nueva cita registrada - {fecha_str} - {cliente.get('nombre')}"
-            enviar_correo(admin_sede_email, admin_subject, mensaje_html)
-    except Exception as e:
-        print(f"⚠️ Error enviando email a admin sede: {e}")
+    else:
+        # pre_reservada — sin correo, el cliente recibirá uno cuando se confirme
+        print(f"📭 Cita pre_reservada — correo pendiente hasta confirmación")
 
     # ═══════════════════════════════════════════════
     # ⭐ INTEGRACIÓN GIFTCARD - Reservar saldo
@@ -1843,21 +1845,294 @@ async def cancelar_cita(cita_id: str, current_user: dict = Depends(get_current_u
 # 🔹 CONFIRMAR CITA
 # =============================================================
 @router.post("/{cita_id}/confirmar", response_model=dict)
-async def confirmar_cita(cita_id: str, current_user: dict = Depends(get_current_user)):
+async def confirmar_cita(
+    cita_id: str,
+    current_user: dict = Depends(get_current_user)
+):
     cita = await resolve_cita_by_id(cita_id)
     if not cita:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
+
+    estado_actual = cita.get("estado", "")
+
+    # Ya estaba confirmada o en estado terminal
+    if estado_actual == "confirmada":
+        return {"success": True, "mensaje": "La cita ya estaba confirmada", "cita_id": cita_id}
+
+    if estado_actual in {"cancelada", "completada", "no_asistio"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede confirmar una cita en estado '{estado_actual}'"
+        )
+
     sede = await collection_locales.find_one({"sede_id": cita.get("sede_id")})
     if not sede:
         raise HTTPException(status_code=404, detail="Sede no encontrada")
 
-    await collection_citas.update_one({"_id": ObjectId(cita["_id"])}, {"$set": {
-        "estado": "confirmada",
-        "confirmada_por": current_user.get("email"),
-        "fecha_confirmacion": today_str(sede)
-    }})
+    await collection_citas.update_one(
+        {"_id": ObjectId(cita["_id"])},
+        {"$set": {
+            "estado": "confirmada",
+            "confirmada_por": current_user.get("email"),
+            "fecha_confirmacion": today_str(sede),
+            "requiere_confirmacion": False
+        }}
+    )
 
     return {"success": True, "mensaje": "Cita confirmada", "cita_id": cita_id}
+
+# =============================================================
+# 🔹 REENVIAR CORREO DE CITA
+# =============================================================
+
+TIPOS_CORREO_VALIDOS = {"confirmacion", "reprogramacion", "cancelacion"}
+
+@router.post("/{cita_id}/reenviar-correo", response_model=dict)
+async def reenviar_correo_cita(
+    cita_id: str,
+    tipo: str = Query(
+        default="confirmacion",
+        description="Tipo de correo: confirmacion | reprogramacion | cancelacion"
+    ),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Reenvía correo de una cita al cliente (y opcionalmente al profesional).
+    ✅ confirmacion  → usado tras crear o confirmar manualmente
+    ✅ reprogramacion → usado tras editar fecha/hora
+    ✅ cancelacion   → notifica que la cita fue cancelada
+    """
+    if current_user.get("rol") not in ["admin_sede", "super_admin", "call_center", "recepcionista"]:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    if tipo not in TIPOS_CORREO_VALIDOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tipo inválido. Usa: {', '.join(TIPOS_CORREO_VALIDOS)}"
+        )
+
+    cita = await resolve_cita_by_id(cita_id)
+    if not cita:
+        raise HTTPException(status_code=404, detail="Cita no encontrada")
+
+    # Validar coherencia tipo ↔ estado
+    estado_cita = cita.get("estado", "")
+    if tipo == "cancelacion" and estado_cita not in {"cancelada"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Solo puedes enviar correo de cancelación si la cita está cancelada"
+        )
+    if tipo in {"confirmacion", "reprogramacion"} and estado_cita in {"cancelada"}:
+        raise HTTPException(
+            status_code=400,
+            detail="No puedes enviar confirmación o reprogramación de una cita cancelada"
+        )
+
+    # Cargar datos relacionados
+    sede = await collection_locales.find_one({"sede_id": cita.get("sede_id")})
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
+
+    cliente_email = cita.get("cliente_email")
+    cliente_nombre = cita.get("cliente_nombre", "Cliente")
+    profesional_nombre = cita.get("profesional_nombre", "")
+    profesional_id = cita.get("profesional_id")
+    fecha_str = cita.get("fecha", "")
+    hora_inicio = cita.get("hora_inicio", "")
+    hora_fin = cita.get("hora_fin", "")
+    sede_nombre = cita.get("sede_nombre") or sede.get("nombre", "")
+    sede_direccion = sede.get("direccion", "")
+    sede_telefono = sede.get("telefono", "No disponible")
+
+    # Nombres de servicios
+    servicios = cita.get("servicios", [])
+    nombres_servicios = ", ".join(
+        s.get("nombre", "Servicio") for s in servicios
+    ) if servicios else cita.get("servicio_nombre", "Sin servicio")
+
+    # Formatear fecha y hora para asunto
+    meses_es = [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    ]
+    try:
+        fecha_dt = datetime.strptime(fecha_str, "%Y-%m-%d")
+        fecha_limpia = f"{fecha_dt.day} {meses_es[fecha_dt.month - 1]}"
+    except Exception:
+        fecha_limpia = fecha_str
+
+    try:
+        hora_dt = datetime.strptime(hora_inicio, "%H:%M")
+        hora_limpia = hora_dt.strftime("%I %p").lstrip("0").replace("AM", "Am").replace("PM", "Pm")
+    except Exception:
+        hora_limpia = hora_inicio
+
+    # ─── Construir asunto y encabezado según tipo ───────────────────────
+    configs = {
+        "confirmacion": {
+            "asunto": f"Confirmamos tu cita. Para el {fecha_limpia} {hora_limpia}",
+            "titulo": "¡Cita Confirmada!",
+            "subtitulo": "Tu reserva ha sido agendada exitosamente",
+            "color_banner": "#000000",
+            "instrucciones": True,
+        },
+        "reprogramacion": {
+            "asunto": f"Tu cita fue reprogramada. Nueva fecha: {fecha_limpia} {hora_limpia}",
+            "titulo": "Cita Reprogramada",
+            "subtitulo": "Los detalles de tu cita han sido actualizados",
+            "color_banner": "#1a1a2e",
+            "instrucciones": True,
+        },
+        "cancelacion": {
+            "asunto": f"Tu cita del {fecha_limpia} {hora_limpia} ha sido cancelada",
+            "titulo": "Cita Cancelada",
+            "subtitulo": "Lamentamos los inconvenientes",
+            "color_banner": "#2d1b1b",
+            "instrucciones": False,
+        },
+    }
+
+    cfg = configs[tipo]
+
+    # ─── Bloque de instrucciones (solo si aplica) ───────────────────────
+    bloque_instrucciones = ""
+    if cfg["instrucciones"]:
+        bloque_instrucciones = """
+        <div style="background-color:#fff0f6;padding:20px;border-radius:12px;border-left:5px solid #f198c0;margin-top:20px;">
+            <div style="color:#f198c0;font-weight:bold;margin-bottom:10px;">📋 Recomendaciones importantes</div>
+            <ul style="margin:0;padding-left:20px;color:#555;font-size:14px;">
+                <li style="margin-bottom:8px;">Llega 10 minutos antes de tu cita</li>
+                <li style="margin-bottom:8px;">En caso de servicio completo, traer cabello desenredado</li>
+                <li style="margin-bottom:8px;">Notifica cualquier cancelación con al menos 24 horas de anticipación</li>
+                <li style="margin-bottom:8px;">En caso de corte de cabello, traer el cabello limpio y desenredado</li>
+            </ul>
+        </div>
+        """
+
+    # ─── Bloque extra para cancelación ─────────────────────────────────
+    bloque_cancelacion = ""
+    if tipo == "cancelacion":
+        bloque_cancelacion = f"""
+        <div style="background-color:#fff5f5;padding:20px;border-radius:12px;border-left:5px solid #e53e3e;margin-top:20px;">
+            <div style="color:#e53e3e;font-weight:bold;margin-bottom:8px;">¿Necesitas reagendar?</div>
+            <p style="color:#555;font-size:14px;margin:0;">
+                Puedes contactarnos al <strong>{sede_telefono}</strong> para agendar una nueva cita.
+                Estaremos encantados de atenderte.
+            </p>
+        </div>
+        """
+
+    # ─── HTML del correo ────────────────────────────────────────────────
+    mensaje_html = f"""
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background-color:#f4f4f4;margin:0;padding:0;">
+        <div style="max-width:600px;margin:20px auto;background-color:#ffffff;border-radius:15px;overflow:hidden;box-shadow:0 4px 10px rgba(0,0,0,0.1);border:1px solid #f198c0;">
+
+            <div style="background-color:#000000;color:#ffffff;padding:40px 20px;text-align:center;">
+                <img src="https://rizosfelicesdata.s3.us-east-2.amazonaws.com/logo+principal+rosado+letra+blanco_Mesa+de+tra+(1).png"
+                     alt="Rizos Felices" style="max-width:180px;margin-bottom:20px;">
+                <h1 style="color:#f198c0;margin:0;font-size:28px;text-transform:uppercase;letter-spacing:2px;">
+                    {cfg['titulo']}
+                </h1>
+                <p style="margin:10px 0 0;font-size:16px;opacity:0.9;">{cfg['subtitulo']}</p>
+            </div>
+
+            <div style="padding:30px;">
+                <div style="color:#333;font-size:18px;font-weight:bold;margin-bottom:20px;
+                            padding-bottom:10px;border-bottom:2px solid #f198c0;">
+                    📅 Detalles de la cita
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:15px;margin-bottom:20px;">
+                    <div style="background:#fff;padding:15px;border-radius:10px;border:1px solid #f198c0;">
+                        <div style="color:#f198c0;font-size:12px;text-transform:uppercase;font-weight:bold;margin-bottom:5px;">Cliente</div>
+                        <div style="color:#333;font-size:15px;font-weight:600;">{cliente_nombre}</div>
+                    </div>
+                    <div style="background:#fff;padding:15px;border-radius:10px;border:1px solid #f198c0;">
+                        <div style="color:#f198c0;font-size:12px;text-transform:uppercase;font-weight:bold;margin-bottom:5px;">Servicio(s)</div>
+                        <div style="color:#333;font-size:15px;font-weight:600;">{nombres_servicios}</div>
+                    </div>
+                    <div style="background:#fff;padding:15px;border-radius:10px;border:1px solid #f198c0;">
+                        <div style="color:#f198c0;font-size:12px;text-transform:uppercase;font-weight:bold;margin-bottom:5px;">Profesional</div>
+                        <div style="color:#333;font-size:15px;font-weight:600;">{profesional_nombre}</div>
+                    </div>
+                    <div style="background:#fff;padding:15px;border-radius:10px;border:1px solid #f198c0;">
+                        <div style="color:#f198c0;font-size:12px;text-transform:uppercase;font-weight:bold;margin-bottom:5px;">Sede</div>
+                        <div style="color:#333;font-size:15px;font-weight:600;">{sede_nombre}</div>
+                        <small style="color:#888;">{sede_direccion}</small>
+                    </div>
+                    <div style="background:#fff;padding:15px;border-radius:10px;border:1px solid #f198c0;">
+                        <div style="color:#f198c0;font-size:12px;text-transform:uppercase;font-weight:bold;margin-bottom:5px;">Fecha</div>
+                        <div style="color:#333;font-size:15px;font-weight:600;">{fecha_str}</div>
+                    </div>
+                    <div style="background:#fff;padding:15px;border-radius:10px;border:1px solid #f198c0;">
+                        <div style="color:#f198c0;font-size:12px;text-transform:uppercase;font-weight:bold;margin-bottom:5px;">Horario</div>
+                        <div style="color:#333;font-size:15px;font-weight:600;">{hora_inicio} - {hora_fin}</div>
+                    </div>
+                </div>
+
+                {bloque_instrucciones}
+                {bloque_cancelacion}
+
+                <div style="margin-top:20px;padding:20px;background:#fff;border-radius:12px;border:1px solid #f198c0;">
+                    <div style="font-size:16px;font-weight:600;color:#f198c0;margin-bottom:8px;">📞 ¿Necesitas ayuda?</div>
+                    <p style="color:#333;margin-bottom:5px;"><strong>{sede_nombre}:</strong> {sede_telefono}</p>
+                </div>
+            </div>
+
+            <div style="background-color:#f9f9f9;padding:30px;text-align:center;color:#777;font-size:13px;">
+                <p>© {datetime.now().year} Rizos Felices. Todos los derechos reservados.</p>
+                <p style="margin-top:10px;font-size:12px;opacity:0.7;">Este es un correo automático, por favor no responder.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+    # ─── Enviar correos ─────────────────────────────────────────────────
+    enviados = []
+    errores = []
+
+    # Al cliente
+    if cliente_email:
+        try:
+            enviar_correo(cliente_email, cfg["asunto"], mensaje_html)
+            enviados.append(cliente_email)
+        except Exception as e:
+            errores.append({"destinatario": cliente_email, "error": str(e)})
+    else:
+        errores.append({"destinatario": "cliente", "error": "Sin email registrado"})
+
+    # Al profesional (solo en confirmacion y reprogramacion)
+    if tipo in {"confirmacion", "reprogramacion"} and profesional_id:
+        try:
+            profesional = await collection_estilista.find_one({"profesional_id": profesional_id})
+            prof_email = profesional.get("email") if profesional else None
+            if prof_email:
+                asunto_prof = f"{'Nueva cita' if tipo == 'confirmacion' else 'Cita reprogramada'} - {fecha_str} {hora_inicio} - {cliente_nombre}"
+                enviar_correo(prof_email, asunto_prof, mensaje_html)
+                enviados.append(prof_email)
+        except Exception as e:
+            errores.append({"destinatario": "profesional", "error": str(e)})
+
+    if not enviados:
+        raise HTTPException(
+            status_code=500,
+            detail={"mensaje": "No se pudo enviar ningún correo", "errores": errores}
+        )
+
+    return {
+        "success": True,
+        "tipo": tipo,
+        "cita_id": cita_id,
+        "enviados": enviados,
+        **({"advertencias": errores} if errores else {})
+    }
 
 SIMBOLOS_MONEDA = {
     "COP": "$",
@@ -2003,10 +2278,38 @@ async def registrar_pago(
     if codigo_giftcard_usado and not cita.get("codigo_giftcard"):
         update_set["codigo_giftcard"] = codigo_giftcard_usado
 
+    if cita.get("estado") == "pre_reservada" and monto_real > 0:
+        update_set["estado"] = "confirmada"
+        update_set["confirmada_por"] = current_user.get("email")
+        update_set["fecha_confirmacion"] = today(sede).replace(tzinfo=None)
+        update_set["requiere_confirmacion"] = False
+
     await collection_citas.update_one(
         {"_id": ObjectId(cita_id)},
         {"$set": update_set, "$push": {"historial_pagos": nuevo_pago}}
     )
+
+    if cita.get("estado") == "pre_reservada" and monto_real > 0:
+        try:
+            cliente_email_dest = cita.get("cliente_email")
+            if cliente_email_dest:
+                meses_es = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
+                            "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
+                fecha_str_c = cita.get("fecha", "")
+                hora_inicio_c = cita.get("hora_inicio", "")
+                fecha_dt_c = datetime.strptime(fecha_str_c, "%Y-%m-%d")
+                hora_dt_c = datetime.strptime(hora_inicio_c, "%H:%M")
+                fecha_limpia_c = f"{fecha_dt_c.day} {meses_es[fecha_dt_c.month - 1]}"
+                hora_limpia_c = hora_dt_c.strftime("%I %p").lstrip("0").replace("AM","Am").replace("PM","Pm")
+                asunto_confirmacion = f"Confirmamos tu cita. Para el {fecha_limpia_c} {hora_limpia_c}"
+
+                # Reutilizar el helper de reenvío que ya tienes
+                from app.scheduling.utils import construir_html_confirmacion
+                html_conf = construir_html_confirmacion(cita, sede)
+                enviar_correo(cliente_email_dest, asunto_confirmacion, html_conf)
+                print(f"📧 Correo de confirmación enviado tras primer pago: {cliente_email_dest}")
+        except Exception as e:
+            print(f"⚠️ Error enviando correo de confirmación post-pago: {e}")
 
     respuesta = {
         "success": True,
@@ -2757,12 +3060,14 @@ async def finalizar_servicio_con_pdf(
     if not sede:
         raise HTTPException(status_code=404, detail="Sede no encontrada")
 
-    # Actualizar estado
+    now = today(sede).replace(tzinfo=None)
+
+    # Actualizar estado de cita y ficha
     await collection_citas.update_one(
         {"_id": ObjectId(cita_id)},
         {"$set": {
             "estado":             "finalizado",
-            "fecha_finalizacion": today(sede).replace(tzinfo=None),
+            "fecha_finalizacion": now,
             "finalizado_por":     current_user.get("email")
         }}
     )
@@ -2771,16 +3076,29 @@ async def finalizar_servicio_con_pdf(
         {"$set": {"estado": "finalizado"}}
     )
 
-    # Leer ficha actualizada y generar PDF — UNA SOLA LÍNEA en vez de 60
+    # ── Actualizar analytics del cliente ─────────────────────────────────
+    cliente_id = cita.get("cliente_id")
+    if cliente_id:
+        try:
+            analytics = await calcular_analytics_cliente(cliente_id, now)
+            if analytics:
+                await collection_clients.update_one(
+                    {"cliente_id": cliente_id},
+                    {"$set": analytics}
+                )
+        except Exception as e:
+            logger.warning(f"Analytics no actualizados para {cliente_id}: {e}")
+    # ─────────────────────────────────────────────────────────────────────
+
+    # Generar y enviar PDF
     ficha_actualizada = await collection_card.find_one({"_id": ficha["_id"]})
     pdf_result = await generar_y_enviar_pdf_ficha(ficha_actualizada, cita_id)
 
-    # Guardar resultado del PDF en la cita
     await collection_citas.update_one(
         {"_id": ObjectId(cita_id)},
         {"$set": {
             "pdf_generado":         pdf_result["pdf_generado"],
-            "pdf_fecha_generacion": today(sede).replace(tzinfo=None),
+            "pdf_fecha_generacion": now,
             "pdf_enviado":          pdf_result["pdf_enviado"]
         }}
     )
@@ -2790,5 +3108,5 @@ async def finalizar_servicio_con_pdf(
         "message": "Servicio finalizado correctamente",
         "cita_id": cita_id,
         "estado":  "finalizado",
-        **pdf_result  # contiene: pdf_generado, pdf_enviado, cliente_email
+        **pdf_result
     }
