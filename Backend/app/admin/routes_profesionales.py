@@ -194,6 +194,7 @@ async def create_profesional(
         "hashed_password": hashed_password,
         "rol": "estilista",
         "sede_id": sede_id,
+        "sedes_permitidas": profesional.sedes_permitidas or [],
         "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "activo": True,
         "creado_por": current_user["email"],
@@ -578,6 +579,15 @@ async def update_professional(
         raise HTTPException(
             status_code=404, 
             detail=f"Profesional no encontrado: {profesional_id}"
+        )
+    
+    if "sedes_permitidas" in update_data:
+        await collection_auth.update_one(
+            {"profesional_id": profesional_id},
+            {"$set": {
+                "sedes_permitidas": update_data["sedes_permitidas"],
+                "updated_at": datetime.now()
+            }}
         )
 
     return {
