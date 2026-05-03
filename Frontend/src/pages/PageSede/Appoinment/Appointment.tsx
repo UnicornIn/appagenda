@@ -508,13 +508,8 @@ const CalendarScheduler: React.FC = () => {
         return;
       }
 
-      const estilistasFiltrados = estilistasData
-        .filter((est): est is Estilista => {
-          if (user.sede_id) {
-            return est?.sede_id === user.sede_id;
-          }
-          return true;
-        })
+      const estilistasFiltrados = (estilistasData || [])
+        .filter(Boolean)
         .map(
           (est) =>
             ({
@@ -524,23 +519,6 @@ const CalendarScheduler: React.FC = () => {
               unique_key: `stylist-${est.profesional_id}`,
             }) as EstilistaCompleto,
         );
-
-      console.log(
-        "👨‍💼 ESTRUCTURA COMPLETA DE ESTILISTAS:",
-        estilistasFiltrados.map((e) => ({
-          nombre: e.nombre,
-          profesional_id: e.profesional_id,
-          _id: e._id,
-          sede_id: e.sede_id,
-          esDeSedeUsuario: e.sede_id === user.sede_id,
-        })),
-      );
-
-      console.log("🔍 FILTRO APLICADO:", {
-        sedeUsuario: user.sede_id,
-        totalEstilistas: estilistasData.length,
-        estilistasFiltrados: estilistasFiltrados.length,
-      });
 
       setEstilistas(estilistasFiltrados);
     } catch (error) {
@@ -558,21 +536,11 @@ const CalendarScheduler: React.FC = () => {
     try {
       const params: any = { fecha: selectedDateString };
 
-      if (user.sede_id) {
-        params.sede_id = user.sede_id;
-      }
-
       if (selectedEstilista)
         params.profesional_id = selectedEstilista.profesional_id;
 
       const response = await getCitas(params, user.access_token);
-      let citasFiltradas = response.citas || response || [];
-
-      if (user.sede_id) {
-        citasFiltradas = citasFiltradas.filter((cita: any) => {
-          return cita.sede_id === user.sede_id;
-        });
-      }
+      const citasFiltradas = response.citas || response || [];
 
       setCitas(citasFiltradas);
     } catch (error) {

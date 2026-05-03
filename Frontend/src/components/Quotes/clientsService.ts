@@ -1,6 +1,5 @@
 // services/clientsService.ts
 import { API_BASE_URL } from "../../types/config";
-import { clientesService } from "../../pages/PageSede/Clients/clientesService"; // 🔥 RUTA CORRECTA
 
 export interface Cliente {
   _id?: string;
@@ -34,8 +33,50 @@ export interface CrearClienteRequest {
   notas?: string;
 }
 
-type FetchClientesOpts = { filtro?: string; limite?: number; pagina?: number };
-const DEFAULT_LIMIT = 25;
+export interface ClienteBusqueda {
+  id: string;
+  cliente_id: string;
+  nombre: string;
+  correo: string;
+  cedula: string;
+  telefono: string;
+  sede_id: string;
+  franquicia_id: string;
+}
+
+const DEFAULT_LIMIT = 15;
+
+export async function buscarCliente(
+  termino: string,
+  token: string,
+  sedeId?: string
+): Promise<ClienteBusqueda[]> {
+  if (termino.trim().length < 2) return [];
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+
+  const activeSede =
+    sedeId ??
+    sessionStorage.getItem("beaux-sede_id") ??
+    localStorage.getItem("beaux-sede_id");
+  if (activeSede) headers["X-Sede-Id"] = activeSede;
+
+  const res = await fetch(
+    `${API_BASE_URL}clientes/buscar?filtro=${encodeURIComponent(termino.trim())}&limite=15`,
+    { headers }
+  );
+
+  if (!res.ok) {
+    if (res.status === 400) return [];
+    throw new Error("Error buscando cliente");
+  }
+
+  const data = await res.json();
+  return Array.isArray(data) ? (data as ClienteBusqueda[]) : [];
+}
 
 const withOptionalField = (
   payload: Record<string, string>,
@@ -86,28 +127,6 @@ const normalizarCliente = (c: any): Cliente => ({
   notas_historial: c.notas_historial,
 });
 
-const fetchClientesLivianos = async (
-  token: string,
-  opciones?: FetchClientesOpts,
-  sedeId?: string
-): Promise<Cliente[]> => {
-  const pagina = opciones?.pagina ?? 1;
-  const limite = Math.min(Math.max(opciones?.limite ?? DEFAULT_LIMIT, 1), 100);
-  const filtro = opciones?.filtro?.trim();
-  const normalizedSedeId = resolveSedeId(sedeId);
-
-  const { clientes } = await clientesService.getClientesPaginados(
-    token,
-    {
-      pagina,
-      limite,
-      filtro,
-    },
-    normalizedSedeId
-  );
-
-  return clientes.map(normalizarCliente);
-};
 
 // Búsqueda con debounce recomendado de 300ms — respuesta es array directo
 export async function buscarClientesRapidFuzz(
@@ -138,62 +157,32 @@ export async function buscarClientesRapidFuzz(
   }
 }
 
-// 🔥 OBTENER CLIENTES POR SEDE (ahora paginado y sin traer los 42k de golpe)
-export async function getClientesPorSede(
-  token: string,
-  sedeId: string,
-  opciones?: FetchClientesOpts
-): Promise<Cliente[]> {
-  try {
-    console.log(
-      `🔄 Obteniendo clientes para reservas (sede: ${sedeId || "auto"})...`
-    );
-
-    const clientes = await fetchClientesLivianos(token, opciones, sedeId);
-
-    console.log(`✅ Clientes cargados para reservas: ${clientes.length}`);
-    return clientes;
-  } catch (error) {
-    console.error("❌ Error cargando clientes para reservas:", error);
-    throw error;
-  }
-}
-
-// 🔥 BUSCAR CLIENTES (con filtro opcional)
+// Busca clientes usando /clientes/buscar — respuesta es array directo, sin analytics
 export async function buscarClientes(
   token: string,
   filtro?: string,
-  limite: number = DEFAULT_LIMIT
+  _limite: number = DEFAULT_LIMIT
 ): Promise<Cliente[]> {
   try {
-    const clientes = await fetchClientesLivianos(token, {
-      filtro,
-      limite,
-      pagina: 1,
-    });
-    // El backend ya ordena por relevancia (rapidfuzz) — no re-filtrar ni reordenar
-    return clientes;
+    if (!filtro?.trim() || filtro.trim().length < 2) return [];
+    const results = await buscarCliente(filtro.trim(), token);
+    return results.map(normalizarCliente);
   } catch (error) {
     console.error("❌ Error buscando clientes:", error);
     return [];
   }
 }
 
-// 🔥 BUSCAR CLIENTES POR SEDE Y FILTRO
 export async function buscarClientesPorSede(
   token: string,
   sedeId: string,
   filtro?: string,
-  limite: number = DEFAULT_LIMIT
+  _limite: number = DEFAULT_LIMIT
 ): Promise<Cliente[]> {
   try {
-    const clientes = await getClientesPorSede(token, sedeId, {
-      filtro,
-      limite,
-      pagina: 1,
-    });
-    // El backend ya ordena por relevancia (rapidfuzz) — no re-filtrar ni reordenar
-    return clientes;
+    if (!filtro?.trim() || filtro.trim().length < 2) return [];
+    const results = await buscarCliente(filtro.trim(), token, sedeId);
+    return results.map(normalizarCliente);
   } catch (error) {
     console.error("❌ Error buscando clientes por sede:", error);
     return [];

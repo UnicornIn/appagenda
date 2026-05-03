@@ -453,10 +453,13 @@ export const giftcardsService = {
     options?: { limit?: number; page?: number; forceRefresh?: boolean }
   ): Promise<GiftCardClientSearchResult> {
     const normalizedQuery = String(query || "").trim();
-    const limit = Math.min(Math.max(options?.limit ?? CLIENTS_SEARCH_DEFAULT_LIMIT, 1), 200);
-    const page = Math.max(1, options?.page ?? 1);
-    const cacheKey = getClientsSearchCacheKey(normalizedQuery, limit, page);
+    const limit = Math.min(Math.max(options?.limit ?? CLIENTS_SEARCH_DEFAULT_LIMIT, 1), 50);
+    const cacheKey = getClientsSearchCacheKey(normalizedQuery, limit, 1);
     const now = Date.now();
+
+    if (normalizedQuery.length < 2) {
+      return { clients: [], hasNext: false, page: 1, limit, totalPages: null };
+    }
 
     if (!options?.forceRefresh) {
       const cached = clientsSearchCache.get(cacheKey);
@@ -466,35 +469,32 @@ export const giftcardsService = {
     }
 
     const queryParams = new URLSearchParams({
-      pagina: String(page),
+      filtro: normalizedQuery,
       limite: String(limit),
     });
 
-    if (normalizedQuery) {
-      queryParams.set("filtro", normalizedQuery);
-    }
-
-    const response = await fetch(`${API_BASE_URL}clientes/todos?${queryParams.toString()}`, {
+    const response = await fetch(`${API_BASE_URL}clientes/buscar?${queryParams.toString()}`, {
       method: "GET",
       headers: buildHeaders(token),
     });
 
     if (!response.ok) {
+      if (response.status === 400) {
+        return { clients: [], hasNext: false, page: 1, limit, totalPages: null };
+      }
       throw new Error(await parseApiError(response));
     }
 
-    const payload = await parseJsonSafely<ClientsResponse | Array<Record<string, unknown>>>(response);
-    const normalized = normalizeClientOptions(getClientRecords(payload));
-    const pageInfo = getPaginationInfo(payload);
-    const hasNext =
-      pageInfo.hasNext ?? (pageInfo.totalPages ? page < pageInfo.totalPages : normalized.length >= limit);
+    const payload = await parseJsonSafely<Array<Record<string, unknown>>>(response);
+    const records = Array.isArray(payload) ? payload : [];
+    const normalized = normalizeClientOptions(records);
 
     const result: GiftCardClientSearchResult = {
       clients: normalized,
-      hasNext,
-      page,
+      hasNext: false,
+      page: 1,
       limit,
-      totalPages: pageInfo.totalPages,
+      totalPages: null,
     };
 
     clientsSearchCache.set(cacheKey, { data: result, at: now });

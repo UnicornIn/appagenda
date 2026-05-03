@@ -1,14 +1,32 @@
 "use client";
 
 import { useMemo } from "react";
-import { ArrowLeft, LogOut, Mail, MapPin, Phone } from "lucide-react";
+import { ArrowLeft, LogOut, Mail, MapPin, Phone, Building2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import StylistBottomNav from "../../../components/Layout/StylistBottomNav";
 
 export default function StylistProfilePage() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, activeSedeId, setActiveSedeId } = useAuth();
+
+  const sedesPermitidas: string[] = useMemo(() => {
+    if (Array.isArray(user?.sedes_permitidas) && user.sedes_permitidas.length > 0) {
+      return user.sedes_permitidas;
+    }
+    try {
+      const raw = sessionStorage.getItem("beaux-sedes_permitidas");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed as string[];
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  }, [user?.sedes_permitidas]);
+
+  const currentSedeId = activeSedeId ?? user?.sede_id ?? "";
 
   const initials = useMemo(() => {
     const name = user?.name || "";
@@ -75,6 +93,28 @@ export default function StylistProfilePage() {
               )}
             </div>
           </section>
+
+          {sedesPermitidas.length >= 2 && (
+            <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-2 mb-3">
+                <Building2 className="h-4 w-4 text-gray-500" />
+                <h2 className="text-sm font-semibold text-gray-900">Sede activa</h2>
+              </div>
+              <select
+                value={currentSedeId}
+                onChange={(e) => setActiveSedeId(e.target.value)}
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none focus:ring-0"
+              >
+                {sedesPermitidas.map((sedeId) => (
+                  <option key={sedeId} value={sedeId}>
+                    {sedeId === user?.sede_id && user?.nombre_local
+                      ? user.nombre_local
+                      : sedeId}
+                  </option>
+                ))}
+              </select>
+            </section>
+          )}
 
           <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
             <h2 className="text-sm font-semibold text-gray-900">Preferencias</h2>
