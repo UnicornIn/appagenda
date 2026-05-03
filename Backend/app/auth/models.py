@@ -32,8 +32,8 @@ class UserResponse(BaseModel):
     profesional_id: Optional[str] = None
     sede_id: Optional[str] = None
     franquicia_id: Optional[str] = None
-    sedes_permitidas: Optional[List[str]] = []  # ← agregar esto
-    comision_productos: Optional[float] = None 
+    sedes_permitidas: Optional[List[str]] = []
+    comision_productos: Optional[float] = None
     activo: bool
     fecha_creacion: Optional[str] = None
     creado_por: Optional[str] = None
@@ -49,7 +49,8 @@ class TokenResponse(BaseModel):
     nombre: str
     email: str
     sede_id: Optional[str] = None
-    sedes_permitidas: Optional[List[str]] = []  # ← NUEVO
+    sedes_permitidas: Optional[List[str]] = []
+    profesional_id: Optional[str] = None          # ← FIX: necesario para estilistas
 
 
 class TokenData(BaseModel):
@@ -69,7 +70,7 @@ class UserUpdate(BaseModel):
     sede_id: Optional[str] = None
     franquicia_id: Optional[str] = None
     activo: Optional[bool] = None
-    sedes_permitidas: Optional[List[str]] = None  # ← NUEVO
+    sedes_permitidas: Optional[List[str]] = None
     password: Optional[str] = None
     comision_productos: Optional[float] = None
 
@@ -86,3 +87,4 @@ class UserUpdateResponse(BaseModel):
     modificado_por: str
     fecha_modificacion: str
     comision_productos: Optional[float] = None
+    profesional_id_asociados: Optional[List[str]] = []  # ← FIX: el endpoint ya lo retorna

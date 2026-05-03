@@ -318,7 +318,8 @@ async def obtener_citas(
             filtro["sede_id"] = filtro_sede
 
         if profesional_id:
-            filtro["profesional_id"] = profesional_id
+            from app.utils.scope import expand_profesional_filter
+            filtro["profesional_id"] = expand_profesional_filter(profesional_id, current_user)
 
         if fecha:
             filtro["fecha"] = fecha
@@ -2436,6 +2437,22 @@ async def get_citas_estilista(
     str_desde = dt_desde.strftime("%Y-%m-%d")
     str_hasta = (dt_hasta - timedelta(days=1)).strftime("%Y-%m-%d")
 
+    todos_ids = [profesional_id] + current_user.get("profesional_id_asociados", [])
+
+    # Sede activa: la del header X-Sede-Id o null para ver todas
+    sede_activa = current_user.get("sede_id")
+    if sede_activa:
+        # get_current_user ya resolvió la sede del header → filtrar solo esa
+        sedes_visibles = [sede_activa]
+    else:
+        # sin header: el profesional ve todas sus sedes (fallback)
+        sedes_visibles = current_user.get("sedes_permitidas") or []
+
+    match_sede = (
+        {"sede_id": {"$in": sedes_visibles}} if sedes_visibles
+        else {}  # sin filtro si no hay sedes definidas (fallback seguro)
+    )
+
     pipeline = [
         {
             "$match": {
@@ -2443,7 +2460,8 @@ async def get_citas_estilista(
                     {"estilista_id": profesional_id},
                     {"profesional_id": profesional_id}
                 ],
-                "fecha": {"$gte": str_desde, "$lte": str_hasta}
+                "fecha": {"$gte": str_desde, "$lte": str_hasta},
+                **match_sede   # ← agrega el filtro de sede si existe
             }
         },
         {"$sort": {"fecha": 1}},
