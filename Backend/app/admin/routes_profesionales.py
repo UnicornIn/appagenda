@@ -88,6 +88,22 @@ async def obtener_servicios_presta(profesional: dict):
         print(f"Error calculando servicios presta: {str(e)}")
         return []
 
+def aplicar_scope_estilista(current_user: dict, profesional_id_objetivo: str = None):
+    """
+    Retorna True si el usuario tiene acceso al recurso solicitado.
+    - super_admin: acceso total
+    - admin_sede: acceso a su sede
+    - estilista: solo su propio perfil
+    """
+    rol = current_user["rol"]
+    if rol == "super_admin":
+        return True
+    if rol == "admin_sede":
+        return True  # el filtro de sede se aplica en la query
+    if rol == "estilista":
+        return current_user.get("profesional_id") == profesional_id_objetivo
+    return False
+
 # ===================================================
 # ✅ Crear profesional — sede_id VIENE EN EL MODELO
 # ===================================================
@@ -178,6 +194,7 @@ async def create_profesional(
         "hashed_password": hashed_password,
         "rol": "estilista",
         "sede_id": sede_id,
+        "sedes_permitidas": profesional.sedes_permitidas or [],
         "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "activo": True,
         "creado_por": current_user["email"],
@@ -215,14 +232,24 @@ async def list_professionals(
     sede_id: str = None,
     current_user: dict = Depends(get_current_user)
 ):
+    rol = current_user["rol"]
     query = {"rol": "estilista"}
-    sede_activa = sede_id or current_user.get("sede_id")
 
-    if current_user["rol"] == "admin_sede":
-        query["sede_id"] = sede_activa
-    elif sede_activa and current_user["rol"] != "super_admin":
-        query["sede_id"] = sede_activa
-    
+    if rol == "super_admin":
+        if sede_id:
+            query["$or"] = [{"sede_id": sede_id}, {"sedes_permitidas": sede_id}]
+
+    elif rol == "admin_sede":
+        sede = current_user["sede_id"]
+        query["$or"] = [{"sede_id": sede}, {"sedes_permitidas": sede}]
+
+    elif rol == "estilista":
+        # Solo puede verse a sí mismo
+        query["profesional_id"] = current_user.get("profesional_id")
+
+    else:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
     if activo is not None:
         query["activo"] = activo
 
@@ -300,16 +327,20 @@ async def list_staff_names(
 
     query_profesionales = {
         "rol": "estilista",
-        "sede_id": sede_objetivo,
         "activo": {"$ne": False},
+        "$and": [
+            {"$or": [{"sede_id": sede_objetivo}, {"sedes_permitidas": sede_objetivo}]},
+        ]
     }
     if filtro_regex:
-        query_profesionales["$or"] = [
-            {"nombre": filtro_regex},
-            {"apellido": filtro_regex},
-            {"email": filtro_regex},
-            {"profesional_id": filtro_regex},
-        ]
+        query_profesionales["$and"].append({
+            "$or": [
+                {"nombre": filtro_regex},
+                {"apellido": filtro_regex},
+                {"email": filtro_regex},
+                {"profesional_id": filtro_regex},
+            ]
+        })
 
     profesionales_raw = await collection_estilista.find(
         query_profesionales,
@@ -392,9 +423,19 @@ async def list_staff_names(
 # ===================================================
 @router.get("/{profesional_id}", response_model=dict)
 async def get_professional(
-    profesional_id: str, 
+    profesional_id: str,
     current_user: dict = Depends(get_current_user)
 ):
+    rol = current_user["rol"]
+
+    # Estilista solo puede ver su propio perfil
+    if rol == "estilista":
+        if current_user.get("profesional_id") != profesional_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Solo puedes consultar tu propio perfil"
+            )
+
     """
     Obtiene un profesional por su profesional_id o ObjectId.
     Incluye nombres de servicios y nombre de la sede.
@@ -538,6 +579,15 @@ async def update_professional(
         raise HTTPException(
             status_code=404, 
             detail=f"Profesional no encontrado: {profesional_id}"
+        )
+    
+    if "sedes_permitidas" in update_data:
+        await collection_auth.update_one(
+            {"profesional_id": profesional_id},
+            {"$set": {
+                "sedes_permitidas": update_data["sedes_permitidas"],
+                "updated_at": datetime.now()
+            }}
         )
 
     return {
@@ -721,6 +771,14 @@ async def get_estadisticas_profesional(
     profesional_id: str,
     current_user: dict = Depends(get_current_user)
 ):
+    rol = current_user["rol"]
+
+    if rol == "estilista":
+        if current_user.get("profesional_id") != profesional_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Solo puedes ver tus propias estadísticas"
+            )
     """
     Obtiene estadísticas detalladas de un profesional.
     Incluye conteo de servicios, etc.

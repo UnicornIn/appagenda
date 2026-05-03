@@ -301,12 +301,17 @@ async def listar_bloqueos_profesional(
     profesional_id: str,
     current_user: dict = Depends(get_current_user)
 ):
+    from app.utils.scope import get_profesional_ids, expand_profesional_filter
     rol = str(current_user.get("rol", "")).strip().lower()
+    todos_ids = get_profesional_ids(current_user)
 
-    if rol == "estilista" and current_user.get("profesional_id") != profesional_id:
+    # Estilista solo puede ver bloqueos de sus propios IDs (canónico + asociados)
+    if rol == "estilista" and profesional_id not in todos_ids:
         raise HTTPException(status_code=403, detail="No autorizado")
 
-    bloqueos = await collection_block.find({"profesional_id": profesional_id}).sort(
+    bloqueos = await collection_block.find(
+        {"profesional_id": expand_profesional_filter(profesional_id, current_user)}
+    ).sort(
         [("fecha", 1), ("hora_inicio", 1)]
     ).to_list(None)
 

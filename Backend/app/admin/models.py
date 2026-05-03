@@ -46,6 +46,7 @@ class Profesional(BaseModel):
     especialidades: bool = Field(default=True)
     telefono: Optional[str] = None
     servicios_no_presta: Optional[List[str]] = Field(default=[])
+    sedes_permitidas: Optional[List[str]] = Field(default=[])
     activo: bool = True
     comision_productos: Optional[float] = None
     comisiones_por_categoria: Optional[Dict[str, float]] = Field(
