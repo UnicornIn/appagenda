@@ -81,6 +81,7 @@ async def get_current_user(
             "franquicia_id": user.get("franquicia_id"),
             "user_id": str(user.get("_id")),
             "profesional_id": user.get("profesional_id"),
+            "profesional_id_asociados": user.get("profesional_id_asociados", []),  # ← NUEVO
         }
     except JWTError:
         raise credentials_exception
@@ -272,6 +273,7 @@ async def login(
         email=user.get("correo_electronico"),
         sede_id=user.get("sede_id"),
         sedes_permitidas=user.get("sedes_permitidas", []),  # ← NUEVO
+        profesional_id=user.get("profesional_id"),
     )
 
 
@@ -460,6 +462,13 @@ async def update_user(
             if val is not None else []
         )
 
+    if "profesional_id_asociados" in raw_changes:
+        val = raw_changes["profesional_id_asociados"]
+        changes["profesional_id_asociados"] = (
+            [s.strip() for s in val if s and str(s).strip()]
+            if val is not None else []
+        )
+
     # franquicia_id — igual
     if "franquicia_id" in raw_changes:
         changes["franquicia_id"] = raw_changes["franquicia_id"] if raw_changes["franquicia_id"] else None
@@ -510,6 +519,8 @@ async def update_user(
         correo_electronico=updated.get("correo_electronico", ""),
         rol=updated.get("rol", ""),
         sede_id=updated.get("sede_id"),
+        sedes_permitidas=updated.get("sedes_permitidas", []),
+        profesional_id_asociados=updated.get("profesional_id_asociados", []),  # ← NUEVO
         franquicia_id=updated.get("franquicia_id"),
         activo=updated.get("activo", True),
         modificado_por=changes["modificado_por"],
@@ -659,6 +670,8 @@ async def refresh_token_endpoint(response: Response, refresh_token: str = Cookie
             email=email,
             nombre=user.get("nombre"),
             sede_id=user.get("sede_id"),
+            sedes_permitidas=user.get("sedes_permitidas", []),
+            profesional_id=user.get("profesional_id"),   # ← AGREGAR ESTA LÍNEA
         )
 
     except JWTError as e:

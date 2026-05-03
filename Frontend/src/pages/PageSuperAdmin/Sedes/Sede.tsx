@@ -136,7 +136,7 @@ export default function SedesPage() {
 
   if (authLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex flex-col min-h-screen items-center justify-center">
         <Loader className="h-5 w-5 animate-spin" />
       </div>
     );
@@ -144,7 +144,7 @@ export default function SedesPage() {
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="mb-2 text-lg font-semibold text-gray-900">No autenticado</div>
           <div className="text-sm text-gray-600">Inicia sesión para continuar</div>
@@ -154,7 +154,7 @@ export default function SedesPage() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex flex-col h-screen bg-gray-50">
       <Sidebar />
 
       <main className="flex-1 overflow-auto">

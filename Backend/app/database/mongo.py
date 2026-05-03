@@ -35,9 +35,11 @@ collection_sales = db["sales"]
 collection_inventarios = db["inventary"]  # Nueva colección
 collection_inventory_motions = db["inventory_motions"]  # Nueva colección
 collection_cash_expenses = db["cash_expenses"]
+collection_bills = db["bills"]  # Nueva colección para gastos generales (no solo cash)
 collection_cash_ingresos = db["cash_ingresos"]
 collection_cash_closures = db["cash_closures"]
 collection_giftcards = db["giftcards"]
 collection_pre_bookings = db["pre_bookings"]  # Nueva colección para pre-reservas
+collection_inventory_reports = db["inventory_reports"]  # Nueva colección para reportes de inventario (entradas, salidas, ajustes)
 def connect_to_mongo():
     pass

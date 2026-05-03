@@ -5,7 +5,7 @@ import { TopServices } from '../../../components/Perfomance/top-services';
 
 export default function Performance() {
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex flex-col h-screen bg-white">
       {/* Sidebar */}
       <Sidebar />
 

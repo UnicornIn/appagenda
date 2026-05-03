@@ -5,6 +5,8 @@ from app.auth.routes import get_current_user
 from datetime import datetime
 from typing import List, Optional
 from bson import ObjectId
+from app.database.mongo import collection_inventory_reports, collection_locales
+from app.utils.timezone import today
 
 router = APIRouter(prefix="/inventarios")
 
@@ -174,80 +176,173 @@ async def crear_inventario(
 async def ajustar_inventario(
     inventario_id: str,
     ajuste: AjusteInventario,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
+
     rol = current_user.get("rol")
-    
     if rol not in ["admin_sede", "super_admin", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No autorizado para ajustar inventario")
-    
+
     inventario = await collection_inventarios.find_one({"_id": ObjectId(inventario_id)})
     if not inventario:
         raise HTTPException(status_code=404, detail="Inventario no encontrado")
-    
-    if rol == ["admin_sede", "recepcionista"]:
+
+    if rol in ["admin_sede", "recepcionista"]:
         user_sede_id = current_user.get("sede_id")
-        if not user_sede_id:
-            raise HTTPException(status_code=403, detail="Usuario sin sede asignada")
         if inventario["sede_id"] != user_sede_id:
             raise HTTPException(status_code=403, detail="No puede ajustar inventario de otra sede")
-    
+
     nuevo_stock = inventario["stock_actual"] + ajuste.cantidad_ajuste
     if nuevo_stock < 0:
-        raise HTTPException(status_code=400, detail=f"El ajuste resultaría en stock negativo ({nuevo_stock})")
-    
+        raise HTTPException(
+            status_code=400,
+            detail=f"El ajuste resultaría en stock negativo ({nuevo_stock})",
+        )
+
+    # ⏰ Timezone de la sede
+    sede = await collection_locales.find_one({"id": inventario["sede_id"]})
+    fecha_actual = today(sede).replace(tzinfo=None) if sede else datetime.now()
+
     await collection_inventarios.update_one(
         {"_id": ObjectId(inventario_id)},
-        {"$set": {"stock_actual": nuevo_stock, "fecha_ultima_actualizacion": datetime.now()}}
+        {"$set": {"stock_actual": nuevo_stock, "fecha_ultima_actualizacion": fecha_actual}},
     )
-    
+
+    # 📋 Determinar tipo para inventory_reports
+    if ajuste.cantidad_ajuste > 0:
+        tipo_reporte = "entrada"
+        motivo_reporte = ajuste.motivo or "Ajuste manual (entrada rápida)"
+    else:
+        tipo_reporte = "salida"
+        motivo_reporte = ajuste.motivo or "Ajuste manual (salida rápida)"
+
+    reporte = {
+        "tipo": tipo_reporte,
+        "sede_id": inventario["sede_id"],
+        "motivo": motivo_reporte,
+        "observaciones": ajuste.observaciones,
+        "items": [
+            {
+                "producto_id": inventario["producto_id"],
+                "nombre_producto": inventario.get("nombre", inventario["producto_id"]),
+                "cantidad": abs(ajuste.cantidad_ajuste),
+                "stock_anterior": inventario["stock_actual"],
+                "stock_nuevo": nuevo_stock,
+            }
+        ],
+        "fecha": fecha_actual,
+        "creado_por": current_user["email"],
+        "es_ajuste_rapido": ajuste.motivo is None,  # flag útil para filtrar en reportes
+    }
+    await collection_inventory_reports.insert_one(reporte)
+
     operacion = "agregó" if ajuste.cantidad_ajuste > 0 else "restó"
-    print(f"🔧 AJUSTE MANUAL: {inventario['sede_id']} - {inventario.get('nombre', 'N/A')} - Se {operacion} {abs(ajuste.cantidad_ajuste)} unidades")
-    
+    print(f"🔧 AJUSTE: {inventario['sede_id']} - {inventario.get('nombre')} - Se {operacion} {abs(ajuste.cantidad_ajuste)} u.")
+
     return {
         "msg": "Ajuste aplicado correctamente",
         "producto_nombre": inventario.get("nombre"),
         "stock_anterior": inventario["stock_actual"],
         "stock_nuevo": nuevo_stock,
-        "ajuste_realizado": ajuste.cantidad_ajuste
+        "ajuste_realizado": ajuste.cantidad_ajuste,
+        "tipo_reporte": tipo_reporte,
     }
 
-
 # =========================================================
-# ⚠️ Alertas de stock bajo
+# ⚠️ Alertas de stock bajo — versión eficiente
 # =========================================================
 @router.get("/alertas/stock-bajo", response_model=List[dict])
 async def alertas_stock_bajo(
-    current_user: dict = Depends(get_current_user)
+    sede_id: Optional[str] = Query(
+        None,
+        description="Solo super_admin: filtrar alertas por sede específica"
+    ),
+    current_user: dict = Depends(get_current_user),
 ):
+    """
+    Retorna productos con stock_actual < stock_minimo.
+
+    - admin_sede / recepcionista: siempre ven solo su sede efectiva
+      (ya resuelta por el scope dinámico en get_current_user vía X-Sede-Id).
+    - super_admin: ve todas las sedes, o filtra con ?sede_id=SD-XXXX
+      (alternativamente puede usar el header X-Sede-Id para scope dinámico).
+
+    Eficiencia: un solo pipeline de aggregation + un fetch batch de productos.
+    """
     rol = current_user.get("rol")
-    
+
     if rol not in ["admin_sede", "super_admin", "recepcionista"]:
         raise HTTPException(status_code=403, detail="No autorizado")
-    
-    query = {}
-    if rol == ["admin_sede", "recepcionista"]:
-        user_sede_id = current_user.get("sede_id")
-        if not user_sede_id:
-            raise HTTPException(status_code=403, detail="Usuario sin sede asignada")
-        query["sede_id"] = user_sede_id
-    
-    inventarios = await collection_inventarios.find(query).to_list(None)
-    alertas = []
-    
-    for inv in inventarios:
-        if inv["stock_actual"] < inv["stock_minimo"]:
-            inv_dict = inventario_to_dict(inv)
-            producto = await collection_productos.find_one({"id": inv["producto_id"]})
-            if producto:
-                inv_dict["producto_nombre"] = producto.get("nombre")
-                inv_dict["producto_codigo"] = producto.get("tipo_codigo")
-                inv_dict["diferencia"] = inv["stock_minimo"] - inv["stock_actual"]
-            alertas.append(inv_dict)
-            print(f"⚠️ ALERTA STOCK BAJO: {inv['sede_id']} - {producto.get('nombre', 'N/A')} ({inv['stock_actual']}/{inv['stock_minimo']})")
-    
-    return alertas
 
+    # ── Determinar filtro de sede ────────────────────────────────────────
+    if rol in ["admin_sede", "recepcionista"]:
+        # Scope ya resuelto por get_current_user (X-Sede-Id o sede principal)
+        effective_sede = current_user.get("sede_id")
+        if not effective_sede:
+            raise HTTPException(status_code=403, detail="Usuario sin sede asignada")
+    else:
+        # super_admin: query param tiene precedencia, luego X-Sede-Id (sede_id del token)
+        effective_sede = sede_id or current_user.get("sede_id")
+        # Si no viene ninguno → None → trae todas las sedes
+
+    # ── 1. Pipeline: filtrar stock bajo directo en MongoDB ───────────────
+    match_stage: dict = {
+        "$expr": {"$lt": ["$stock_actual", "$stock_minimo"]}
+    }
+    if effective_sede:
+        match_stage["sede_id"] = effective_sede
+
+    pipeline = [
+        {"$match": match_stage},
+        {
+            "$project": {
+                "_id": 1,
+                "producto_id": 1,
+                "sede_id": 1,
+                "nombre": 1,
+                "stock_actual": 1,
+                "stock_minimo": 1,
+                "fecha_ultima_actualizacion": 1,
+                "diferencia": {"$subtract": ["$stock_minimo", "$stock_actual"]},
+            }
+        },
+        {"$sort": {"diferencia": -1}},  # más críticos primero
+    ]
+
+    inventarios = await collection_inventarios.aggregate(pipeline).to_list(None)
+
+    if not inventarios:
+        return []
+
+    # ── 2. Batch fetch de productos (UNA sola query) ─────────────────────
+    producto_ids = list({inv["producto_id"] for inv in inventarios})
+    productos_cursor = collection_productos.find(
+        {"id": {"$in": producto_ids}},
+        {"id": 1, "nombre": 1, "tipo_codigo": 1, "categoria": 1}
+    )
+    productos_list = await productos_cursor.to_list(None)
+    productos_map = {p["id"]: p for p in productos_list}
+
+    # ── 3. Armar respuesta enriquecida ───────────────────────────────────
+    alertas = []
+    for inv in inventarios:
+        inv["_id"] = str(inv["_id"])
+        producto = productos_map.get(inv["producto_id"], {})
+
+        alertas.append({
+            **inv,
+            "producto_nombre": producto.get("nombre") or inv.get("nombre"),
+            "producto_codigo": producto.get("tipo_codigo"),
+            "categoria": producto.get("categoria"),
+        })
+
+        print(
+            f"⚠️ STOCK BAJO: {inv['sede_id']} - "
+            f"{producto.get('nombre', inv.get('nombre', 'N/A'))} "
+            f"({inv['stock_actual']}/{inv['stock_minimo']}) déficit: {inv['diferencia']}"
+        )
+
+    return alertas
 
 # =========================================================
 # 📦 Obtener inventario específico por producto y sede

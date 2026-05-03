@@ -1587,7 +1587,7 @@ export function StylistsTeamWorkspace({
 
   if (authLoading || isBootLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gray-50">
         <div className="flex items-center gap-3 text-gray-700">
           <Loader2 className="h-5 w-5 animate-spin" />
           <span>Cargando módulo de equipo...</span>
@@ -1597,7 +1597,7 @@ export function StylistsTeamWorkspace({
   }
 
   return (
-    <div className="flex h-screen bg-gray-50 text-gray-900">
+    <div className="flex flex-col h-screen bg-gray-50 text-gray-900">
       <Sidebar />
 
       <main className="flex-1 overflow-auto">

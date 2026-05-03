@@ -153,11 +153,13 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
                     "otros": 0,
                     "addi": 0,
                     "giftcard": 0,
+                    "link_pago": 0,
                     "link_de_pago": 0,
                     "tarjeta_credito": 0,
                     "tarjeta_debito": 0,
                     "descuento_nomina": 0,
-                    "abono_transferencia"
+                    "descuento_por_nomina": 0,
+                    "abono_transferencia": 0,
                     "abonos": 0
                 }
             }
@@ -187,7 +189,7 @@ def calcular_metricas_financieras(ventas: List[Dict]) -> Dict:
                 metricas_por_moneda[moneda]["ventas_productos"] += subtotal
         
         # Métodos de pago desde desglose_pagos
-        for metodo in ["efectivo", "transferencia","tarjeta", "tarjeta_credito", "tarjeta_debito", "link_de_pago", "giftcard", "addi", "abonos","abono_transferencia", "descuento_nomina", "otros"]:
+        for metodo in ["efectivo", "transferencia","tarjeta", "tarjeta_credito", "tarjeta_debito", "link_pago","link_de_pago", "giftcard", "addi", "abonos","abono_transferencia", "descuento_nomina","descuento_por_nomina", "otros"]:
             valor = desglose_pagos.get(metodo, 0)
             if valor > 0:
                 metricas_por_moneda[moneda]["metodos_pago"][metodo] += valor

@@ -7,7 +7,7 @@ from app.database.mongo import (
 from app.auth.routes import get_current_user
 from app.id_generator.generator import generar_id
 from pymongo.errors import DuplicateKeyError
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from bson import ObjectId
 import logging
@@ -75,21 +75,19 @@ def _solo_digitos(texto: str) -> str:
  
  
 def _tipo_busqueda(termino: str) -> str:
-    """
-    Clasifica el tipo de búsqueda según el contenido del término.
-    Retorna: 'nombre' | 'telefono' | 'cedula_o_id' | 'mixto'
-    """
+    # ── Correo electrónico: detección prioritaria ──────────────────────
+    if "@" in termino:
+        return "correo"
+    
     digitos = _solo_digitos(termino)
     tiene_letras = bool(re.search(r"[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]", termino))
     tiene_digitos = bool(digitos)
- 
+
     if tiene_letras and not tiene_digitos:
         return "nombre"
     if not tiene_letras and tiene_digitos:
-        # Si empieza con + o tiene 7+ dígitos → teléfono; si es corto → puede ser ID o cédula
         return "telefono_o_cedula"
     if tiene_letras and tiene_digitos:
-        # Mezcla: puede ser cliente_id tipo "CLI-001" o nombre con número
         return "mixto"
     return "nombre"
  
@@ -114,29 +112,36 @@ def _normalizar_telefono(tel: str) -> str:
  
 def _score_nombre(termino: str, nombre: str) -> int:
     """
-    Score en 3 capas:
-    1. token_set_ratio  — robusto para nombres compuestos con palabras en el medio
-    2. partial_ratio    — útil para términos cortos de una sola palabra
-    3. prefix boost     — el último token puede estar incompleto mientras se escribe:
-                          "luisa busta" → "busta" empieza "bustamante" → boost +20
-                          Esto resuelve el desafase visual mientras el usuario escribe.
+    Score en 4 capas:
+    1. base: para 1 token usa partial_ratio (búsqueda parcial útil);
+             para 2+ tokens usa token_set + token_sort SIN partial_ratio.
+             partial_ratio causa falsos positivos en multi-token porque
+             evalúa substrings ('arredondo' matchea 94% en 'catalina arredondo montoya').
+    2. prefix boost: el último token puede estar incompleto mientras se escribe.
+    3. token coverage penalty: penaliza nombres que no cubren todos los tokens del término.
+    4. first-token penalty: penaliza si el nombre de pila no coincide (umbral 85, no 80).
     """
     t = termino.lower().strip()
     n = nombre.lower().strip()
- 
-    score_set = fuzz.token_set_ratio(t, n)
-    score_partial = fuzz.partial_ratio(t, n)
-    base = max(score_set, score_partial)
- 
-    # Prefix boost para el último token (el usuario está escribiendo)
+
     tokens_termino = t.split()
+    tokens_nombre  = n.split()
+
+    # ── 1. Base score ──────────────────────────────────────────────────
+    if len(tokens_termino) == 1:
+        # Un solo token: partial_ratio es útil para encontrar "Ana" dentro de "Ana María"
+        base = max(fuzz.token_set_ratio(t, n), fuzz.partial_ratio(t, n))
+    else:
+        # Multi-token: token_sort es más estricto que token_set y no sufre del
+        # problema de substring. Tomamos el máximo entre ambos.
+        base = max(fuzz.token_set_ratio(t, n), fuzz.token_sort_ratio(t, n))
+
+    # ── 2. Prefix boost (usuario escribiendo el último token) ──────────
     if tokens_termino:
         ultimo_token = tokens_termino[-1]
         if len(ultimo_token) >= 2:
-            tokens_nombre = n.split()
             prefijo_match = any(p.startswith(ultimo_token) for p in tokens_nombre)
             if prefijo_match:
-                # Si los tokens anteriores también están → más confianza → boost mayor
                 tokens_previos = tokens_termino[:-1]
                 contexto_ok = all(
                     any(fuzz.ratio(tp, tn) >= 70 for tn in tokens_nombre)
@@ -144,9 +149,32 @@ def _score_nombre(termino: str, nombre: str) -> int:
                 ) if tokens_previos else True
                 boost = 22 if contexto_ok else 10
                 base = min(100, base + boost)
- 
+
+    # ── 3. Token coverage penalty ──────────────────────────────────────
+    if len(tokens_termino) >= 2:
+        tokens_cubiertos = sum(
+            1 for tt in tokens_termino
+            if any(fuzz.ratio(tt, tn) >= 70 or tn.startswith(tt) or tt.startswith(tn)
+                   for tn in tokens_nombre)
+        )
+        cobertura = tokens_cubiertos / len(tokens_termino)
+        penalizacion = round((1 - cobertura) * 50)
+        base = max(0, base - penalizacion)
+
+    # ── 4. First-token boost/penalty ───────────────────────────────────
+    # Umbral en 85 (no 80): fuzz.ratio('natalia','catalina')=80 era falso positivo
+    if tokens_termino and tokens_nombre:
+        primer_token = tokens_termino[0]
+        if len(primer_token) >= 3:
+            mejor_match_primer = max(
+                fuzz.ratio(primer_token, tn) for tn in tokens_nombre
+            )
+            if mejor_match_primer >= 85:
+                base = min(100, base + 10)
+            elif mejor_match_primer < 55:
+                base = max(0, base - 30)
+
     return base
- 
  
 def _umbral_dinamico(termino: str) -> int:
     """
@@ -234,12 +262,8 @@ async def _buscar_candidatos(
     projection: dict,
     max_candidatos: int = 5000
 ) -> List[dict]:
-    """
-    Estrategia de pre-filtro en MongoDB según el tipo de búsqueda.
-    Siempre garantiza que los candidatos relevantes estén incluidos.
-    """
+
     if tipo == "nombre":
-        # Pre-filtro: nombres que contengan AL MENOS UNO de los tokens
         tokens = [re.escape(t) for t in termino.split() if len(t) >= 2]
         if tokens:
             query = {
@@ -251,13 +275,17 @@ async def _buscar_candidatos(
             }
         else:
             query = query_base
- 
+
+    elif tipo == "correo":                                   # ← NUEVO
+        query = {
+            **query_base,
+            "correo": {"$regex": re.escape(termino), "$options": "i"}
+        }
+
     elif tipo == "telefono_o_cedula":
-        # Buscar por teléfono Y por cédula simultáneamente
         digitos = _solo_digitos(termino)
         if not digitos:
             return []
-        # Regex que busca los dígitos en cualquier posición del campo
         regex_digitos = {"$regex": digitos, "$options": "i"}
         query = {
             **query_base,
@@ -267,24 +295,23 @@ async def _buscar_candidatos(
                 {"cliente_id": {"$regex": re.escape(termino), "$options": "i"}},
             ]
         }
- 
-    else:  # mixto (cliente_id tipo "CLI-001")
+
+    else:  # mixto
         query = {
             **query_base,
             "$or": [
                 {"cliente_id": {"$regex": re.escape(termino), "$options": "i"}},
-                {"nombre": {"$regex": re.escape(termino), "$options": "i"}},
+                {"nombre":     {"$regex": re.escape(termino), "$options": "i"}},
             ]
         }
- 
+
     candidatos = await (
         collection_clients
         .find(query, projection)
         .limit(max_candidatos)
         .to_list(max_candidatos)
     )
- 
-    # Fallback: si no hay resultados, ampliar sin restricción de campo
+
     if len(candidatos) < 3 and tipo == "nombre":
         candidatos = await (
             collection_clients
@@ -292,23 +319,26 @@ async def _buscar_candidatos(
             .limit(max_candidatos)
             .to_list(max_candidatos)
         )
- 
+
     return candidatos
  
  
 def _puntuar_y_ordenar(candidatos: List[dict], termino: str, tipo: str) -> List[dict]:
-    """
-    Aplica el algoritmo de scoring adecuado según el tipo de búsqueda
-    y retorna la lista ordenada por relevancia.
-    """
     if tipo == "nombre":
         return _aplicar_fuzzy_nombres(candidatos, termino)
- 
+
+    elif tipo == "correo":                                   # ← NUEVO
+        # Ordenar por qué tan al inicio del correo aparece el término
+        termino_lower = termino.lower()
+        def score_correo(c):
+            correo = (c.get("correo") or "").lower()
+            idx = correo.find(termino_lower)
+            return idx if idx >= 0 else 9999
+        return sorted(candidatos, key=score_correo)
+
     elif tipo == "telefono_o_cedula":
-        # Para teléfonos y cédulas: match exacto por contenido, sin fuzzy
         por_tel = _aplicar_filtro_telefono(candidatos, termino)
         por_ced = _aplicar_filtro_cedula(candidatos, termino)
-        # Combinar sin duplicados, teléfono primero
         ids_vistos = set()
         resultado = []
         for c in por_tel + por_ced:
@@ -317,11 +347,9 @@ def _puntuar_y_ordenar(candidatos: List[dict], termino: str, tipo: str) -> List[
                 ids_vistos.add(cid)
                 resultado.append(c)
         return resultado
- 
-    else:  # mixto
-        # Para cliente_id u otros mixtos: devolver como vienen (ya filtrados por MongoDB)
-        return candidatos
 
+    else:  # mixto
+        return candidatos
 
 # ============================================================
 # CREAR CLIENTE
@@ -429,12 +457,79 @@ async def listar_clientes(
         raise HTTPException(500, "Error al listar clientes")
  
  
+
+# ============================================================
+# BÚSQUEDA LIGERA — Para citas, giftcards, ventas directas
+# ============================================================
+@router.get("/buscar", response_model=List[dict])
+async def buscar_clientes_ligero(
+    filtro: str = Query(..., min_length=2, description="Nombre, teléfono, cédula, correo o ID"),
+    limite: int = Query(15, ge=1, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Búsqueda rápida de clientes para gestión operativa (citas, giftcards, ventas).
+    Devuelve solo los campos esenciales para identificar al cliente.
+    Soporta: nombre (fuzzy), teléfono, cédula, correo, cliente_id.
+    """
+    try:
+        rol = current_user.get("rol")
+        if rol not in ["admin_sede", "super_admin", "estilista", "call_center", "recepcionista"]:
+            raise HTTPException(403, "No autorizado")
+
+        query_base = await _get_query_base(rol, current_user)
+        filtro_limpio = filtro.strip()
+
+        # Proyección mínima — solo lo necesario para identificar al cliente
+        projection = {
+            "_id": 1,
+            "cliente_id": 1,
+            "nombre": 1,
+            "correo": 1,
+            "cedula": 1,
+            "telefono": 1,
+            "sede_id": 1,
+            "franquicia_id": 1,
+        }
+
+        tipo = _tipo_busqueda(filtro_limpio)
+
+        candidatos = await _buscar_candidatos(
+            query_base=query_base,
+            termino=filtro_limpio,
+            tipo=tipo,
+            projection=projection,
+            max_candidatos=2000   # techo más bajo — no necesitamos toda la base
+        )
+
+        resultado = _puntuar_y_ordenar(candidatos, filtro_limpio, tipo)
+
+        return [
+            {
+                "id":            str(c.get("_id", "")),
+                "cliente_id":    c.get("cliente_id", ""),
+                "nombre":        c.get("nombre", ""),
+                "correo":        c.get("correo", ""),
+                "cedula":        c.get("cedula", ""),
+                "telefono":      c.get("telefono", ""),
+                "sede_id":       c.get("sede_id"),
+                "franquicia_id": c.get("franquicia_id"),
+            }
+            for c in resultado[:limite]
+        ]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en buscar_clientes_ligero: {e}", exc_info=True)
+        raise HTTPException(500, "Error al buscar clientes")
+
 # ============================================================
 # LISTAR TODOS — CON PAGINACIÓN Y BÚSQUEDA INTELIGENTE
 # ============================================================
 @router.get("/todos", response_model=ClientesPaginados)
 async def listar_todos(
-    filtro: Optional[str] = Query(None, description="Búsqueda por nombre, teléfono, cédula o ID"),
+    filtro: Optional[str] = Query(None, description="Búsqueda por nombre, teléfono, correo, cédula o ID"),
     limite: int = Query(30, ge=1, le=100),
     pagina: int = Query(1, ge=1),
     current_user: dict = Depends(get_current_user)
@@ -444,6 +539,7 @@ async def listar_todos(
     - Nombres: fuzzy con token_set_ratio + partial_ratio, umbral dinámico
     - Teléfonos: normaliza prefijos de país (+57, 57, etc.)
     - Cédulas: normaliza dígitos, búsqueda por contención
+    - Correos: búsqueda exacta
     - IDs: regex exacto
     """
     try:
@@ -456,10 +552,22 @@ async def listar_todos(
  
         projection = {
             "_id": 1, "cliente_id": 1, "nombre": 1, "correo": 1,
-            "telefono": 1, "cedula": 1, "sede_id": 1, "franquicia_id": 1,
+            "telefono": 1, "cedula": 1, "sede_id": 1, "franquicia_id": 1, "cedula": 1,
+            "fecha_creacion": 1,
             "fecha_registro": 1,
+            "total_gastado": 1,
+            "ticket_promedio": 1,
+            "ltv_proyectado": 1,
+            "dias_sin_visitar": 1,
+            "ultima_visita": 1,
+            "primera_visita": 1,
+            "frecuencia_dias": 1,
+            "en_riesgo_churn": 1,
+            "segmento": 1,
+            "total_visitas": 1,
+            "notas_historial": {"$slice": 5},
+            # score_retencion y tendencia_gasto: se guardan en BD pero no se exponen
         }
- 
         # ── SIN FILTRO: comportamiento original con paginación ──────────────
         if not filtro_limpio:
             if rol == "super_admin" and not query_base:
@@ -539,17 +647,43 @@ async def listar_todos(
 # 🪶 FUNCIÓN AUXILIAR: Convertir a dict ligero
 # ============================================================
 def cliente_to_dict_ligero(cliente: dict) -> dict:
-    return {
-        "id": str(cliente.get("_id", "")),
-        "cliente_id": cliente.get("cliente_id", ""),
-        "nombre": cliente.get("nombre", ""),
-        "correo": cliente.get("correo", ""),
-        "telefono": cliente.get("telefono", ""),
-        "sede_id": cliente.get("sede_id"),
-        "franquicia_id": cliente.get("franquicia_id"),
-        "fecha_registro": cliente.get("fecha_registro")
-    }
+    ultima_visita  = cliente.get("ultima_visita")
+    primera_visita = cliente.get("primera_visita")
 
+    fecha_creacion = cliente.get("fecha_creacion") or cliente.get("fecha_registro")
+    if isinstance(fecha_creacion, datetime):
+        fecha_creacion = fecha_creacion.strftime("%Y-%m-%d")
+
+    dias_sin_visitar = 0
+    if ultima_visita:
+        try:
+            ultima_dt = datetime.strptime(str(ultima_visita)[:10], "%Y-%m-%d")
+            dias_sin_visitar = max(0, (datetime.now() - ultima_dt).days)
+        except Exception:
+            dias_sin_visitar = cliente.get("dias_sin_visitar", 0) or 0
+
+    return {
+        "id":               str(cliente.get("_id", "")),
+        "cliente_id":       cliente.get("cliente_id", ""),
+        "nombre":           cliente.get("nombre", ""),
+        "correo":           cliente.get("correo", ""),
+        "telefono":         cliente.get("telefono", ""),
+        "cedula":           cliente.get("cedula", ""), 
+        "sede_id":          cliente.get("sede_id"),
+        "franquicia_id":    cliente.get("franquicia_id"),
+        "fecha_creacion":   fecha_creacion,
+        "total_gastado":    cliente.get("total_gastado", 0) or 0,
+        "ticket_promedio":  cliente.get("ticket_promedio", 0) or 0,
+        "ltv_proyectado":   cliente.get("ltv_proyectado", 0) or 0,
+        "dias_sin_visitar": dias_sin_visitar,
+        "ultima_visita":    ultima_visita,
+        "primera_visita":   primera_visita,
+        "frecuencia_dias":  cliente.get("frecuencia_dias"),
+        "en_riesgo_churn":  cliente.get("en_riesgo_churn", False) or False,
+        "segmento":         cliente.get("segmento", "Nuevo") or "Nuevo",
+        "total_visitas":    cliente.get("total_visitas", 0) or 0,
+        "notas_historial":  cliente.get("notas_historial", []),
+    }
 
 # ============================================================
 # LISTAR CLIENTES POR ID DE SEDE
@@ -715,9 +849,11 @@ async def agregar_nota(
         if not cliente:
             raise HTTPException(404, "Cliente no encontrado")
 
-        nota_obj = nota.dict()
-        nota_obj["fecha"] = datetime.now()
-        nota_obj["autor"] = current_user.get("email")
+        nota_obj = {
+            "contenido": nota.contenido,   # ← was nota.nota
+            "fecha": datetime.now(),
+            "autor": nota.autor or current_user.get("email"),
+        }
 
         await collection_clients.update_one(
             {"_id": cliente["_id"]},
@@ -928,4 +1064,299 @@ async def obtener_calificacion_cliente(
         "calificacion": cliente.get("calificacion"),          # None si nunca fue calificado
         "actualizada_en": cliente.get("calificacion_actualizada_en"),
         "actualizada_por": cliente.get("calificacion_actualizada_por"),
+    }
+
+async def calcular_analytics_cliente(cliente_id: str, hoy: datetime) -> dict | None:
+    """
+    Calcula todas las métricas de negocio para un cliente.
+    Retorna None si no hay citas válidas.
+    """
+    pipeline = [
+        {"$match": {
+            "cliente_id": cliente_id,
+            "valor_total": {"$gt": 0},
+            "$or": [
+                {"estado_pago": {"$in": ["pagado", "abonado"]}},
+                {"estado": {"$in": ["completada", "finalizado"]}}
+            ]
+        }},
+        {"$sort": {"fecha": 1}},
+        {"$group": {
+            "_id": "$cliente_id",
+            "total_gastado":   {"$sum": "$valor_total"},
+            "count":           {"$sum": 1},
+            "ultima_visita":   {"$max": "$fecha"},
+            "primera_visita":  {"$min": "$fecha"},
+            "todas_las_fechas": {"$push": "$fecha"},
+            # Gasto últimos 90 días vs 90 anteriores
+            "gasto_reciente": {
+                "$sum": {
+                    "$cond": [
+                        {"$gte": ["$fecha", (hoy - timedelta(days=90)).strftime("%Y-%m-%d")]},
+                        "$valor_total", 0
+                    ]
+                }
+            },
+            "gasto_anterior": {
+                "$sum": {
+                    "$cond": [
+                        {"$and": [
+                            {"$gte": ["$fecha", (hoy - timedelta(days=180)).strftime("%Y-%m-%d")]},
+                            {"$lt":  ["$fecha", (hoy - timedelta(days=90)).strftime("%Y-%m-%d")]}
+                        ]},
+                        "$valor_total", 0
+                    ]
+                }
+            },
+        }}
+    ]
+
+    stats = await collection_citas.aggregate(pipeline).to_list(1)
+    if not stats:
+        return None
+
+    s = stats[0]
+    count = s["count"]
+
+    # ── Fechas ───────────────────────────────────────────────────────
+    ultima_str   = str(s["ultima_visita"])[:10]
+    primera_str  = str(s["primera_visita"])[:10]
+    ultima_dt    = datetime.strptime(ultima_str, "%Y-%m-%d")
+    primera_dt   = datetime.strptime(primera_str, "%Y-%m-%d")
+    dias_sin_venir = max(0, (hoy - ultima_dt).days)
+
+    # ── Frecuencia real (promedio de días entre visitas) ─────────────
+    fechas_ordenadas = sorted(set(str(f)[:10] for f in s["todas_las_fechas"]))
+    if len(fechas_ordenadas) >= 2:
+        intervalos = []
+        for i in range(1, len(fechas_ordenadas)):
+            d1 = datetime.strptime(fechas_ordenadas[i-1], "%Y-%m-%d")
+            d2 = datetime.strptime(fechas_ordenadas[i],   "%Y-%m-%d")
+            diff = (d2 - d1).days
+            if diff > 0:  # ignorar duplicados del mismo día
+                intervalos.append(diff)
+        frecuencia_dias = round(sum(intervalos) / len(intervalos)) if intervalos else None
+    else:
+        frecuencia_dias = None
+
+    # ── Ticket promedio ───────────────────────────────────────────────
+    ticket_promedio = round(s["total_gastado"] / count, 2)
+
+    # ── LTV real proyectado ───────────────────────────────────────────
+    # Si tenemos frecuencia: ticket × (365/frecuencia) × 3 años
+    # Si no: ticket × 12 visitas/año × 3 años (asunción conservadora)
+    # Solo proyectar si hay frecuencia real (mínimo 2 visitas con días distintos)
+    if frecuencia_dias and frecuencia_dias > 0 and count >= 2:
+        visitas_por_año = 365 / frecuencia_dias
+        ltv_proyectado  = round(ticket_promedio * visitas_por_año * 3)
+    else:
+        # Sin datos suficientes: LTV = solo lo que ha pagado, sin proyección
+        ltv_proyectado = round(s["total_gastado"], 2)
+
+    # ── Tendencia de gasto ────────────────────────────────────────────────
+    gasto_rec = s.get("gasto_reciente", 0)
+    gasto_ant = s.get("gasto_anterior", 0)
+    if gasto_ant > 0:
+        tendencia_pct = round(((gasto_rec - gasto_ant) / gasto_ant) * 100)
+    elif gasto_rec > 0:
+        tendencia_pct = 100   # cliente nuevo con actividad reciente
+    else:
+        tendencia_pct = -100  # no ha gastado nada en 180 días
+
+    # ── Churn: combinación de frecuencia + tendencia + días absolutos ─────
+    if frecuencia_dias and frecuencia_dias > 0:
+        umbral_churn = frecuencia_dias * 2      # antes era 1.5, ahora más holgado
+        por_frecuencia = dias_sin_venir > umbral_churn
+    else:
+        por_frecuencia = dias_sin_venir > 60    # fallback sin frecuencia
+
+    por_tendencia  = tendencia_pct <= -80       # gastó 80% menos o nada en 90d
+    por_inactividad = dias_sin_venir > 180      # más de 6 meses sin aparecer
+
+    en_riesgo = por_frecuencia or por_tendencia or por_inactividad
+
+    # ── Score de retención ────────────────────────────────────────────────
+    umbral_score = (frecuencia_dias * 2) if frecuencia_dias else 60
+    score_ret = max(0, round(100 - (dias_sin_venir / umbral_score * 100)))
+    # Penalizar si la tendencia es muy negativa
+    if tendencia_pct <= -80:
+        score_ret = min(score_ret, 30)
+
+    # ── Segmento ──────────────────────────────────────────────────────────
+    # Primero detectar si el cliente está perdido
+    if dias_sin_venir > 365:
+        segmento = "Inactivo"
+    elif dias_sin_venir > 180 or (en_riesgo and tendencia_pct <= -80):
+        segmento = "En riesgo"
+    elif count < 2:
+        segmento = "Nuevo"       # solo 1 visita, sin data suficiente
+    elif ltv_proyectado >= 3_000_000 and count >= 3:
+        segmento = "VIP"
+    elif ltv_proyectado >= 1_000_000 and count >= 3:
+        segmento = "Premium"
+    else:
+        segmento = "Regular"
+    return {
+        # Valores guardados en DB
+        "total_gastado":    round(s["total_gastado"], 2),
+        "ticket_promedio":  ticket_promedio,
+        "ltv_proyectado":   ltv_proyectado,
+        "ultima_visita":    ultima_str,
+        "primera_visita":   primera_str,
+        "dias_sin_visitar": dias_sin_venir,
+        "frecuencia_dias":  frecuencia_dias,      # promedio días entre visitas
+        "total_visitas":    count,
+        "tendencia_gasto":  tendencia_pct,        # % vs 90d anteriores
+        "en_riesgo_churn":  en_riesgo,
+        "segmento":         segmento,             # Nuevo/Regular/Premium/VIP
+    }
+
+@router.post("/admin/backfill-analytics", response_model=dict)
+async def backfill_client_analytics(
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["rol"] != "super_admin":
+        raise HTTPException(403, "Solo super_admin")
+
+    from pymongo import UpdateOne
+    from datetime import timedelta
+
+    hoy = datetime.now()
+    hace_90  = (hoy - timedelta(days=90)).strftime("%Y-%m-%d")
+    hace_180 = (hoy - timedelta(days=180)).strftime("%Y-%m-%d")
+
+    pipeline = [
+        {"$match": {
+            "valor_total": {"$gt": 0},
+            "$or": [
+                {"estado_pago": {"$in": ["pagado", "abonado"]}},
+                {"estado": {"$in": ["completada", "finalizado"]}}
+            ]
+        }},
+        {"$group": {
+            "_id": "$cliente_id",
+            "total_gastado":    {"$sum": "$valor_total"},
+            "count":            {"$sum": 1},
+            "ultima_visita":    {"$max": "$fecha"},
+            "primera_visita":   {"$min": "$fecha"},
+            "todas_las_fechas": {"$push": "$fecha"},
+            "gasto_reciente":   {"$sum": {"$cond": [{"$gte": ["$fecha", hace_90]}, "$valor_total", 0]}},
+            "gasto_anterior":   {"$sum": {"$cond": [{"$and": [{"$gte": ["$fecha", hace_180]}, {"$lt": ["$fecha", hace_90]}]}, "$valor_total", 0]}},
+        }}
+    ]
+
+    cursor = collection_citas.aggregate(pipeline, allowDiskUse=True)
+
+    operaciones = []
+    total_procesados = 0
+    total_modificados = 0
+    errores = 0
+    BATCH = 500
+
+    async for s in cursor:
+        cliente_id = s["_id"]
+        if not cliente_id or not s.get("ultima_visita"):
+            continue
+
+        try:
+            ultima_str  = str(s["ultima_visita"])[:10]
+            primera_str = str(s["primera_visita"])[:10]
+            ultima_dt   = datetime.strptime(ultima_str, "%Y-%m-%d")
+            dias_sin_venir = max(0, (hoy - ultima_dt).days)
+            count = s["count"]
+
+            # Frecuencia real
+            fechas = sorted(set(str(f)[:10] for f in s["todas_las_fechas"]))
+            intervalos = []
+            for i in range(1, len(fechas)):
+                d1 = datetime.strptime(fechas[i-1], "%Y-%m-%d")
+                d2 = datetime.strptime(fechas[i],   "%Y-%m-%d")
+                diff = (d2 - d1).days
+                if diff > 0:
+                    intervalos.append(diff)
+            frecuencia_dias = round(sum(intervalos) / len(intervalos)) if intervalos else None
+
+            ticket_promedio = round(s["total_gastado"] / count, 2)
+
+            # LTV solo si hay frecuencia real con mínimo 2 visitas
+            if frecuencia_dias and frecuencia_dias > 0 and count >= 2:
+                ltv_proyectado = round(ticket_promedio * (365 / frecuencia_dias) * 3)
+            else:
+                ltv_proyectado = round(s["total_gastado"], 2)
+
+            # Tendencia
+            gasto_rec = s.get("gasto_reciente", 0)
+            gasto_ant = s.get("gasto_anterior", 0)
+            if gasto_ant > 0:
+                tendencia_pct = round(((gasto_rec - gasto_ant) / gasto_ant) * 100)
+            elif gasto_rec > 0:
+                tendencia_pct = 100
+            else:
+                tendencia_pct = -100
+
+            # Churn
+            if frecuencia_dias and frecuencia_dias > 0:
+                umbral_churn = frecuencia_dias * 2
+                por_frecuencia = dias_sin_venir > umbral_churn
+            else:
+                por_frecuencia = dias_sin_venir > 60
+
+            en_riesgo = (
+                por_frecuencia or
+                tendencia_pct <= -80 or
+                dias_sin_venir > 180
+            )
+
+            # Segmento
+            if dias_sin_venir > 365:
+                segmento = "Inactivo"
+            elif dias_sin_venir > 180 or (en_riesgo and tendencia_pct <= -80):
+                segmento = "En riesgo"
+            elif count < 2:
+                segmento = "Nuevo"
+            elif ltv_proyectado >= 3_000_000 and count >= 3:
+                segmento = "VIP"
+            elif ltv_proyectado >= 1_000_000 and count >= 3:
+                segmento = "Premium"
+            else:
+                segmento = "Regular"
+
+            operaciones.append(UpdateOne(
+                {"cliente_id": cliente_id},
+                {"$set": {
+                    "total_gastado":    round(s["total_gastado"], 2),
+                    "ticket_promedio":  ticket_promedio,
+                    "ltv_proyectado":   ltv_proyectado,
+                    "ultima_visita":    ultima_str,
+                    "primera_visita":   primera_str,
+                    "dias_sin_visitar": dias_sin_venir,
+                    "frecuencia_dias":  frecuencia_dias,
+                    "total_visitas":    count,
+                    "en_riesgo_churn":  en_riesgo,
+                    "segmento":         segmento,
+                    # tendencia la guardamos pero no la exponemos en API aún
+                    "tendencia_gasto":  tendencia_pct,
+                }}
+            ))
+            total_procesados += 1
+
+        except Exception as e:
+            logger.warning(f"Backfill skip {cliente_id}: {e}")
+            errores += 1
+            continue
+
+        if len(operaciones) >= BATCH:
+            res = await collection_clients.bulk_write(operaciones, ordered=False)
+            total_modificados += res.modified_count
+            operaciones = []
+
+    if operaciones:
+        res = await collection_clients.bulk_write(operaciones, ordered=False)
+        total_modificados += res.modified_count
+
+    return {
+        "success": True,
+        "procesados": total_procesados,
+        "modificados": total_modificados,
+        "errores": errores
     }

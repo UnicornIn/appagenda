@@ -29,6 +29,10 @@ class ClientesPaginados(BaseModel):
     metadata: MetadataPaginacion
 
 
+class NotaCliente(BaseModel):
+    contenido: str          # ← was "nota", frontend sends "contenido"
+    autor: Optional[str] = None
+
 class Cliente(BaseModel):
     cliente_id: Optional[str] = None
     nombre: str
@@ -36,10 +40,14 @@ class Cliente(BaseModel):
     telefono: Optional[str] = None
     cedula: Optional[str] = None
     ciudad: Optional[str] = None
-    fecha_de_nacimiento: Optional[str] = None # "1990-06-01"  # ISO string
+    fecha_de_nacimiento: Optional[str] = None
     sede_id: Optional[str] = None
     notas: Optional[str] = None
     fecha_creacion: Optional[datetime] = None
+    ultima_visita: Optional[str] = None         # ← new, ISO date string
+    total_gastado: Optional[float] = None        # ← new
+    ticket_promedio: Optional[float] = None      # ← new
+    dias_sin_visitar: Optional[int] = None       # ← new
 
     @field_validator("nombre", mode="before")
     @classmethod

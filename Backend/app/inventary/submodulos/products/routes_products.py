@@ -275,7 +275,7 @@ async def eliminar_producto(
     return {"msg": "Producto eliminado correctamente"}
 
 
-# =========================================================
+"""# =========================================================
 # 🔹 Productos con stock bajo
 # =========================================================
 @router.get("/alertas/stock-bajo", response_model=List[dict])
@@ -302,7 +302,7 @@ async def productos_stock_bajo(
         print(f"⚠️ ALERTA: {p['nombre']} - Stock: {p['stock_actual']}/{p['stock_minimo']}")
         resultado.append(p_dict)
 
-    return resultado
+    return resultado"""
 
 
 # =========================================================

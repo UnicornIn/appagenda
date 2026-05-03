@@ -15,6 +15,29 @@ export interface SalesMetricsData {
   cantidad_ventas?: number;
   ticket_promedio?: number;
   crecimiento_ventas?: string;
+  // Payment method breakdown
+  efectivo?: number;
+  transferencia?: number;
+  tarjeta?: number;
+  tarjeta_credito?: number;
+  tarjeta_debito?: number;
+  sin_pago?: number;
+  otros?: number;
+  addi?: number;
+  giftcard?: number;
+  link_de_pago?: number;
+  descuento_nomina?: number;
+  abono_transferencia?: number;
+  abonos?: number;
+}
+
+export interface PaymentMethodTotals {
+  efectivo: number;
+  transferencia: number;
+  tarjeta: number;
+  nequi: number;
+  daviplata: number;
+  otros: number;
 }
 
 export interface SalesMetricsResponse {
@@ -139,6 +162,31 @@ export function extractMainMetrics(data: SalesMetricsResponse): {
     servicios: metricas.ventas_servicios,
     productos: metricas.ventas_productos,
     moneda: moneda
+  };
+}
+
+/**
+ * Extrae el desglose por método de pago desde la respuesta del dashboard.
+ * Nequi y Daviplata no tienen campo propio en el backend; se muestran como 0.
+ * "otros" agrupa: addi, giftcard, link_de_pago, descuento_nomina, sin_pago, otros.
+ */
+export function extractPaymentMethods(data: SalesMetricsResponse): PaymentMethodTotals {
+  const fallbackCurrency = normalizeCurrencyCode(getStoredCurrency("USD"));
+  const moneda = normalizeCurrencyCode(data.moneda_sede || fallbackCurrency);
+  const firstAvailableCurrency = Object.keys(data.metricas_por_moneda || {})[0];
+  const m: SalesMetricsData = data.metricas_por_moneda?.[moneda] ||
+    (firstAvailableCurrency ? data.metricas_por_moneda[firstAvailableCurrency] : null) ||
+    {} as SalesMetricsData;
+
+  const n = (v: number | undefined) => (typeof v === "number" && isFinite(v) ? v : 0);
+
+  return {
+    efectivo: n(m.efectivo),
+    transferencia: n(m.transferencia) + n(m.abono_transferencia) + n(m.abonos),
+    tarjeta: n(m.tarjeta) + n(m.tarjeta_credito) + n(m.tarjeta_debito),
+    nequi: 0,     // no existe como campo separado en el backend
+    daviplata: 0, // no existe como campo separado en el backend
+    otros: n(m.addi) + n(m.giftcard) + n(m.link_de_pago) + n(m.descuento_nomina) + n(m.sin_pago) + n(m.otros),
   };
 }
 
