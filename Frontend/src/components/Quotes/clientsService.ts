@@ -109,14 +109,14 @@ const fetchClientesLivianos = async (
   return clientes.map(normalizarCliente);
 };
 
-// 🔥 BÚSQUEDA DIRECTA CON RAPIDFUZZ (backend) — endpoint GET /clientes/
+// Búsqueda con debounce recomendado de 300ms — respuesta es array directo
 export async function buscarClientesRapidFuzz(
   token: string,
   filtro?: string,
   limite: number = 20
 ): Promise<Cliente[]> {
   try {
-    const url = new URL(`${API_BASE_URL}clientes/`);
+    const url = new URL(`${API_BASE_URL}clientes/buscar`);
     const q = filtro?.trim();
     if (q) url.searchParams.set("filtro", q);
     url.searchParams.set("limite", String(Math.min(Math.max(limite, 1), 100)));

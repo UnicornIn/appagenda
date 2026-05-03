@@ -1,7 +1,7 @@
 // components/Quotes/ClientSearch.tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, Plus, User, X, Loader2 } from 'lucide-react';
-import { buscarClientesRapidFuzz, crearCliente, Cliente, CrearClienteRequest } from '../../../../components/Quotes/clientsService';
+import { buscarClientes, crearCliente, Cliente, CrearClienteRequest } from '../../../../components/Quotes/clientsService';
 import { useAuth } from '../../../../components/Auth/AuthContext';
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -83,7 +83,7 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
 
     const timer = setTimeout(async () => {
       try {
-        const results = await buscarClientesRapidFuzz(user.access_token, q, 20);
+        const results = await buscarClientes(user.access_token, q, 20);
         if (!cancelRef.current) setClientes(results);
       } catch {
         if (!cancelRef.current) setClientes([]);

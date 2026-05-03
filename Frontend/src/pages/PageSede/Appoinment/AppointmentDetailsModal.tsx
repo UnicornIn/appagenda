@@ -7,6 +7,7 @@ import {
   Loader2,
   CheckCircle,
   Plus,
+  Minus,
   Package,
   CreditCard,
   CreditCard as CardIcon,
@@ -28,10 +29,11 @@ import {
   Gift,
   MessageCircle,
   ChevronLeft,
+  Search,
 } from "lucide-react";
 import Modal from "../../../components/ui/modal";
 import { useAuth } from "../../../components/Auth/AuthContext";
-import { updateQuote, registrarPagoCita, ApiRequestError } from "./citasApi";
+import { updateQuote, registrarPagoCita, confirmarCita, reenviarCorreoCita, ApiRequestError } from "./citasApi";
 import { formatDateDMY } from "../../../lib/dateFormat";
 import {
   getServicios,
@@ -55,41 +57,33 @@ import {
   PAYROLL_PAYMENT_METHOD,
 } from "../../../lib/payment-methods";
 
-// ── RF design status system (mirrored from Appointment.tsx) ──────────────────
+// ── RF design status system — estados backend: pre_reservada, confirmada, cancelada, completada, no_asistio ──
 const RF_STATUSES = {
-  "pre-cita": { color: "#9CA3AF", bg: "#F3F4F6", label: "Pre-cita" },
-  confirmed: { color: "#3B82F6", bg: "#EFF6FF", label: "Confirmada" },
+  pre_reservada: { color: "#F59E0B", bg: "#FFFBEB", label: "Pre-reservada" },
+  confirmada:    { color: "#3B82F6", bg: "#EFF6FF", label: "Confirmada" },
   "in-progress": { color: "#8B5CF6", bg: "#F5F3FF", label: "En curso" },
-  completed: { color: "#10B981", bg: "#ECFDF5", label: "Completada" },
-  cancelled: { color: "#EF4444", bg: "#FEF2F2", label: "Cancelada" },
+  completada:    { color: "#10B981", bg: "#ECFDF5", label: "Completada" },
+  cancelada:     { color: "#EF4444", bg: "#FEF2F2", label: "Cancelada" },
+  no_asistio:    { color: "#6B7280", bg: "#F3F4F6", label: "No asistió" },
 } as const;
 type RFStatusKey = keyof typeof RF_STATUSES;
 
 const resolveRFStatus = (estado: string): RFStatusKey => {
   const v = (estado || "").toLowerCase().trim();
-  if (v.includes("cancel")) return "cancelled";
-  if (["pre-cita", "pre_cita", "precita"].some((s) => v.includes(s)))
-    return "pre-cita";
+  if (v.includes("cancel")) return "cancelada";
+  if (v === "no_asistio" || v === "no asistio" || v.includes("no_asistio") || v.includes("no asistio")) return "no_asistio";
+  if (["pre_reservada", "pre-cita", "pre_cita", "precita"].some((s) => v.includes(s))) return "pre_reservada";
   if (
-    [
-      "en proc",
-      "en_proc",
-      "proceso",
-      "en curso",
-      "en_curso",
-      "en-curso",
-      "progres",
-      "in-prog",
-    ].some((s) => v.includes(s))
-  )
-    return "in-progress";
-  if (
-    ["complet", "finaliz", "terminad", "realizad", "factur"].some((s) =>
-      v.includes(s),
+    ["en proc", "en_proc", "proceso", "en curso", "en_curso", "en-curso", "progres", "in-prog"].some(
+      (s) => v.includes(s),
     )
-  )
-    return "completed";
-  return "confirmed";
+  ) return "in-progress";
+  if (
+    ["complet", "finaliz", "terminad", "realizad", "factur"].some((s) => v.includes(s))
+  ) return "completada";
+  // "confirmada" o "confirmed" como estado explícito
+  if (v === "confirmada" || v === "confirmed") return "confirmada";
+  return "confirmada";
 };
 
 interface AppointmentDetailsModalProps {
@@ -173,6 +167,7 @@ const ESTADOS_NO_EDITABLES_SERVICIOS = new Set([
   "finalizada",
   "no asistio",
   "no_asistio",
+  "no asistió",
 ]);
 
 const toNumber = (value: unknown): number => {
@@ -479,6 +474,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   const [selectedProductId, setSelectedProductId] = useState("");
   const [loadingProductosDisponibles, setLoadingProductosDisponibles] =
     useState(false);
+  const [prodSearchQuery, setProdSearchQuery] = useState("");
+  const [showProdDropdown, setShowProdDropdown] = useState(false);
 
   const [profesionalesDisponibles, setProfesionalesDisponibles] = useState<
     ProfesionalDisponible[]
@@ -508,6 +505,8 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [loadingServiciosDisponibles, setLoadingServiciosDisponibles] =
     useState(false);
+  const [svcSearchQuery, setSvcSearchQuery] = useState("");
+  const [showSvcDropdown, setShowSvcDropdown] = useState(false);
   const [savingServicios, setSavingServicios] = useState(false);
   const [serviceError, setServiceError] = useState<string | null>(null);
   const [notasEditadas, setNotasEditadas] = useState("");
@@ -520,6 +519,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   const [showClientProfile, setShowClientProfile] = useState(false);
   const [clientProfile, setClientProfile] = useState<Cliente | null>(null);
   const [loadingClientProfile, setLoadingClientProfile] = useState(false);
+  const [confirmandoCita, setConfirmandoCita] = useState(false);
 
   const sessionCurrency =
     typeof window !== "undefined"
@@ -550,7 +550,11 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       setAppointmentDetails(appointment);
       setServiceError(null);
       setSelectedServiceId("");
+      setSvcSearchQuery("");
+      setShowSvcDropdown(false);
       setSelectedProductId("");
+      setProdSearchQuery("");
+      setShowProdDropdown(false);
       setProductosDisponibles([]);
       setProductosCatalogoCargado(false);
       setActiveTab("cita");
@@ -1202,7 +1206,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     if (updating || savingServicios) return true;
 
     if (
-      ["cancelada", "no asistio"].includes(
+      ["cancelada", "no asistio", "no_asistio"].includes(
         appointmentDetails?.estado?.toLowerCase(),
       )
     ) {
@@ -1226,11 +1230,10 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       return;
     }
 
-    const mensajes = {
-      cancelada:
-        "⚠️ ¿Cancelar esta cita?\n\nLa cita se marcará como cancelada.",
-      "no asistio":
-        '⚠️ ¿Marcar como "No Asistió"?\n\nEl cliente no se presentó a la cita.',
+    const mensajes: Record<string, string> = {
+      cancelada: "⚠️ ¿Cancelar esta cita?\n\nLa cita se marcará como cancelada.",
+      no_asistio: '⚠️ ¿Marcar como "No Asistió"?\n\nEl cliente no se presentó a la cita.',
+      "no asistio": '⚠️ ¿Marcar como "No Asistió"?\n\nEl cliente no se presentó a la cita.',
     };
 
     if (
@@ -1267,6 +1270,37 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       );
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleConfirmarCita = async () => {
+    if (!appointmentDetails?.id || !user?.access_token) return;
+
+    setConfirmandoCita(true);
+    try {
+      const result = await confirmarCita(appointmentDetails.id, user.access_token);
+
+      // Usar el estado que devuelve el backend
+      const nuevoEstado = result?.estado || "confirmada";
+      setAppointmentDetails((prev: any) => ({
+        ...prev,
+        estado: nuevoEstado,
+        rawData: { ...(prev?.rawData || {}), estado: nuevoEstado },
+      }));
+
+      // Reenviar correo de confirmación automáticamente
+      try {
+        await reenviarCorreoCita(appointmentDetails.id, "confirmacion", user.access_token);
+      } catch {
+        // No bloquear el flujo si el correo falla
+      }
+
+      alert("✅ Cita confirmada. Se ha enviado correo de confirmación al cliente.");
+      if (onRefresh) setTimeout(() => onRefresh(), 500);
+    } catch (error: any) {
+      alert(`❌ Error: ${extraerMensajeError(error, "No se pudo confirmar la cita")}`);
+    } finally {
+      setConfirmandoCita(false);
     }
   };
 
@@ -1363,12 +1397,15 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
 
       setAppointmentDetails((prev: any) => ({
         ...prev,
+        // Usar el estado que devuelve el backend (no forzar cambio manual)
+        ...(response.estado ? { estado: response.estado } : {}),
         rawData: {
           ...prev.rawData,
           abono: response.abono,
           saldo_pendiente: response.saldo_pendiente,
           estado_pago: response.estado_pago,
           metodo_pago: metodoPagoSeguro,
+          ...(response.estado ? { estado: response.estado } : {}),
           ...(metodoPagoSeguro === "giftcard" && codigoGiftcard
             ? { codigo_giftcard: codigoGiftcard }
             : {}),
@@ -1398,6 +1435,38 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     } finally {
       setRegistrandoPago(false);
     }
+  };
+
+  const handleAgregarServicioById = (servicioId: string) => {
+    if (
+      serviciosSeleccionados.some((s) => s.servicio_id === servicioId)
+    ) {
+      setServiceError("El servicio ya está agregado en la cita.");
+      return;
+    }
+    const servicioCatalogo = serviciosDisponibles.find(
+      (s) => s.servicio_id === servicioId,
+    );
+    if (!servicioCatalogo) {
+      setServiceError("No se encontró el servicio seleccionado.");
+      return;
+    }
+    const nuevoServicio: ServicioSeleccionado = {
+      servicio_id: servicioCatalogo.servicio_id,
+      nombre: servicioCatalogo.nombre,
+      precio_unitario: servicioCatalogo.precio,
+      precio_unitario_input: String(servicioCatalogo.precio),
+      precio_base: servicioCatalogo.precio,
+      cantidad: 1,
+      duracion_minutos: servicioCatalogo.duracion_minutos || 0,
+      subtotal: roundMoney(servicioCatalogo.precio),
+      precio_personalizado: null,
+      usa_precio_personalizado: false,
+    };
+    setServiciosSeleccionados((prev) => [...prev, nuevoServicio]);
+    setSvcSearchQuery("");
+    setShowSvcDropdown(false);
+    setServiceError(null);
   };
 
   const handleAgregarServicio = () => {
@@ -1598,6 +1667,39 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     if (!productosCatalogoCargado) {
       await cargarProductosDisponibles();
     }
+  };
+
+  const handleAgregarProductoById = (productoId: string) => {
+    if (productos.some((p) => p.producto_id === productoId)) {
+      setServiceError("El producto ya está agregado en la cita.");
+      return;
+    }
+    const productoCatalogo = productosDisponibles.find(
+      (p) => p.producto_id === productoId,
+    );
+    if (!productoCatalogo) {
+      setServiceError("No se encontró el producto seleccionado.");
+      return;
+    }
+    const nuevoProducto: ProductoSeleccionado = {
+      producto_id: productoCatalogo.producto_id,
+      nombre: productoCatalogo.nombre,
+      cantidad: 1,
+      precio_unitario: productoCatalogo.precio,
+      subtotal: roundMoney(productoCatalogo.precio),
+      moneda: productoCatalogo.moneda,
+      comision_porcentaje: 0,
+      comision_valor: 0,
+      agregado_por_email: user?.email,
+      agregado_por_rol: (user as any)?.rol || user?.role,
+      fecha_agregado: new Date().toISOString(),
+      profesional_id:
+        profesionalEditadoId || appointmentDetails?.rawData?.profesional_id,
+    };
+    setProductos((prev) => [...prev, nuevoProducto]);
+    setProdSearchQuery("");
+    setShowProdDropdown(false);
+    setServiceError(null);
   };
 
   const handleGuardarServicios = async () => {
@@ -2114,188 +2216,201 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         ),
     );
 
-    return (
-      <div className="space-y-1.5">
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-1.5">
-          <select
-            value={selectedProductId}
-            onChange={(e) => setSelectedProductId(e.target.value)}
-            onFocus={() => {
-              void handleOpenProductosSelector();
-            }}
-            onClick={() => {
-              void handleOpenProductosSelector();
-            }}
-            disabled={isServiceActionsDisabled || loadingProductosDisponibles}
-            className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
-          >
-            <option value="">
-              {loadingProductosDisponibles
-                ? "Cargando productos..."
-                : productosCatalogoCargado
-                  ? "Seleccionar producto para agregar"
-                  : "Haz clic para cargar productos"}
-            </option>
-            {productosDisponiblesParaAgregar.map((producto) => (
-              <option key={producto.producto_id} value={producto.producto_id}>
-                {producto.nombre} - ${producto.precio}
-              </option>
-            ))}
-          </select>
+    const productosFiltrados = productosDisponiblesParaAgregar.filter((p) =>
+      p.nombre.toLowerCase().includes(prodSearchQuery.toLowerCase()),
+    );
 
-          <button
-            type="button"
-            onClick={handleAgregarProducto}
-            disabled={
-              isServiceActionsDisabled ||
-              loadingProductosDisponibles ||
-              (productosCatalogoCargado &&
-                (!selectedProductId ||
-                  productosDisponiblesParaAgregar.length === 0))
+    return (
+      <div className="space-y-3">
+        {/* ── Buscador ── */}
+        <div
+          className="relative"
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setTimeout(() => setShowProdDropdown(false), 150);
             }
-            className="px-2 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 flex items-center justify-center gap-1 font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Plus className="w-3 h-3" />
-            {productosCatalogoCargado ? "Agregar producto" : "Cargar productos"}
-          </button>
+          }}
+        >
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={prodSearchQuery}
+            onChange={(e) => {
+              setProdSearchQuery(e.target.value);
+              setShowProdDropdown(true);
+            }}
+            onFocus={async () => {
+              if (!productosCatalogoCargado) await cargarProductosDisponibles();
+              setShowProdDropdown(true);
+            }}
+            disabled={isServiceActionsDisabled}
+            placeholder={
+              loadingProductosDisponibles
+                ? "Cargando productos..."
+                : "Buscar y agregar producto..."
+            }
+            className="w-full border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-sm outline-none focus:border-slate-400 disabled:bg-slate-50 disabled:text-slate-400 transition-colors"
+          />
+
+          {/* Dropdown de resultados */}
+          {showProdDropdown && prodSearchQuery && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto z-20">
+              {loadingProductosDisponibles ? (
+                <div className="flex items-center justify-center gap-2 py-3 text-sm text-slate-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Cargando...
+                </div>
+              ) : productosFiltrados.length === 0 ? (
+                <div className="py-3 text-center text-sm text-slate-400">
+                  Sin resultados
+                </div>
+              ) : (
+                productosFiltrados.map((producto) => (
+                  <button
+                    key={producto.producto_id}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() =>
+                      handleAgregarProductoById(producto.producto_id)
+                    }
+                    className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 border-b border-slate-100 last:border-0 text-left"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0 text-xs font-semibold text-slate-500">
+                      {producto.nombre[0].toUpperCase()}
+                    </div>
+                    <span className="flex-1 text-sm font-medium text-slate-800 truncate">
+                      {producto.nombre}
+                    </span>
+                    <span className="text-sm font-semibold text-slate-500 whitespace-nowrap">
+                      ${producto.precio}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="bg-gray-50 p-1.5 rounded grid grid-cols-3 gap-1 text-xs">
+        {/* ── Lista de productos ── */}
+        {productos.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-5 border border-dashed border-slate-200 rounded-xl text-slate-400">
+            <Package className="w-6 h-6 mb-1.5 text-slate-300" />
+            <p className="text-xs">No hay productos en esta cita</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {productos.map((producto) => (
+              <div
+                key={producto.producto_id}
+                className="flex items-center gap-3 px-3 py-2.5 bg-slate-50 rounded-xl"
+              >
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-800 truncate">
+                    {producto.nombre}
+                  </p>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className="text-xs text-slate-400">$</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      pattern="[0-9]*[.,]?[0-9]*"
+                      value={producto.precio_unitario}
+                      onChange={(e) =>
+                        handleActualizarPrecioProducto(
+                          producto.producto_id,
+                          e.target.value,
+                        )
+                      }
+                      disabled={isServiceActionsDisabled}
+                      className="w-24 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-600 outline-none focus:border-slate-400 disabled:bg-transparent disabled:border-transparent transition-colors"
+                      placeholder="0"
+                    />
+                    <span className="text-xs text-slate-400">c/u</span>
+                  </div>
+                </div>
+
+                {/* Stepper cantidad */}
+                <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleActualizarCantidadProducto(
+                        producto.producto_id,
+                        String(producto.cantidad - 1),
+                      )
+                    }
+                    disabled={
+                      isServiceActionsDisabled || producto.cantidad <= 1
+                    }
+                    className="w-6 h-6 flex items-center justify-center bg-white hover:bg-slate-100 disabled:opacity-40 text-slate-600 transition-colors"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <span className="w-7 h-6 flex items-center justify-center text-xs font-semibold border-x border-slate-200 bg-white select-none">
+                    {producto.cantidad}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleActualizarCantidadProducto(
+                        producto.producto_id,
+                        String(producto.cantidad + 1),
+                      )
+                    }
+                    disabled={isServiceActionsDisabled}
+                    className="w-6 h-6 flex items-center justify-center bg-white hover:bg-slate-100 disabled:opacity-40 text-slate-600 transition-colors"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </div>
+
+                {/* Subtotal */}
+                <p className="text-sm font-bold text-slate-800 whitespace-nowrap min-w-[56px] text-right">
+                  ${producto.subtotal}
+                </p>
+
+                {/* Eliminar */}
+                <button
+                  type="button"
+                  onClick={() => handleEliminarProducto(producto.producto_id)}
+                  disabled={isServiceActionsDisabled}
+                  className="p-1 text-slate-400 hover:text-red-500 disabled:opacity-50 transition-colors"
+                  aria-label="Eliminar producto"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Resumen ── */}
+        <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-xl p-3 text-xs">
           <div className="text-center">
-            <div className="text-gray-600 font-medium">Total Productos</div>
-            <div className="text-sm font-bold text-gray-900">
+            <div className="text-slate-500 mb-0.5">Total productos</div>
+            <div className="font-bold text-slate-800">
               ${roundMoney(totalProductos)}
             </div>
           </div>
           <div className="text-center">
-            <div className="text-gray-600 font-medium">Comisión Total</div>
-            <div className="text-sm font-bold text-gray-900">
+            <div className="text-slate-500 mb-0.5">Comisión total</div>
+            <div className="font-bold text-slate-800">
               $
               {roundMoney(
                 productos.reduce(
-                  (total, producto) =>
-                    total + toNumber(producto.comision_valor ?? 0),
+                  (acc, p) => acc + toNumber(p.comision_valor ?? 0),
                   0,
                 ),
               )}
             </div>
           </div>
           <div className="text-center">
-            <div className="text-gray-600 font-medium">Cantidad</div>
-            <div className="text-sm font-bold text-gray-900">
-              {productos.length}
-            </div>
+            <div className="text-slate-500 mb-0.5">Cantidad</div>
+            <div className="font-bold text-slate-800">{productos.length}</div>
           </div>
         </div>
 
-        {productos.length === 0 ? (
-          <div className="text-center py-2 text-gray-400 text-xs border border-dashed border-gray-300 rounded">
-            <Package className="w-5 h-5 mx-auto mb-1 text-gray-300" />
-            <p>No hay productos registrados</p>
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {productos.map((producto) => (
-              <div
-                key={producto.producto_id}
-                className="p-1.5 border border-gray-200 rounded hover:bg-gray-50"
-              >
-                <div className="flex justify-between items-start">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <ShoppingBag className="w-3 h-3 text-gray-700 flex-shrink-0" />
-                      <h4 className="text-xs font-bold text-gray-900 truncate">
-                        {producto.nombre}
-                      </h4>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-1 text-[10px] mb-1">
-                      <div>
-                        <label className="block text-gray-600 mb-0.5">
-                          Cantidad
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={producto.cantidad}
-                          onChange={(e) =>
-                            handleActualizarCantidadProducto(
-                              producto.producto_id,
-                              e.target.value,
-                            )
-                          }
-                          disabled={isServiceActionsDisabled}
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-gray-600 mb-0.5">
-                          Precio unitario
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={producto.precio_unitario}
-                          onChange={(e) =>
-                            handleActualizarPrecioProducto(
-                              producto.producto_id,
-                              e.target.value,
-                            )
-                          }
-                          disabled={isServiceActionsDisabled}
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-1 text-[10px]">
-                      <div className="text-gray-600">
-                        Subtotal:{" "}
-                        <span className="font-bold text-green-700">
-                          ${producto.subtotal}
-                        </span>
-                      </div>
-                      <div className="text-gray-600">
-                        Comisión:{" "}
-                        <span className="font-bold text-blue-700">
-                          ${roundMoney(toNumber(producto.comision_valor ?? 0))}
-                        </span>
-                        <span className="text-gray-500 ml-0.5">
-                          (
-                          {roundMoney(
-                            toNumber(producto.comision_porcentaje ?? 0),
-                          )}
-                          %)
-                        </span>
-                      </div>
-                    </div>
-
-                    {producto.fecha_agregado && (
-                      <div className="text-[9px] text-gray-500 flex items-center gap-1 mt-0.5">
-                        <CalendarDays className="w-2 h-2" />
-                        <span className="truncate">
-                          {formatFechaHora(producto.fecha_agregado)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleEliminarProducto(producto.producto_id)}
-                    disabled={isServiceActionsDisabled}
-                    className="p-1 text-gray-500 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    aria-label="Eliminar producto"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     );
   };
@@ -2308,172 +2423,218 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         ),
     );
 
+    const serviciosFiltrados = serviciosDisponiblesParaAgregar.filter((s) =>
+      s.nombre.toLowerCase().includes(svcSearchQuery.toLowerCase()),
+    );
+
     return (
-      <div className="space-y-2">
+      <div className="space-y-3">
+        {/* ── Alertas ── */}
         {serviceError && (
-          <div className="p-2 border border-red-200 bg-red-50 rounded text-xs text-red-700">
+          <div className="px-3 py-2 border border-red-200 bg-red-50 rounded-xl text-xs text-red-700">
             {serviceError}
           </div>
         )}
 
         {isEstadoNoEditableServicios && (
-          <div className="p-2 border border-gray-300 bg-gray-50 rounded text-xs text-gray-700">
+          <div className="px-3 py-2 border border-slate-200 bg-slate-50 rounded-xl text-xs text-slate-600">
             Esta cita no permite edición de servicios por su estado actual.
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-1.5">
-          <select
-            value={selectedServiceId}
-            onChange={(e) => setSelectedServiceId(e.target.value)}
-            disabled={isServiceActionsDisabled || loadingServiciosDisponibles}
-            className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
-          >
-            <option value="">
-              {loadingServiciosDisponibles
-                ? "Cargando servicios..."
-                : "Seleccionar servicio para agregar"}
-            </option>
-            {serviciosDisponiblesParaAgregar.map((servicio) => (
-              <option key={servicio.servicio_id} value={servicio.servicio_id}>
-                {servicio.nombre} - ${servicio.precio}
-              </option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            onClick={handleAgregarServicio}
-            disabled={
-              isServiceActionsDisabled ||
-              loadingServiciosDisponibles ||
-              !selectedServiceId ||
-              serviciosDisponiblesParaAgregar.length === 0
+        {/* ── Buscador ── */}
+        <div
+          className="relative"
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setTimeout(() => setShowSvcDropdown(false), 150);
             }
-            className="px-2 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 flex items-center justify-center gap-1 font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Plus className="w-3 h-3" />
-            Agregar servicio
-          </button>
+          }}
+        >
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={svcSearchQuery}
+            onChange={(e) => {
+              setSvcSearchQuery(e.target.value);
+              setShowSvcDropdown(true);
+            }}
+            onFocus={() => setShowSvcDropdown(true)}
+            disabled={isServiceActionsDisabled}
+            placeholder={
+              loadingServiciosDisponibles
+                ? "Cargando servicios..."
+                : "Buscar y agregar servicio..."
+            }
+            className="w-full border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-sm outline-none focus:border-slate-400 disabled:bg-slate-50 disabled:text-slate-400 transition-colors"
+          />
+
+          {/* Dropdown de resultados */}
+          {showSvcDropdown && svcSearchQuery && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto z-20">
+              {loadingServiciosDisponibles ? (
+                <div className="flex items-center justify-center gap-2 py-3 text-sm text-slate-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Cargando...
+                </div>
+              ) : serviciosFiltrados.length === 0 ? (
+                <div className="py-3 text-center text-sm text-slate-400">
+                  Sin resultados
+                </div>
+              ) : (
+                serviciosFiltrados.map((servicio) => (
+                  <button
+                    key={servicio.servicio_id}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() =>
+                      handleAgregarServicioById(servicio.servicio_id)
+                    }
+                    className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 border-b border-slate-100 last:border-0 text-left"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0 text-xs font-semibold text-slate-500">
+                      {servicio.nombre[0].toUpperCase()}
+                    </div>
+                    <span className="flex-1 text-sm font-medium text-slate-800 truncate">
+                      {servicio.nombre}
+                    </span>
+                    <span className="text-sm font-semibold text-slate-500 whitespace-nowrap">
+                      ${servicio.precio}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </div>
 
+        {/* ── Lista de servicios ── */}
         {serviciosSeleccionados.length === 0 ? (
-          <div className="text-center py-3 text-gray-400 text-xs border border-dashed border-gray-300 rounded">
-            No hay servicios seleccionados en esta cita.
+          <div className="flex flex-col items-center justify-center py-5 border border-dashed border-slate-200 rounded-xl text-slate-400">
+            <Tag className="w-6 h-6 mb-1.5 text-slate-300" />
+            <p className="text-xs">No hay servicios en esta cita</p>
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-2">
             {serviciosSeleccionados.map((servicio) => (
               <div
                 key={servicio.servicio_id}
-                className="p-2 border border-gray-200 rounded"
+                className="px-3 py-2.5 bg-slate-50 rounded-xl"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-gray-900 truncate">
+                {/* Fila principal: nombre + stepper + subtotal + eliminar */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-800 truncate">
                       {servicio.nombre}
                     </p>
-                    <p className="text-[10px] text-gray-600">
-                      Precio unitario: ${servicio.precio_unitario}
-                    </p>
+                    {servicio.usa_precio_personalizado && (
+                      <span className="inline-block text-[9px] px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded-full font-medium mt-0.5">
+                        Precio personalizado
+                      </span>
+                    )}
                   </div>
 
+                  {/* Stepper cantidad */}
+                  <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleActualizarCantidad(
+                          servicio.servicio_id,
+                          String(servicio.cantidad - 1),
+                        )
+                      }
+                      disabled={
+                        isServiceActionsDisabled || servicio.cantidad <= 1
+                      }
+                      className="w-6 h-6 flex items-center justify-center bg-white hover:bg-slate-100 disabled:opacity-40 text-slate-600 transition-colors"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <span className="w-7 h-6 flex items-center justify-center text-xs font-semibold border-x border-slate-200 bg-white select-none">
+                      {servicio.cantidad}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleActualizarCantidad(
+                          servicio.servicio_id,
+                          String(servicio.cantidad + 1),
+                        )
+                      }
+                      disabled={isServiceActionsDisabled}
+                      className="w-6 h-6 flex items-center justify-center bg-white hover:bg-slate-100 disabled:opacity-40 text-slate-600 transition-colors"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  </div>
+
+                  {/* Subtotal */}
+                  <p className="text-sm font-bold text-slate-800 whitespace-nowrap min-w-[56px] text-right">
+                    ${servicio.subtotal}
+                  </p>
+
+                  {/* Eliminar */}
                   <button
                     type="button"
-                    onClick={() => handleEliminarServicio(servicio.servicio_id)}
+                    onClick={() =>
+                      handleEliminarServicio(servicio.servicio_id)
+                    }
                     disabled={isServiceActionsDisabled}
-                    className="p-1 text-gray-500 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="p-1 text-slate-400 hover:text-red-500 disabled:opacity-50 transition-colors"
                     aria-label="Eliminar servicio"
                   >
-                    <Trash2 className="w-3 h-3" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 mt-1.5">
-                  <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">
-                      Precio unitario
-                    </label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      pattern="[0-9]*[.,]?[0-9]*"
-                      value={servicio.precio_unitario_input}
-                      onChange={(e) =>
-                        handleActualizarPrecioServicio(
-                          servicio.servicio_id,
-                          e.target.value,
-                        )
-                      }
-                      disabled={isServiceActionsDisabled}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
-                      placeholder="0"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">
-                      Cantidad
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={servicio.cantidad}
-                      onChange={(e) =>
-                        handleActualizarCantidad(
-                          servicio.servicio_id,
-                          e.target.value,
-                        )
-                      }
-                      disabled={isServiceActionsDisabled}
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:ring-0 focus:border-black disabled:bg-gray-100"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 mt-1.5">
-                  <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">
-                      Subtotal
-                    </label>
-                    <div className="border border-gray-200 rounded px-2 py-1 text-xs font-semibold text-gray-900 bg-gray-50">
-                      ${servicio.subtotal}
-                    </div>
-                  </div>
-                  <div className="text-[10px] text-gray-500 flex items-end">
-                    {servicio.usa_precio_personalizado
-                      ? "Precio personalizado"
-                      : "Precio base"}
-                  </div>
+                {/* Fila secundaria: precio editable */}
+                <div className="flex items-center gap-1.5 mt-1.5 pl-0">
+                  <span className="text-xs text-slate-400">$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*[.,]?[0-9]*"
+                    value={servicio.precio_unitario_input}
+                    onChange={(e) =>
+                      handleActualizarPrecioServicio(
+                        servicio.servicio_id,
+                        e.target.value,
+                      )
+                    }
+                    disabled={isServiceActionsDisabled}
+                    className="w-24 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-600 outline-none focus:border-slate-400 disabled:bg-transparent disabled:border-transparent transition-colors"
+                    placeholder="0"
+                  />
+                  <span className="text-xs text-slate-400">c/u</span>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        <div className="bg-gray-50 p-2 rounded grid grid-cols-2 gap-1 text-xs">
-          <div className="text-gray-700">
-            Total servicios:{" "}
-            <span className="font-bold text-gray-900">${totalServicios}</span>
+        {/* ── Resumen ── */}
+        <div className="grid grid-cols-2 gap-2 bg-slate-50 rounded-xl p-3 text-xs">
+          <div className="text-center">
+            <div className="text-slate-500 mb-0.5">Total servicios</div>
+            <div className="font-bold text-slate-800">${totalServicios}</div>
           </div>
-          <div className="text-gray-700 text-right">
-            Total estimado cita:{" "}
-            <span className="font-bold text-gray-900">
+          <div className="text-center">
+            <div className="text-slate-500 mb-0.5">Total estimado</div>
+            <div className="font-bold text-slate-800">
               ${totalCitaCalculado}
-            </span>
+            </div>
           </div>
         </div>
 
-        <div className="flex justify-end items-center gap-2">
-          {hasUnsavedServiceChanges &&
-            !hasUnsavedProductChanges &&
-            !hasUnsavedScheduleChanges && (
-              <span className="text-[10px] text-gray-600">
-                Hay cambios sin guardar
-              </span>
-            )}
-        </div>
+        {/* Indicador de cambios sin guardar */}
+        {hasUnsavedServiceChanges &&
+          !hasUnsavedProductChanges &&
+          !hasUnsavedScheduleChanges && (
+            <p className="text-[10px] text-slate-500 text-right">
+              Hay cambios sin guardar
+            </p>
+          )}
       </div>
     );
   };
@@ -2487,11 +2648,12 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       {(() => {
         // ── render-local helpers ─────────────────────────────────────────────
         const rfStatus = resolveRFStatus(appointmentDetails?.estado || "");
+        // Flujo normal de estados (sin cancelada/no_asistio que son terminales)
         const STATUS_STEPS = [
-          "pre-cita",
-          "confirmed",
+          "pre_reservada",
+          "confirmada",
           "in-progress",
-          "completed",
+          "completada",
         ] as const;
         const currentStepIdx = STATUS_STEPS.findIndex((s) => s === rfStatus);
         const fmtM = (n: number) => "$" + Math.round(n).toLocaleString("es-CO");
@@ -2509,17 +2671,18 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         const profNombre =
           profActual?.nombre || appointmentDetails.estilista_nombre || "";
         const stepLabel: Record<string, string> = {
-          "pre-cita": "Pre-cita",
-          confirmed: "Confirmada",
+          pre_reservada: "Pre-reservada",
+          confirmada: "Confirmada",
           "in-progress": "En curso",
-          completed: "Completada",
+          completada: "Completada",
         };
         const stepIcon: Record<string, string> = {
-          "pre-cita": "?",
-          confirmed: "✓",
+          pre_reservada: "⏳",
+          confirmada: "✓",
           "in-progress": "▶",
-          completed: "✔",
+          completada: "✔",
         };
+        const isPreReservada = rfStatus === "pre_reservada";
 
         const innerContent = (
           <div
@@ -2859,31 +3022,44 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                     >
                       Estado
                     </p>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {STATUS_STEPS.map((step, idx) => {
-                        const si = RF_STATUSES[step];
-                        const isActive = step === rfStatus;
-                        const isPast = idx < currentStepIdx;
-                        return (
-                          <div
-                            key={step}
-                            className="flex flex-col items-center py-2 rounded-xl text-[10px] font-semibold text-center select-none"
-                            style={{
-                              border: `${isActive ? 2 : 1}px solid ${isActive || isPast ? si.color : "#E2E8F0"}`,
-                              background:
-                                isActive || isPast ? si.bg : "transparent",
-                              color: isActive || isPast ? si.color : "#CBD5E1",
-                              opacity: isActive ? 1 : isPast ? 0.65 : 0.35,
-                            }}
-                          >
-                            <span className="text-sm leading-none mb-0.5">
-                              {stepIcon[step]}
-                            </span>
-                            {stepLabel[step]}
-                          </div>
-                        );
-                      })}
-                    </div>
+                    {/* Badge para estados terminales */}
+                    {(rfStatus === "cancelada" || rfStatus === "no_asistio") ? (
+                      <div
+                        className="flex items-center justify-center py-2 rounded-xl text-sm font-semibold"
+                        style={{
+                          background: RF_STATUSES[rfStatus].bg,
+                          color: RF_STATUSES[rfStatus].color,
+                          border: `1px solid ${RF_STATUSES[rfStatus].color}`,
+                        }}
+                      >
+                        {RF_STATUSES[rfStatus].label}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {STATUS_STEPS.map((step, idx) => {
+                          const si = RF_STATUSES[step];
+                          const isActive = step === rfStatus;
+                          const isPast = idx < currentStepIdx;
+                          return (
+                            <div
+                              key={step}
+                              className="flex flex-col items-center py-2 rounded-xl text-[10px] font-semibold text-center select-none"
+                              style={{
+                                border: `${isActive ? 2 : 1}px solid ${isActive || isPast ? si.color : "#E2E8F0"}`,
+                                background: isActive || isPast ? si.bg : "transparent",
+                                color: isActive || isPast ? si.color : "#CBD5E1",
+                                opacity: isActive ? 1 : isPast ? 0.65 : 0.35,
+                              }}
+                            >
+                              <span className="text-sm leading-none mb-0.5">
+                                {stepIcon[step]}
+                              </span>
+                              {stepLabel[step]}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Financial summary card */}
@@ -3605,6 +3781,20 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                         </>
                       ) : (
                         "Guardar cambios"
+                      )}
+                    </button>
+                  ) : isPreReservada ? (
+                    /* Botón confirmar cuando estado = pre_reservada */
+                    <button
+                      onClick={handleConfirmarCita}
+                      disabled={confirmandoCita}
+                      className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                      style={{ background: "#3B82F6" }}
+                    >
+                      {confirmandoCita ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Confirmando...</>
+                      ) : (
+                        <><CheckCircle className="w-4 h-4" /> Confirmar cita</>
                       )}
                     </button>
                   ) : !shouldDisableActions() ? (
