@@ -110,6 +110,8 @@ interface ClientRowProps {
 const ClientRow = memo(function ClientRow({ cliente, selected, onSelect }: ClientRowProps) {
   const handleClick = useCallback(() => onSelect(cliente), [cliente, onSelect])
   const daysSince = cliente.diasSinVenir ?? 0
+  const hasVisit = Boolean((cliente as any).ultima_visita)
+  const daysLabel = !hasVisit ? 'Sin visitas' : daysSince === 0 ? 'Hoy' : `${daysSince}d sin venir`
 
   return (
     <div
@@ -125,7 +127,7 @@ const ClientRow = memo(function ClientRow({ cliente, selected, onSelect }: Clien
           {cliente.historialCitas.length > 0 && (
             <span>{cliente.historialCitas.length} visitas</span>
           )}
-          <span>{daysSince === 0 ? 'Hoy' : `${daysSince}d sin venir`}</span>
+          <span>{daysLabel}</span>
         </div>
       </div>
       <div style={S.clRight}>

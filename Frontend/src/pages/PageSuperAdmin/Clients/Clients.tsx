@@ -160,22 +160,26 @@ export default function ClientsPage() {
     const token = getAccessToken()
     if (!token || clientes.length === 0) return
 
-    const idsSinCedula = clientes
-      .filter((cliente) => !cliente.cedula?.trim() && !cedulaCacheRef.current.has(cliente.id))
+    const idsParaEnriquecer = clientes
+      .filter((cliente) => {
+        const sinUltimaVisita = !(cliente as any).ultima_visita
+        const sinCedula = !cliente.cedula?.trim() && !cedulaCacheRef.current.has(cliente.id)
+        return sinUltimaVisita || sinCedula
+      })
       .map((cliente) => cliente.id)
 
-    if (idsSinCedula.length === 0) return
+    if (idsParaEnriquecer.length === 0) return
 
     let cancelled = false
     const hydrationRequestId = ++latestCedulaHydrationRef.current
 
     const hydrateCedulas = async () => {
-      const updates = new Map<string, string>()
+      const updates = new Map<string, { cedula: string; ltv: number; diasSinVenir: number; ultima_visita: string }>()
 
       const results = await Promise.allSettled(
-        idsSinCedula.map(async (clienteId) => {
-          const cedula = await clientesService.getClienteCedula(token, clienteId)
-          return { clienteId, cedula: cedula.trim() }
+        idsParaEnriquecer.map(async (clienteId) => {
+          const data = await clientesService.getClienteCedula(token, clienteId)
+          return { clienteId, ...data }
         })
       )
 
@@ -185,22 +189,24 @@ export default function ClientsPage() {
 
       for (const result of results) {
         if (result.status !== "fulfilled") continue
-        const { clienteId, cedula } = result.value
+        const { clienteId, cedula, ltv, diasSinVenir, ultima_visita } = result.value
         cedulaCacheRef.current.set(clienteId, cedula || null)
-        if (cedula) {
-          updates.set(clienteId, cedula)
-        }
+        updates.set(clienteId, { cedula, ltv, diasSinVenir, ultima_visita })
       }
 
       if (updates.size === 0) return
 
       setClientes((prev) =>
         prev.map((cliente) => {
-          const updatedCedula = updates.get(cliente.id)
-          if (!updatedCedula || cliente.cedula?.trim() === updatedCedula) {
-            return cliente
+          const enriched = updates.get(cliente.id)
+          if (!enriched) return cliente
+          return {
+            ...cliente,
+            cedula: enriched.cedula || cliente.cedula,
+            ltv: enriched.ltv || cliente.ltv,
+            diasSinVenir: enriched.diasSinVenir || cliente.diasSinVenir,
+            ultima_visita: enriched.ultima_visita || (cliente as any).ultima_visita,
           }
-          return { ...cliente, cedula: updatedCedula }
         })
       )
     }

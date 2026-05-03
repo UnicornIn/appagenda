@@ -1,6 +1,5 @@
 import { API_BASE_URL } from "../../../types/config";
 import { Cliente } from "../../../types/cliente";
-import { calcularDiasSinVenir } from "../../../lib/clientMetrics";
 import { formatCurrencyNoDecimals } from "../../../lib/currency";
 import { getActiveSedeIdFromStorage } from "../../../lib/sede-context";
 
@@ -172,53 +171,24 @@ const extractCedula = (cliente: any): string =>
     cliente?.dni
   )
 
-const parseDiasSinVenir = (value: unknown): number | undefined => {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? Math.floor(value) : undefined
+const calcDiasSinVisitar = (fecha?: string): number => {
+  if (!fecha) return 0;
+  try {
+    const diff = Date.now() - new Date(fecha).getTime();
+    return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+  } catch {
+    return 0;
   }
-  if (typeof value === "string") {
-    const trimmed = value.trim()
-    if (!trimmed) return undefined
+};
 
-    const parsed = Number(trimmed)
-    if (Number.isFinite(parsed)) {
-      return Math.floor(parsed)
-    }
+const resolveDiasSinVenir = (cliente: any): number => {
+  if (cliente.dias_sin_visitar != null) return Number(cliente.dias_sin_visitar);
+  const fecha = cliente.ultima_visita || cliente.fecha_ultima_visita || cliente.last_visit;
+  return calcDiasSinVisitar(fecha);
+};
 
-    const numberInText = trimmed.match(/-?\d+/)
-    if (numberInText) {
-      const extracted = Number(numberInText[0])
-      return Number.isFinite(extracted) ? extracted : undefined
-    }
-
-    return undefined
-  }
-  return undefined
-}
-
-const getDiasSinVenir = (cliente: any): number => {
-  const diasDirectos = parseDiasSinVenir(
-    cliente?.diasSinVenir ??
-      cliente?.dias_sin_venir ??
-      cliente?.dias_sin_visitar
-  )
-  if (typeof diasDirectos === "number") {
-    return diasDirectos
-  }
-
-  const diasCalculados = calcularDiasSinVenir({
-    dias_sin_visitar: parseDiasSinVenir(cliente?.dias_sin_visitar),
-    ultima_visita:
-      cliente?.ultima_visita ??
-      cliente?.ultimaVisita ??
-      cliente?.fecha_ultima_visita ??
-      cliente?.fechaUltimaVisita,
-    fecha_creacion: cliente?.fecha_creacion ?? cliente?.fechaCreacion,
-    created_at: cliente?.created_at ?? cliente?.createdAt,
-  })
-
-  return Number.isFinite(diasCalculados) ? Math.max(0, Math.floor(diasCalculados)) : Number.NaN
-}
+const resolveLtv = (cliente: any): number =>
+  cliente.total_gastado || cliente.total_compras || cliente.ltv || cliente.valor_total || 0;
 
 const mapCliente = (cliente: any): Cliente => ({
   id: cliente.cliente_id || cliente.id || cliente._id || '',
@@ -227,9 +197,9 @@ const mapCliente = (cliente: any): Cliente => ({
   email: cliente.correo || cliente.email || 'No disponible',
   cedula: extractCedula(cliente),
   ciudad: cliente.ciudad || '',
-  diasSinVenir: getDiasSinVenir(cliente),
-  diasSinComprar: cliente.dias_sin_visitar || 0,
-  ltv: cliente.total_gastado || 0,
+  diasSinVenir: resolveDiasSinVenir(cliente),
+  diasSinComprar: resolveDiasSinVenir(cliente),
+  ltv: resolveLtv(cliente),
   ticketPromedio: cliente.ticket_promedio || 0,
   rizotipo: cliente.rizotipo || '',
   nota: cliente.notas_historial?.[0]?.contenido || cliente.notas || '',
@@ -460,7 +430,7 @@ export const clientesService = {
     return data.map(mapCliente);
   },
 
-  async getClienteCedula(token: string, clienteId: string): Promise<string> {
+  async getClienteCedula(token: string, clienteId: string): Promise<{ cedula: string; ltv: number; diasSinVenir: number; ultima_visita: string }> {
     try {
       const response = await fetch(`${API_BASE_URL}clientes/${clienteId}`, {
         method: 'GET',
@@ -471,13 +441,18 @@ export const clientesService = {
       })
 
       if (!response.ok) {
-        return ''
+        return { cedula: '', ltv: 0, diasSinVenir: 0, ultima_visita: '' }
       }
 
       const cliente = await response.json()
-      return extractCedula(cliente)
+      return {
+        cedula: extractCedula(cliente),
+        ltv: resolveLtv(cliente),
+        diasSinVenir: resolveDiasSinVenir(cliente),
+        ultima_visita: cliente.ultima_visita || cliente.fecha_ultima_visita || '',
+      }
     } catch {
-      return ''
+      return { cedula: '', ltv: 0, diasSinVenir: 0, ultima_visita: '' }
     }
   },
 
@@ -516,9 +491,9 @@ export const clientesService = {
       email: cliente.correo || 'No disponible',
       cedula: extractCedula(cliente),
       ciudad: cliente.ciudad || '',
-      diasSinVenir: getDiasSinVenir(cliente),
-      diasSinComprar: cliente.dias_sin_visitar || 0,
-      ltv: cliente.total_gastado || 0,
+      diasSinVenir: resolveDiasSinVenir(cliente),
+      diasSinComprar: resolveDiasSinVenir(cliente),
+      ltv: resolveLtv(cliente),
       ticketPromedio: cliente.ticket_promedio || 0,
       rizotipo: rizotipoFicha,
       nota: (cliente as any).notas_historial?.[0]?.contenido || '',
