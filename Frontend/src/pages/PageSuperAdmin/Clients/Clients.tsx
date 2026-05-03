@@ -8,10 +8,10 @@ import { ClientFormModal } from "./ClientFormModal"
 import type { Cliente } from "../../../types/cliente"
 import type { Sede } from "../Sedes/sedeService"
 import { clientesService, type ClientesPaginadosMetadata } from "./clientesService"
-import { sedeService } from "../Sedes/sedeService" // ✅ Cambiado de sedesService a sedeService
+import { sedeService } from "../Sedes/sedeService"
 import { useAuth } from "../../../components/Auth/AuthContext"
 import { Loader } from "lucide-react"
-import { useClientSmartSearch } from "../../../hooks/useClientSmartSearch"
+import { rankClientsByRelevance } from "../../../lib/client-search"
 
 const SEARCH_DEBOUNCE_MS = 300
 
@@ -102,7 +102,10 @@ export default function ClientsPage() {
 
       if (requestId !== latestRequestIdRef.current) return
 
-      setClientes(applyCedulaCache(result.clientes))
+      const sorted = filtro.trim()
+        ? rankClientsByRelevance(result.clientes, filtro, result.clientes.length).map(r => r.cliente)
+        : result.clientes
+      setClientes(applyCedulaCache(sorted))
       setMetadata(result.metadata)
     } catch (err) {
       if (requestId !== latestRequestIdRef.current) return
@@ -157,22 +160,26 @@ export default function ClientsPage() {
     const token = getAccessToken()
     if (!token || clientes.length === 0) return
 
-    const idsSinCedula = clientes
-      .filter((cliente) => !cliente.cedula?.trim() && !cedulaCacheRef.current.has(cliente.id))
+    const idsParaEnriquecer = clientes
+      .filter((cliente) => {
+        const sinUltimaVisita = !(cliente as any).ultima_visita
+        const sinCedula = !cliente.cedula?.trim() && !cedulaCacheRef.current.has(cliente.id)
+        return sinUltimaVisita || sinCedula
+      })
       .map((cliente) => cliente.id)
 
-    if (idsSinCedula.length === 0) return
+    if (idsParaEnriquecer.length === 0) return
 
     let cancelled = false
     const hydrationRequestId = ++latestCedulaHydrationRef.current
 
     const hydrateCedulas = async () => {
-      const updates = new Map<string, string>()
+      const updates = new Map<string, { cedula: string; ltv: number; diasSinVenir: number; ultima_visita: string }>()
 
       const results = await Promise.allSettled(
-        idsSinCedula.map(async (clienteId) => {
-          const cedula = await clientesService.getClienteCedula(token, clienteId)
-          return { clienteId, cedula: cedula.trim() }
+        idsParaEnriquecer.map(async (clienteId) => {
+          const data = await clientesService.getClienteCedula(token, clienteId)
+          return { clienteId, ...data }
         })
       )
 
@@ -182,22 +189,24 @@ export default function ClientsPage() {
 
       for (const result of results) {
         if (result.status !== "fulfilled") continue
-        const { clienteId, cedula } = result.value
+        const { clienteId, cedula, ltv, diasSinVenir, ultima_visita } = result.value
         cedulaCacheRef.current.set(clienteId, cedula || null)
-        if (cedula) {
-          updates.set(clienteId, cedula)
-        }
+        updates.set(clienteId, { cedula, ltv, diasSinVenir, ultima_visita })
       }
 
       if (updates.size === 0) return
 
       setClientes((prev) =>
         prev.map((cliente) => {
-          const updatedCedula = updates.get(cliente.id)
-          if (!updatedCedula || cliente.cedula?.trim() === updatedCedula) {
-            return cliente
+          const enriched = updates.get(cliente.id)
+          if (!enriched) return cliente
+          return {
+            ...cliente,
+            cedula: enriched.cedula || cliente.cedula,
+            ltv: enriched.ltv || cliente.ltv,
+            diasSinVenir: enriched.diasSinVenir || cliente.diasSinVenir,
+            ultima_visita: enriched.ultima_visita || (cliente as any).ultima_visita,
           }
-          return { ...cliente, cedula: updatedCedula }
         })
       )
     }
@@ -293,39 +302,13 @@ export default function ClientsPage() {
     }
   }, [getAccessToken, selectedClient, loadClientes, metadata?.pagina, searchTerm, selectedSede])
 
-  const fetchSmartResults = useCallback(async (query: string) => {
-    const token = getAccessToken()
-    if (!token || !query.trim()) return []
-
-    const { clientes: fetched } = await clientesService.getClientesPaginados(token, {
-      pagina: 1,
-      limite: 25,
-      filtro: query,
-      sedeId: selectedSede !== "all" ? selectedSede : undefined,
-    })
-
-    return fetched
-  }, [getAccessToken, selectedSede])
-
-  const {
-    results: smartResults,
-    isLoading: smartLoading,
-    error: smartError,
-  } = useClientSmartSearch(searchTerm, {
-    baseClientes: clientes,
-    fetchRemote: fetchSmartResults,
-    maxSuggestions: 8,
-  })
-
-  // Mostrar loading mientras se verifica la autenticación
-  if (authLoading || (Boolean(user) && isInitialLoading)) {
+  // Solo bloqueamos la pantalla completa durante la verificación de auth
+  if (authLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gray-50">
         <div className="flex items-center gap-3">
           <Loader className="h-6 w-6 animate-spin text-gray-700" />
-          <span className="text-lg text-gray-600">
-            {authLoading ? "Verificando autenticación..." : "Cargando clientes..."}
-          </span>
+          <span className="text-lg text-gray-600">Verificando autenticación...</span>
         </div>
       </div>
     )
@@ -333,7 +316,7 @@ export default function ClientsPage() {
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="text-red-600 text-lg mb-4">No autenticado</div>
           <div className="text-gray-600">Por favor inicia sesión para acceder a esta página</div>
@@ -343,43 +326,51 @@ export default function ClientsPage() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex flex-col h-screen bg-white">
       <Sidebar />
-      <div className="flex-1 overflow-auto">
-        {selectedClient ? (
-          <ClientDetail
-            client={selectedClient}
-            onBack={handleBack}
-            onClientUpdated={handleClientUpdated}
-          />
-        ) : (
-          <ClientsList
-            onSelectClient={handleSelectClient}
-            onAddClient={handleAddClient}
-            clientes={clientes}
-            metadata={metadata || undefined}
-            error={error}
-            onRetry={handleRetry}
-            onPageChange={handlePageChange}
-            onSearch={handleSearch}
-            searchValue={searchTerm}
-            onSedeChange={handleSedeChange}
-            selectedSede={selectedSede}
-            sedes={sedes}
-            onItemsPerPageChange={handleItemsPerPageChange}
-            itemsPerPage={itemsPorPagina}
-            isFetching={isFetching}
-            smartResults={smartResults}
-            smartLoading={smartLoading}
-            smartError={smartError}
-          />
-        )}
+      <div className="flex-1 overflow-hidden" style={{ display: 'flex' }}>
+        <ClientsList
+          onSelectClient={handleSelectClient}
+          onAddClient={handleAddClient}
+          clientes={clientes}
+          selectedId={selectedClient?.id}
+          metadata={metadata || undefined}
+          error={error}
+          onRetry={handleRetry}
+          onPageChange={handlePageChange}
+          onSearch={handleSearch}
+          searchValue={searchTerm}
+          onSedeChange={handleSedeChange}
+          selectedSede={selectedSede}
+          sedes={sedes}
+          onItemsPerPageChange={handleItemsPerPageChange}
+          itemsPerPage={itemsPorPagina}
+          isFetching={isFetching}
+          isInitialLoading={isInitialLoading}
+        />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {selectedClient ? (
+            <ClientDetail
+              client={selectedClient}
+              onBack={handleBack}
+              onClientUpdated={handleClientUpdated}
+            />
+          ) : (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              height: '100%', color: '#94A3B8', fontSize: '14px',
+              fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif",
+            }}>
+              Selecciona un cliente para ver su perfil completo
+            </div>
+          )}
+        </div>
       </div>
 
       <ClientFormModal
         isOpen={isModalOpen}
         onClose={handleCloseModal}
-        onSuccess={handleSaveClient} // ✅ Usa onSuccess
+        onSuccess={handleSaveClient}
         isSaving={isSaving}
         sedeId={selectedSede !== "all" ? selectedSede : ""}
       />

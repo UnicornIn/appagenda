@@ -113,6 +113,8 @@ const pickNumber = (source: any, keys: string[]): number | undefined => {
 };
 
 const unwrapData = (data: any) => data?.data ?? data?.result ?? data;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 const pickArray = (...candidates: any[]): any[] => {
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) return candidate;
@@ -190,9 +192,211 @@ const normalizePaymentMethod = (value?: string) => getCashPaymentMethodLabel(val
 
 const normalizePaymentMethodKey = (value?: string) => {
   return String(value || "otros")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, "_");
+    .replace(/[\s-]+/g, "_");
+};
+
+const TOTAL_INCOME_KEYS = [
+  "total_general",
+  "grand_total",
+  "ingresos_total",
+  "total_ingresos",
+  "ventas_totales",
+  "total_vendido",
+  "ingresos",
+];
+
+const TOTAL_OTHER_METHODS_KEYS = [
+  "total",
+  "total_general",
+  "otros_metodos_total",
+  "total_otros_metodos",
+];
+
+const TOTAL_CASH_EXPENSE_KEYS = [
+  "total_efectivo",
+  "egresos_efectivo",
+  "cash_total",
+  "total",
+];
+
+const EXPECTED_CASH_KEYS = [
+  "efectivo_esperado",
+  "efectivo_en_caja",
+  "efectivo_total",
+  "saldo",
+  "balance",
+];
+
+// El backend hoy usa algunas llaves reales como `giftcard` y `link_de_pago`
+// dentro de `ingresos_otros_metodos`, así que aquí aliasamos esos nombres
+// además de las variantes documentadas para no perder montos.
+const PAYMENT_METHOD_ALIASES = {
+  efectivo: ["efectivo", "cash"],
+  tarjetas: [
+    "tarjeta",
+    "tarjetas",
+    "tarjeta_credito",
+    "tarjeta_debito",
+    "credit_card",
+    "debit_card",
+    "card",
+    "cards",
+    "pos",
+    "dataphone",
+  ],
+  transferencias: ["transferencia", "transferencias", "bank_transfer", "transfer"],
+  linkPagos: ["link_de_pago", "link_de_pagos", "link_pago", "link_pagos", "payment_link", "paylink"],
+  creditoEmpleados: [
+    "credito_empleados",
+    "credito_empleado",
+    "employee_credit",
+    "employee_credits",
+    "descuento_por_nomina",
+    "decuento_por_nomina",
+  ],
+  abonos: ["abono", "abonos"],
+  giftCards: ["giftcard", "gift_card", "giftcards", "gift_cards"],
+  addi: ["addi"],
+} as const;
+
+const getObjectAmount = (value: unknown): number => {
+  if (isRecord(value)) {
+    return (
+      pickNumber(value, ["total", "monto", "valor", "amount", "importe"]) ?? 0
+    );
+  }
+
+  return toNumber(value);
+};
+
+const sumRecordAmounts = (
+  source: unknown,
+  ignoredKeys: string[] = [],
+): number => {
+  if (!isRecord(source)) return 0;
+
+  const ignored = new Set(ignoredKeys.map((key) => normalizePaymentMethodKey(key)));
+
+  return Object.entries(source).reduce((sum, [rawKey, rawValue]) => {
+    const key = normalizePaymentMethodKey(rawKey);
+    if (!key || ignored.has(key)) {
+      return sum;
+    }
+
+    return sum + getObjectAmount(rawValue);
+  }, 0);
+};
+
+const getAmountByAliases = (source: unknown, aliases: readonly string[]): number => {
+  if (!isRecord(source)) return 0;
+
+  const aliasSet = new Set(aliases.map((alias) => normalizePaymentMethodKey(alias)));
+
+  return Object.entries(source).reduce((sum, [rawKey, rawValue]) => {
+    const key = normalizePaymentMethodKey(rawKey);
+    if (!aliasSet.has(key)) {
+      return sum;
+    }
+
+    return sum + getObjectAmount(rawValue);
+  }, 0);
+};
+
+const matchesAlias = (value: string, aliases: readonly string[]) => {
+  return aliases.some((alias) => normalizePaymentMethodKey(alias) === value);
+};
+
+const getCashReportNodes = (data: any) => {
+  const root = unwrapData(data) || {};
+  const dataNode = unwrapData(root?.data) || root?.data || {};
+  const resultNode = unwrapData(root?.result) || root?.result || {};
+  const summary =
+    unwrapData(root?.resumen) ||
+    unwrapData(root?.summary) ||
+    root?.resumen ||
+    root?.summary ||
+    root;
+  const periodTotals =
+    root?.totales ?? summary?.totales ?? dataNode?.totales ?? resultNode?.totales ?? {};
+  const ingresosEfectivo =
+    summary?.ingresos_efectivo ??
+    root?.ingresos_efectivo ??
+    dataNode?.ingresos_efectivo ??
+    resultNode?.ingresos_efectivo ??
+    {};
+  const ingresosOtrosMetodos =
+    summary?.ingresos_otros_metodos ??
+    root?.ingresos_otros_metodos ??
+    dataNode?.ingresos_otros_metodos ??
+    resultNode?.ingresos_otros_metodos ??
+    {};
+  const egresos =
+    summary?.egresos ??
+    root?.egresos ??
+    dataNode?.egresos ??
+    resultNode?.egresos ??
+    {};
+
+  return { root, summary, dataNode, resultNode, periodTotals, ingresosEfectivo, ingresosOtrosMetodos, egresos };
+};
+
+const extractCashReportMetrics = (data: any) => {
+  const { root, summary, dataNode, resultNode, periodTotals, ingresosEfectivo, ingresosOtrosMetodos, egresos } =
+    getCashReportNodes(data);
+
+  const efectivo =
+    pickNumber(ingresosEfectivo, ["total", "efectivo_total", "total_efectivo"]) ?? 0;
+  const otrosMetodosTotal =
+    pickNumber(ingresosOtrosMetodos, TOTAL_OTHER_METHODS_KEYS) ??
+    sumRecordAmounts(ingresosOtrosMetodos, TOTAL_OTHER_METHODS_KEYS);
+  const totalRecibido =
+    pickNumber(periodTotals, TOTAL_INCOME_KEYS) ??
+    pickNumber(summary, TOTAL_INCOME_KEYS) ??
+    pickNumber(root, TOTAL_INCOME_KEYS) ??
+    (efectivo + otrosMetodosTotal);
+  const abonos = getAmountByAliases(ingresosOtrosMetodos, PAYMENT_METHOD_ALIASES.abonos);
+  const tarjetas = getAmountByAliases(ingresosOtrosMetodos, PAYMENT_METHOD_ALIASES.tarjetas);
+  const transferencias = getAmountByAliases(
+    ingresosOtrosMetodos,
+    PAYMENT_METHOD_ALIASES.transferencias,
+  );
+  const linkPagos = getAmountByAliases(ingresosOtrosMetodos, PAYMENT_METHOD_ALIASES.linkPagos);
+  const creditoEmpleados = getAmountByAliases(
+    ingresosOtrosMetodos,
+    PAYMENT_METHOD_ALIASES.creditoEmpleados,
+  );
+  const giftCards = getAmountByAliases(ingresosOtrosMetodos, PAYMENT_METHOD_ALIASES.giftCards);
+  const addi = getAmountByAliases(ingresosOtrosMetodos, PAYMENT_METHOD_ALIASES.addi);
+  const egresosEfectivo =
+    pickNumber(egresos, TOTAL_CASH_EXPENSE_KEYS) ??
+    pickNumber(summary, TOTAL_CASH_EXPENSE_KEYS) ??
+    pickNumber(root, TOTAL_CASH_EXPENSE_KEYS) ??
+    0;
+  const efectivoEsperado =
+    pickNumber(root, EXPECTED_CASH_KEYS) ??
+    pickNumber(summary, EXPECTED_CASH_KEYS) ??
+    pickNumber(dataNode, EXPECTED_CASH_KEYS) ??
+    pickNumber(resultNode, EXPECTED_CASH_KEYS);
+
+  return {
+    totalRecibido,
+    abonos,
+    egresosEfectivo,
+    efectivoEsperado,
+    paymentMethods: {
+      efectivo,
+      tarjetas,
+      transferencias,
+      linkPagos,
+      creditoEmpleados,
+      giftCards,
+      addi,
+    },
+  };
 };
 
 const parseGiftcardPaymentMethod = (notes?: string) => {
@@ -329,7 +533,7 @@ export default function CierreCajaPage() {
     end_date: today,
   });
 
-  const [resumen, setResumen] = useState<CashResumen>({
+  const [, setResumen] = useState<CashResumen>({
     ingresos: 0,
     egresos: 0,
     balance: 0,
@@ -340,8 +544,7 @@ export default function CierreCajaPage() {
   const [cierres, setCierres] = useState<CashCierre[]>([]);
   const [giftcardIngresos, setGiftcardIngresos] = useState<CashIngreso[]>([]);
 
-  // Valor del loading no se usa en UI; se mantiene el setter para conservar la lógica existente.
-  const [, setLoadingResumen] = useState(false);
+  const [loadingResumen, setLoadingResumen] = useState(false);
   const [loadingIngresos, setLoadingIngresos] = useState(false);
   const [loadingEgresos, setLoadingEgresos] = useState(false);
   const [loadingCierres, setLoadingCierres] = useState(false);
@@ -545,10 +748,6 @@ export default function CierreCajaPage() {
     return `${formatDate(fechaDesde)} - ${formatDate(fechaHasta)}`;
   }, [fechaDesde, fechaHasta]);
 
-  const egresosTotal = useMemo(() => {
-    return egresos.reduce((sum, egreso) => sum + (egreso.monto || 0), 0);
-  }, [egresos]);
-
   const cierreDiferencia = useMemo(() => {
     if (efectivoEnCaja === null || !cierreEfectivoContado.trim()) {
       return null;
@@ -579,32 +778,33 @@ export default function CierreCajaPage() {
     const root = unwrapData(data) || {};
     const summary = root?.resumen ?? root?.summary ?? root;
     const periodTotals = root?.totales;
+    const metrics = extractCashReportMetrics(data);
 
     const ingresos =
+      metrics.totalRecibido ??
       pickNumber(periodTotals, ["ingresos", "total_ingresos", "ventas", "total_ventas"]) ??
-      pickNumber(root?.ingresos_efectivo, ["total"]) ??
       pickNumber(summary, [
         "ingresos_total",
         "total_ingresos",
         "ventas_totales",
         "total_ventas",
         "ingresos",
-        "efectivo_total",
-        "efectivo_dia",
-        "total",
-      ]) ?? 0;
+      ]) ??
+      0;
 
     const egresos =
+      metrics.egresosEfectivo ??
       pickNumber(periodTotals, ["egresos", "total_egresos"]) ??
-      pickNumber(root?.egresos, ["total"]) ??
       pickNumber(summary, [
         "egresos_total",
         "total_egresos",
         "egresos",
         "gastos",
-      ]) ?? 0;
+      ]) ??
+      0;
 
     const balance =
+      metrics.efectivoEsperado ??
       pickNumber(periodTotals, ["neto", "balance", "saldo"]) ??
       pickNumber(summary, ["balance", "saldo", "neto", "total_balance"]) ??
       (ingresos - egresos);
@@ -839,7 +1039,7 @@ export default function CierreCajaPage() {
             fecha: start,
           });
           setResumen(normalizeResumen(efectivo));
-          setReportePeriodo(null);
+          setReportePeriodo(efectivo);
         } catch (innerErr) {
           setResumen({ ingresos: 0, egresos: 0, balance: 0, moneda: monedaSede });
           setReportePeriodo(null);
@@ -1413,16 +1613,104 @@ export default function CierreCajaPage() {
     return mergeCashRecords([...ingresos, ...giftcardVentasUnicas]);
   }, [giftcardVentasUnicas, ingresos]);
 
-  const ingresosConGiftcardsTotal = useMemo(() => {
-    return ingresosConGiftcards.reduce((sum, ingreso) => sum + (ingreso.monto || 0), 0);
+  const localPaymentMethodTotals = useMemo(() => {
+    const totals = {
+      efectivo: 0,
+      tarjetas: 0,
+      transferencias: 0,
+      linkPagos: 0,
+      creditoEmpleados: 0,
+      abonos: 0,
+      giftCards: 0,
+      addi: 0,
+    };
+
+    const addIngreso = (bucket: keyof typeof totals, amount: number) => {
+      totals[bucket] = Number((totals[bucket] + amount).toFixed(2));
+    };
+
+    ingresosConGiftcards.forEach((ingreso) => {
+      const methodKey = normalizePaymentMethodKey(ingreso.metodo_pago);
+      const amount = ingreso.monto || 0;
+
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.efectivo)) {
+        addIngreso("efectivo", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.tarjetas)) {
+        addIngreso("tarjetas", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.transferencias)) {
+        addIngreso("transferencias", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.linkPagos)) {
+        addIngreso("linkPagos", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.creditoEmpleados)) {
+        addIngreso("creditoEmpleados", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.abonos) || ingreso.tipo === "abono_cliente") {
+        addIngreso("abonos", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.giftCards) || ingreso.tipo === "giftcard") {
+        addIngreso("giftCards", amount);
+        return;
+      }
+      if (matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.addi)) {
+        addIngreso("addi", amount);
+      }
+    });
+
+    return totals;
   }, [ingresosConGiftcards]);
 
-  const abonosTotal = useMemo(() => {
-    return ingresosConGiftcards.reduce((sum, ingreso) => {
-      const metodo = String(ingreso.metodo_pago || "").toLowerCase();
-      return metodo === "abonos" ? sum + (ingreso.monto || 0) : sum;
+  const egresosEfectivoLocal = useMemo(() => {
+    return egresos.reduce((sum, egreso) => {
+      const methodKey = normalizePaymentMethodKey(egreso.metodo_pago);
+      const isCashExpense =
+        !methodKey ||
+        methodKey === "otros" ||
+        matchesAlias(methodKey, PAYMENT_METHOD_ALIASES.efectivo);
+      return isCashExpense ? sum + Math.abs(egreso.monto || 0) : sum;
     }, 0);
-  }, [ingresosConGiftcards]);
+  }, [egresos]);
+
+  const reportMetrics = useMemo(() => extractCashReportMetrics(reportePeriodo), [reportePeriodo]);
+  const hasReportMetrics = reportePeriodo !== null;
+
+  const totalRecibidoDisplay = useMemo(() => {
+    if (hasReportMetrics) {
+      return reportMetrics.totalRecibido;
+    }
+
+    return (
+      localPaymentMethodTotals.efectivo +
+      localPaymentMethodTotals.tarjetas +
+      localPaymentMethodTotals.transferencias +
+      localPaymentMethodTotals.linkPagos +
+      localPaymentMethodTotals.creditoEmpleados +
+      localPaymentMethodTotals.abonos +
+      localPaymentMethodTotals.giftCards +
+      localPaymentMethodTotals.addi
+    );
+  }, [hasReportMetrics, localPaymentMethodTotals, reportMetrics.totalRecibido]);
+
+  const abonosTotal = useMemo(() => {
+    return hasReportMetrics ? reportMetrics.abonos : localPaymentMethodTotals.abonos;
+  }, [hasReportMetrics, localPaymentMethodTotals.abonos, reportMetrics.abonos]);
+
+  const egresosEfectivoDisplay = useMemo(() => {
+    return hasReportMetrics ? reportMetrics.egresosEfectivo : egresosEfectivoLocal;
+  }, [egresosEfectivoLocal, hasReportMetrics, reportMetrics.egresosEfectivo]);
+
+  const efectivoEsperadoDisplay = useMemo(() => {
+    return hasReportMetrics ? reportMetrics.efectivoEsperado ?? efectivoEnCaja : efectivoEnCaja;
+  }, [efectivoEnCaja, hasReportMetrics, reportMetrics.efectivoEsperado]);
 
   type MovimientoDia = {
     id: string;
@@ -1512,82 +1800,29 @@ export default function CierreCajaPage() {
   }, [movimientosDia]);
 
   const saldosPorMedio = useMemo(() => {
-    const reportRoot = unwrapData(reportePeriodo) || {};
-    const reportSummary = reportRoot?.resumen ?? reportRoot?.summary ?? reportRoot;
-    const reportIngresosEfectivo = reportSummary?.ingresos_efectivo ?? reportRoot?.ingresos_efectivo ?? {};
-    const reportOtrosMetodos = reportSummary?.ingresos_otros_metodos ?? reportRoot?.ingresos_otros_metodos ?? {};
-    const hasReportMethods =
-      reportOtrosMetodos &&
-      typeof reportOtrosMetodos === "object" &&
-      Object.keys(reportOtrosMetodos).length > 0;
-
-    if (hasReportMethods) {
-      const fromReport = (keys: string[]) =>
-        keys.reduce((sum, key) => sum + toNumber((reportOtrosMetodos as Record<string, unknown>)[key]), 0);
-
-      const efectivo =
-        pickNumber(reportIngresosEfectivo, ["total", "efectivo_total", "total_efectivo"]) ?? 0;
-      const tarjetas = fromReport([
-        "tarjeta_credito",
-        "tarjeta_debito",
-        "tarjeta",
-        "pos",
-      ]);
-      const transferencias = fromReport(["transferencia", "link_de_pago"]);
-      const creditoEmpleados = fromReport([
-        "credito_empleados",
-        "abonos",
-        "descuento_por_nomina",
-        "decuento_por_nomina",
-      ]);
-      const addi = fromReport(["addi"]);
-      const giftcardsMetodo = fromReport(["giftcard"]);
-      const total =
-        pickNumber(reportSummary, ["total_vendido", "ventas_totales", "total_ingresos"]) ??
-        (efectivo + tarjetas + transferencias + creditoEmpleados + addi + giftcardsMetodo);
-
-      return {
-        izquierda: [
-          { label: "Efectivo", value: efectivo, trend: true },
-          { label: "Tarjetas", value: tarjetas, trend: true },
-          { label: "Transferencias", value: transferencias, trend: true },
-          { label: "Total", value: total, trend: false, total: true },
-        ],
-        derecha: [
-          { label: "Tarjeta", value: tarjetas, trend: true },
-          { label: "Transferencias", value: transferencias, trend: true },
-          { label: "Crédito empleados", value: creditoEmpleados, trend: false },
-          { label: "Gift Cards", value: giftcardsMetodo, trend: false },
-          { label: "Addi", value: addi, trend: false },
-        ],
-      };
-    }
-
-    const totales: Record<string, number> = {};
-    const accumulate = (method: string | undefined, amount: number) => {
-      const key = normalizePaymentMethodKey(method);
-      totales[key] = Number(((totales[key] || 0) + amount).toFixed(2));
-    };
-
-    for (const ingreso of ingresosConGiftcards) {
-      accumulate(ingreso.metodo_pago, ingreso.monto || 0);
-    }
-
-    for (const egreso of egresos) {
-      accumulate(egreso.metodo_pago, -Math.abs(egreso.monto || 0));
-    }
-
-    const sumMethods = (methods: string[]) => {
-      return methods.reduce((sum, method) => sum + (totales[normalizePaymentMethodKey(method)] || 0), 0);
-    };
-
-    const efectivo = sumMethods(["efectivo"]);
-    const tarjetas = sumMethods(["tarjeta_credito", "tarjeta_debito", "tarjeta", "pos"]);
-    const transferencias = sumMethods(["transferencia", "link_de_pago"]);
-    const creditoEmpleados = sumMethods(["credito_empleados", "abonos"]);
-    const giftcardsMetodo = sumMethods(["giftcard"]);
-    const addi = sumMethods(["addi"]);
-    const total = efectivo + tarjetas + transferencias + creditoEmpleados + addi + giftcardsMetodo;
+    const efectivo = hasReportMetrics
+      ? reportMetrics.paymentMethods.efectivo
+      : localPaymentMethodTotals.efectivo;
+    const tarjetas = hasReportMetrics
+      ? reportMetrics.paymentMethods.tarjetas
+      : localPaymentMethodTotals.tarjetas;
+    const transferencias = hasReportMetrics
+      ? reportMetrics.paymentMethods.transferencias
+      : localPaymentMethodTotals.transferencias;
+    const linkPagos = hasReportMetrics
+      ? reportMetrics.paymentMethods.linkPagos
+      : localPaymentMethodTotals.linkPagos;
+    const creditoEmpleados = hasReportMetrics
+      ? reportMetrics.paymentMethods.creditoEmpleados
+      : localPaymentMethodTotals.creditoEmpleados;
+    const abonos = hasReportMetrics ? reportMetrics.abonos : localPaymentMethodTotals.abonos;
+    const giftcardsMetodo = hasReportMetrics
+      ? reportMetrics.paymentMethods.giftCards
+      : localPaymentMethodTotals.giftCards;
+    const addi = hasReportMetrics
+      ? reportMetrics.paymentMethods.addi
+      : localPaymentMethodTotals.addi;
+    const total = totalRecibidoDisplay;
 
     return {
       izquierda: [
@@ -1597,14 +1832,14 @@ export default function CierreCajaPage() {
         { label: "Total", value: total, trend: false, total: true },
       ],
       derecha: [
-        { label: "Tarjeta", value: tarjetas, trend: true },
-        { label: "Transferencias", value: transferencias, trend: true },
+        { label: "Link de pago", value: linkPagos, trend: true },
         { label: "Crédito empleados", value: creditoEmpleados, trend: false },
+        { label: "Abonos", value: abonos, trend: false },
         { label: "Gift Cards", value: giftcardsMetodo, trend: false },
         { label: "Addi", value: addi, trend: false },
       ],
     };
-  }, [egresos, ingresosConGiftcards, reportePeriodo]);
+  }, [hasReportMetrics, localPaymentMethodTotals, reportMetrics, totalRecibidoDisplay]);
 
   const reporteResumen = useMemo(() => {
     if (!reportePeriodo) return null;
@@ -1795,7 +2030,7 @@ export default function CierreCajaPage() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex flex-col h-screen bg-gray-50">
       <Sidebar />
       <main className="flex-1 overflow-auto">
         <div className="p-8">
@@ -1873,7 +2108,7 @@ export default function CierreCajaPage() {
                 <CardContent className="p-6">
                   <p className="text-sm font-medium text-gray-700">Dinero recibido hoy</p>
                   <p className="mt-2 text-2xl font-bold text-black">
-                    {loadingIngresos || loadingGiftcards ? "..." : formatMoney(ingresosConGiftcardsTotal)}
+                    {loadingResumen ? "..." : formatMoney(totalRecibidoDisplay)}
                   </p>
                 </CardContent>
               </Card>
@@ -1882,7 +2117,7 @@ export default function CierreCajaPage() {
                 <CardContent className="p-6">
                   <p className="text-sm font-medium text-gray-700">Abonos recibidos</p>
                   <p className="mt-2 text-2xl font-bold text-black">
-                    {loadingIngresos ? "..." : formatMoney(abonosTotal)}
+                    {loadingResumen ? "..." : formatMoney(abonosTotal)}
                   </p>
                 </CardContent>
               </Card>
@@ -1891,7 +2126,7 @@ export default function CierreCajaPage() {
                 <CardContent className="p-6">
                   <p className="text-sm font-medium text-gray-700">Egresos</p>
                   <p className="mt-2 text-2xl font-bold text-black">
-                    {loadingEgresos ? "..." : formatSignedMoney(-Math.abs(resumen.egresos || egresosTotal))}
+                    {loadingResumen ? "..." : formatSignedMoney(-Math.abs(egresosEfectivoDisplay))}
                   </p>
                 </CardContent>
               </Card>
@@ -1900,7 +2135,11 @@ export default function CierreCajaPage() {
                 <CardContent className="p-6">
                   <p className="text-sm font-medium text-gray-700">Efectivo en caja</p>
                   <p className="mt-2 text-2xl font-bold text-black">
-                    {loadingEfectivoEnCaja ? "..." : efectivoEnCaja === null ? "--" : formatMoney(efectivoEnCaja)}
+                    {loadingResumen && efectivoEsperadoDisplay === null
+                      ? "..."
+                      : efectivoEsperadoDisplay === null
+                        ? "--"
+                        : formatMoney(efectivoEsperadoDisplay)}
                   </p>
                 </CardContent>
               </Card>

@@ -24,12 +24,14 @@ class MetodoPagoIngreso(str, Enum):
     POS = "pos"
     TRANSFERENCIA = "transferencia"
     LINK_DE_PAGO = "link_de_pago"
+    LINK_PAGO = "link_pago"  # <-- nuevo método de pago para link de pago, se acepta ambos nombres por compatibilidad
     GIFTCARD = "giftcard"
     ADDI = "addi"
     ABONOS = "abonos"
     ABONO_TRANSFERENCIA = "abono_transferencia"   # ← nuevo
     OTROS = "otros"
     DESCUENTO_POR_NOMINA = "descuento_por_nomina"
+    DESCUENTO_NOMINA = "descuento_nomina"
 
 class EstadoCierre(str, Enum):
     ABIERTO = "abierto"

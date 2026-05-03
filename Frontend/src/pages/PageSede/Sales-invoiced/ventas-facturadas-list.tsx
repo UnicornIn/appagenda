@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   Search,
   Loader2,
@@ -52,13 +52,6 @@ type FacturaFilters = {
   period: BillingPeriod;
 };
 
-type AppliedFacturaFilters = {
-  fecha_desde: string | null;
-  fecha_hasta: string | null;
-  search: string | null;
-  period: BillingPeriod | null;
-};
-
 const PERIOD_OPTIONS: Array<{ id: BillingPeriod; label: string }> = [
   { id: "today", label: "Hoy" },
   { id: "last_7_days", label: "7 días" },
@@ -68,16 +61,10 @@ const PERIOD_OPTIONS: Array<{ id: BillingPeriod; label: string }> = [
 ];
 
 const DEFAULT_BILLING_PERIOD = DEFAULT_PERIOD as BillingPeriod;
+const SEARCH_DEBOUNCE_MS = 300;
 const SINGLE_DAY_FALLBACK_WINDOW_DAYS = 90;
 const SINGLE_DAY_FALLBACK_PAGE_SIZE = 200;
 const SINGLE_DAY_FALLBACK_MAX_PAGES = 8;
-
-const EMPTY_FACTURA_FILTERS: FacturaFilters = {
-  searchTerm: "",
-  fecha_desde: "",
-  fecha_hasta: "",
-  period: DEFAULT_BILLING_PERIOD,
-};
 
 const toIsoLocalDate = (date: Date) => {
   const year = date.getFullYear();
@@ -143,6 +130,63 @@ const getFacturaEffectiveTimestamp = (factura: Factura) => {
   return parsedDate ? parsedDate.getTime() : 0;
 };
 
+const normalizeSearchValue = (value: unknown) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+const isValidDateRange = (range: DateRange) => {
+  if (!range.start_date || !range.end_date) return false;
+
+  const start = new Date(`${range.start_date}T00:00:00`);
+  const end = new Date(`${range.end_date}T00:00:00`);
+
+  return (
+    !Number.isNaN(start.getTime()) &&
+    !Number.isNaN(end.getTime()) &&
+    start.getTime() <= end.getTime()
+  );
+};
+
+const sortFacturasByDateDesc = (items: Factura[]) =>
+  [...items].sort(
+    (a, b) => getFacturaEffectiveTimestamp(b) - getFacturaEffectiveTimestamp(a),
+  );
+
+const dedupeFacturas = (items: Factura[]) => {
+  const uniqueFacturas = new Map<string, Factura>();
+
+  items.forEach((factura) => {
+    const key = [
+      factura.venta_id || factura.identificador,
+      factura.numero_comprobante,
+      getFacturaEffectiveDateSource(factura),
+    ].join("|");
+
+    if (!uniqueFacturas.has(key)) {
+      uniqueFacturas.set(key, factura);
+    }
+  });
+
+  return Array.from(uniqueFacturas.values());
+};
+
+const matchesFacturaSearch = (factura: Factura, searchTerm: string) => {
+  const normalizedTerm = normalizeSearchValue(searchTerm);
+  if (!normalizedTerm) return true;
+
+  return [
+    factura.nombre_cliente,
+    factura.cedula_cliente,
+    factura.email_cliente,
+    factura.numero_comprobante,
+  ]
+    .map(normalizeSearchValue)
+    .some((value) => value.includes(normalizedTerm));
+};
+
 const buildClientPagination = (
   page: number,
   pageSize: number,
@@ -168,25 +212,19 @@ const buildClientPagination = (
 
 export function VentasFacturadasList() {
   const { user, activeSedeId } = useAuth();
-  const defaultDateRange = useMemo(() => getDefaultCustomDateRange(), []);
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [period, setPeriod] = useState<BillingPeriod>(DEFAULT_BILLING_PERIOD);
-  const [dateRange, setDateRange] = useState<DateRange>(defaultDateRange);
-  const [tempDateRange, setTempDateRange] =
-    useState<DateRange>(defaultDateRange);
-  const [showDateModal, setShowDateModal] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRange>(() =>
+    getDefaultCustomDateRange(),
+  );
   const [selectedFactura, setSelectedFactura] = useState<Factura | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [facturas, setFacturas] = useState<Factura[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pagination, setPagination] = useState<any>(null);
-  const [filtersApplied, setFiltersApplied] =
-    useState<AppliedFacturaFilters | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [appliedFilters, setAppliedFilters] = useState<FacturaFilters>(
-    EMPTY_FACTURA_FILTERS,
-  );
   const [limit] = useState(50);
   const [paymentSummary, setPaymentSummary] =
     useState<PaymentMethodTotals | null>(null);
@@ -196,6 +234,9 @@ export function VentasFacturadasList() {
       { status: "idle" | "loading" | "success" | "error"; message?: string }
     >
   >({});
+  const latestRequestIdRef = useRef(0);
+  const previousFiltersKeyRef = useRef<string | null>(null);
+  const clientSearchCacheRef = useRef(new Map<string, Factura[]>());
 
   const activeSedeNombre =
     (typeof window !== "undefined"
@@ -231,19 +272,33 @@ export function VentasFacturadasList() {
     };
   };
 
-  const cargarFacturasFechaEfectiva = async (
-    page: number,
-    filtros: FacturaFilters,
-  ) => {
-    if (!filtros.fecha_desde || filtros.fecha_desde !== filtros.fecha_hasta) {
+  const activeFilters = useMemo(() => {
+    if (period === "custom" && !isValidDateRange(dateRange)) {
       return null;
+    }
+
+    return buildFilters(debouncedSearchTerm, period, dateRange);
+  }, [debouncedSearchTerm, period, dateRange]);
+
+  const activeFiltersKey = useMemo(
+    () => JSON.stringify(activeFilters ?? null),
+    [activeFilters],
+  );
+
+  const activeSearchSummary = activeFilters?.searchTerm || null;
+
+  const cargarFacturasFechaEfectiva = async (
+    filtros: FacturaFilters,
+  ): Promise<Factura[]> => {
+    if (!filtros.fecha_desde || filtros.fecha_desde !== filtros.fecha_hasta) {
+      return [];
     }
 
     const targetDate = filtros.fecha_desde;
     const fallbackStart = new Date(`${targetDate}T00:00:00`);
 
     if (Number.isNaN(fallbackStart.getTime())) {
-      return null;
+      return [];
     }
 
     fallbackStart.setDate(
@@ -258,7 +313,7 @@ export function VentasFacturadasList() {
       currentPage += 1
     ) {
       const result = await facturaService.buscarFacturas({
-        searchTerm: filtros.searchTerm,
+        searchTerm: "",
         fecha_desde: toIsoLocalDate(fallbackStart),
         fecha_hasta: filtros.fecha_hasta,
         page: currentPage,
@@ -272,83 +327,172 @@ export function VentasFacturadasList() {
       }
     }
 
-    const filteredFacturas = collectedFacturas
-      .filter((factura) => getFacturaEffectiveDateYmd(factura) === targetDate)
-      .sort(
-        (a, b) =>
-          getFacturaEffectiveTimestamp(b) - getFacturaEffectiveTimestamp(a),
-      );
-
-    const startIndex = (page - 1) * limit;
-    const pagedFacturas = filteredFacturas.slice(
-      startIndex,
-      startIndex + limit,
+    return sortFacturasByDateDesc(
+      dedupeFacturas(
+        collectedFacturas.filter(
+          (factura) => getFacturaEffectiveDateYmd(factura) === targetDate,
+        ),
+      ),
     );
+  };
+
+  const cargarFacturasRangoCompleto = async (
+    filtros: FacturaFilters,
+  ): Promise<Factura[]> => {
+    if (filtros.fecha_desde && filtros.fecha_desde === filtros.fecha_hasta) {
+      return cargarFacturasFechaEfectiva(filtros);
+    }
+
+    const collectedFacturas: Factura[] = [];
+    let page = 1;
+
+    while (true) {
+      const result = await facturaService.buscarFacturas({
+        searchTerm: "",
+        fecha_desde: filtros.fecha_desde,
+        fecha_hasta: filtros.fecha_hasta,
+        page,
+        limit: SINGLE_DAY_FALLBACK_PAGE_SIZE,
+      });
+
+      collectedFacturas.push(...((result.facturas as Factura[]) || []));
+
+      if (!result.pagination?.has_next) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    return sortFacturasByDateDesc(dedupeFacturas(collectedFacturas));
+  };
+
+  const cargarFacturasBusquedaCliente = async (
+    page: number,
+    filtros: FacturaFilters,
+  ) => {
+    const rangeCacheKey = `${filtros.period}:${filtros.fecha_desde}:${filtros.fecha_hasta}`;
+    let facturasDelRango = clientSearchCacheRef.current.get(rangeCacheKey);
+
+    if (!facturasDelRango) {
+      facturasDelRango = await cargarFacturasRangoCompleto(filtros);
+      clientSearchCacheRef.current.set(rangeCacheKey, facturasDelRango);
+    }
+
+    const filteredFacturas = facturasDelRango.filter((factura) =>
+      matchesFacturaSearch(factura, filtros.searchTerm),
+    );
+    const clientPagination = buildClientPagination(
+      page,
+      limit,
+      filteredFacturas.length,
+    );
+    const startIndex = (clientPagination.page - 1) * limit;
 
     return {
-      facturas: pagedFacturas,
-      pagination: buildClientPagination(page, limit, filteredFacturas.length),
+      facturas: filteredFacturas.slice(startIndex, startIndex + limit),
+      pagination: clientPagination,
       paymentSummary: calculatePaymentMethodTotals(filteredFacturas),
     };
   };
 
   const cargarFacturas = async (
     page: number = 1,
-    filtros: FacturaFilters = appliedFilters,
+    filtros: FacturaFilters,
   ) => {
+    const requestId = ++latestRequestIdRef.current;
+
     try {
       setIsLoading(true);
       setError(null);
 
-      const singleDayResult =
-        filtros.fecha_desde && filtros.fecha_desde === filtros.fecha_hasta
-          ? await cargarFacturasFechaEfectiva(page, filtros)
-          : null;
+      let result:
+        | Awaited<ReturnType<typeof facturaService.buscarFacturas>>
+        | {
+            facturas: Factura[];
+            pagination: ReturnType<typeof buildClientPagination>;
+            paymentSummary: PaymentMethodTotals;
+          };
 
-      const result =
-        singleDayResult ||
-        (await facturaService.buscarFacturas({
-          searchTerm: filtros.searchTerm,
+      if (filtros.searchTerm.trim().length > 0) {
+        result = await cargarFacturasBusquedaCliente(page, filtros);
+      } else if (
+        filtros.fecha_desde &&
+        filtros.fecha_desde === filtros.fecha_hasta
+      ) {
+        const filteredFacturas = await cargarFacturasFechaEfectiva(filtros);
+        const clientPagination = buildClientPagination(
+          page,
+          limit,
+          filteredFacturas.length,
+        );
+        const startIndex = (clientPagination.page - 1) * limit;
+
+        result = {
+          facturas: filteredFacturas.slice(startIndex, startIndex + limit),
+          pagination: clientPagination,
+          paymentSummary: calculatePaymentMethodTotals(filteredFacturas),
+        };
+      } else {
+        result = await facturaService.buscarFacturas({
+          searchTerm: "",
           fecha_desde: filtros.fecha_desde,
           fecha_hasta: filtros.fecha_hasta,
           page,
           limit,
-        }));
+        });
+      }
+
+      if (requestId !== latestRequestIdRef.current) {
+        return;
+      }
 
       setFacturas(result.facturas as Factura[]);
       setPagination(result.pagination);
       setPaymentSummary(result.paymentSummary || null);
-      setFiltersApplied({
-        fecha_desde: filtros.fecha_desde || null,
-        fecha_hasta: filtros.fecha_hasta || null,
-        search: filtros.searchTerm || null,
-        period: filtros.period || null,
-      });
       setCurrentPage(page);
     } catch (err) {
+      if (requestId !== latestRequestIdRef.current) {
+        return;
+      }
+
       console.error("Error cargando facturas:", err);
       setError("Error al cargar las facturas. Por favor, intenta nuevamente.");
       setFacturas([]);
       setPagination(null);
       setPaymentSummary(null);
     } finally {
-      setIsLoading(false);
+      if (requestId === latestRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    const initialFilters = buildFilters(
-      "",
-      DEFAULT_BILLING_PERIOD,
-      defaultDateRange,
-    );
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, SEARCH_DEBOUNCE_MS);
 
-    setPeriod(DEFAULT_BILLING_PERIOD);
-    setDateRange(defaultDateRange);
-    setTempDateRange(defaultDateRange);
-    setAppliedFilters(initialFilters);
-    void cargarFacturas(1, initialFilters);
-  }, [defaultDateRange]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => window.clearTimeout(timeoutId);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (!activeFilters) return;
+
+    const filtersChanged = previousFiltersKeyRef.current !== activeFiltersKey;
+    previousFiltersKeyRef.current = activeFiltersKey;
+
+    if (filtersChanged && currentPage !== 1) {
+      setCurrentPage(1);
+      return;
+    }
+
+    void cargarFacturas(currentPage, activeFilters);
+  }, [currentPage, activeFiltersKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    clientSearchCacheRef.current.clear();
+  }, [activeSedeId]);
 
   useEffect(() => {
     if (!allegraEnabled || !authToken || facturas.length === 0) return;
@@ -428,74 +572,13 @@ export function VentasFacturadasList() {
     };
   }, [facturas, allegraEnabled, authToken, activeSedeId]);
 
-  const aplicarFiltros = async () => {
-    const filtros = buildFilters(searchTerm, period, dateRange);
-    setAppliedFilters(filtros);
-    await cargarFacturas(1, filtros);
-  };
-
-  const limpiarFiltros = () => {
-    setSearchTerm("");
-    setPeriod(DEFAULT_BILLING_PERIOD);
-    setDateRange(defaultDateRange);
-    setTempDateRange(defaultDateRange);
-
-    const filtros = buildFilters("", DEFAULT_BILLING_PERIOD, defaultDateRange);
-    setAppliedFilters(filtros);
-    void cargarFacturas(1, filtros);
-  };
-
-  const handlePeriodChange = async (newPeriod: BillingPeriod) => {
-    if (newPeriod === "custom") {
-      setTempDateRange(
-        dateRange.start_date && dateRange.end_date
-          ? dateRange
-          : defaultDateRange,
-      );
-      setShowDateModal(true);
-      return;
-    }
-
+  const handlePeriodChange = (newPeriod: BillingPeriod) => {
     setPeriod(newPeriod);
-    const filtros = buildFilters(searchTerm, newPeriod, dateRange);
-    setAppliedFilters(filtros);
-    await cargarFacturas(1, filtros);
-  };
-
-  const handleApplyDateRange = async () => {
-    if (!tempDateRange.start_date || !tempDateRange.end_date) {
-      console.log("⚠️ Por favor selecciona ambas fechas");
-      return;
-    }
-
-    if (new Date(tempDateRange.start_date) > new Date(tempDateRange.end_date)) {
-      console.log("⚠️ La fecha de inicio no puede ser mayor a la fecha de fin");
-      return;
-    }
-
-    setDateRange(tempDateRange);
-    setPeriod("custom");
-    setShowDateModal(false);
-
-    const filtros = buildFilters(searchTerm, "custom", tempDateRange);
-    setAppliedFilters(filtros);
-    await cargarFacturas(1, filtros);
-  };
-
-  const setQuickDateRange = (days: number) => {
-    const today = new Date();
-    const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() - (days - 1));
-
-    setTempDateRange({
-      start_date: toIsoLocalDate(startDate),
-      end_date: toIsoLocalDate(today),
-    });
   };
 
   const irAPagina = (pagina: number) => {
     if (pagina >= 1 && pagina <= (pagination?.total_pages || 1)) {
-      void cargarFacturas(pagina, appliedFilters);
+      setCurrentPage(pagina);
     }
   };
 
@@ -522,29 +605,27 @@ export function VentasFacturadasList() {
 
   const formatDate = (dateString: string) =>
     formatDateDMY(dateString, dateString);
-  const formatDateDisplay = (dateString: string) =>
-    formatDateDMY(dateString, "");
   const getPeriodLabel = (selectedPeriod?: BillingPeriod | null) =>
     PERIOD_OPTIONS.find((option) => option.id === selectedPeriod)?.label ||
     "Rango aplicado";
   const appliedPeriodSummary = (() => {
-    if (!filtersApplied) return null;
+    if (!activeFilters) return null;
 
-    const periodLabel = getPeriodLabel(filtersApplied.period);
+    const periodLabel = getPeriodLabel(activeFilters.period);
 
-    if (filtersApplied.fecha_desde && filtersApplied.fecha_hasta) {
-      return `${periodLabel}: ${formatDate(filtersApplied.fecha_desde)} - ${formatDate(filtersApplied.fecha_hasta)}`;
+    if (activeFilters.fecha_desde && activeFilters.fecha_hasta) {
+      return `${periodLabel}: ${formatDate(activeFilters.fecha_desde)} - ${formatDate(activeFilters.fecha_hasta)}`;
     }
 
-    if (filtersApplied.fecha_desde) {
-      return `${periodLabel}: ${formatDate(filtersApplied.fecha_desde)}`;
+    if (activeFilters.fecha_desde) {
+      return `${periodLabel}: ${formatDate(activeFilters.fecha_desde)}`;
     }
 
-    if (filtersApplied.fecha_hasta) {
-      return `${periodLabel}: ${formatDate(filtersApplied.fecha_hasta)}`;
+    if (activeFilters.fecha_hasta) {
+      return `${periodLabel}: ${formatDate(activeFilters.fecha_hasta)}`;
     }
 
-    return filtersApplied.period ? periodLabel : null;
+    return activeFilters.period ? periodLabel : null;
   })();
 
   const getCurrencyLocale = (currency: string) => {
@@ -757,163 +838,16 @@ export function VentasFacturadasList() {
 
     return paginas;
   };
-
-  const DateRangeModal = () => {
-    if (!showDateModal) return null;
-
-    const today = toIsoLocalDate(new Date());
-
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div className="mx-4 w-full max-w-md rounded-lg bg-white p-6">
-          <div className="mb-6">
-            <h3 className="text-xl font-bold text-gray-900">
-              Seleccionar rango de fechas
-            </h3>
-            <p className="mt-1 text-gray-700">
-              Elige las fechas para filtrar las facturas
-            </p>
-          </div>
-
-          <div className="mb-6">
-            <p className="mb-3 text-sm text-gray-700">Rangos rápidos:</p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-gray-300 text-gray-800 hover:bg-gray-100"
-                onClick={() => setQuickDateRange(7)}
-              >
-                7 días
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-gray-300 text-gray-800 hover:bg-gray-100"
-                onClick={() => setQuickDateRange(30)}
-              >
-                30 días
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-gray-300 text-gray-800 hover:bg-gray-100"
-                onClick={() => setQuickDateRange(90)}
-              >
-                90 días
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-gray-300 text-gray-800 hover:bg-gray-100"
-                onClick={() => {
-                  const now = new Date();
-                  const firstDayOfMonth = new Date(
-                    now.getFullYear(),
-                    now.getMonth(),
-                    1,
-                  );
-                  setTempDateRange({
-                    start_date: toIsoLocalDate(firstDayOfMonth),
-                    end_date: toIsoLocalDate(now),
-                  });
-                }}
-              >
-                Mes actual
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-800">
-                Fecha de inicio
-              </label>
-              <input
-                type="date"
-                value={tempDateRange.start_date}
-                onChange={(e) =>
-                  setTempDateRange((prev) => ({
-                    ...prev,
-                    start_date: e.target.value,
-                  }))
-                }
-                className="w-full rounded border border-gray-300 px-3 py-2 focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500"
-                max={tempDateRange.end_date || today}
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-800">
-                Fecha de fin
-              </label>
-              <input
-                type="date"
-                value={tempDateRange.end_date}
-                onChange={(e) =>
-                  setTempDateRange((prev) => ({
-                    ...prev,
-                    end_date: e.target.value,
-                  }))
-                }
-                className="w-full rounded border border-gray-300 px-3 py-2 focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500"
-                min={tempDateRange.start_date}
-                max={today}
-              />
-            </div>
-          </div>
-
-          <div className="mt-6 rounded-lg border border-gray-300 bg-gray-50 p-4">
-            <p className="text-sm text-gray-800">
-              <span className="font-medium">Rango seleccionado:</span>{" "}
-              {formatDateDisplay(tempDateRange.start_date)} -{" "}
-              {formatDateDisplay(tempDateRange.end_date)}
-            </p>
-            <p className="mt-1 text-xs text-gray-600">
-              {tempDateRange.start_date && tempDateRange.end_date && (
-                <>
-                  Duración:{" "}
-                  {Math.ceil(
-                    (new Date(tempDateRange.end_date).getTime() -
-                      new Date(tempDateRange.start_date).getTime()) /
-                      (1000 * 60 * 60 * 24),
-                  ) + 1}{" "}
-                  días
-                </>
-              )}
-            </p>
-          </div>
-
-          <div className="mt-6 flex gap-3">
-            <Button
-              className="flex-1 bg-black text-white hover:bg-gray-800"
-              onClick={() => void handleApplyDateRange()}
-            >
-              Aplicar rango
-            </Button>
-            <Button
-              variant="outline"
-              className="flex-1 border-gray-300 text-gray-800 hover:bg-gray-100"
-              onClick={() => setShowDateModal(false)}
-            >
-              Cancelar
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  const today = toIsoLocalDate(new Date());
 
   return (
     <>
-      <DateRangeModal />
-
       <div className="space-y-6">
         <PageHeader title="Ventas Facturadas" />
 
         <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-            <div>
+          <div className="grid grid-cols-1 gap-3">
+            <div className="max-w-full lg:max-w-xl">
               <label className="mb-1 block text-xs font-medium text-gray-700">
                 Buscar cliente/comprobante
               </label>
@@ -923,42 +857,9 @@ export function VentasFacturadasList() {
                   placeholder="Nombre, cédula, email o número de comprobante..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      void aplicarFiltros();
-                    }
-                  }}
                   className="h-9 pl-8 text-sm"
-                  disabled={isLoading}
                 />
               </div>
-            </div>
-
-            <div className="flex items-end gap-2">
-              <Button
-                variant="default"
-                onClick={() => void aplicarFiltros()}
-                disabled={isLoading}
-                className="h-9 bg-gray-900 px-3 text-xs text-white hover:bg-gray-800"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                    Aplicando...
-                  </>
-                ) : (
-                  "Aplicar filtros"
-                )}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={limpiarFiltros}
-                disabled={isLoading}
-                className="h-9 px-3 text-xs"
-              >
-                Limpiar filtros
-              </Button>
             </div>
           </div>
 
@@ -980,15 +881,45 @@ export function VentasFacturadasList() {
                         ? "bg-black text-white hover:bg-gray-800"
                         : "text-gray-700 hover:bg-gray-100"
                     }`}
-                    onClick={() => void handlePeriodChange(option.id)}
-                    disabled={isLoading}
+                    onClick={() => handlePeriodChange(option.id)}
                   >
                     {option.label}
                   </Button>
                 ))}
               </div>
+
+              {period === "custom" && (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    type="date"
+                    value={dateRange.start_date}
+                    onChange={(e) =>
+                      setDateRange((prev) => ({
+                        ...prev,
+                        start_date: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 sm:w-auto"
+                    max={dateRange.end_date || today}
+                  />
+                  <input
+                    type="date"
+                    value={dateRange.end_date}
+                    onChange={(e) =>
+                      setDateRange((prev) => ({
+                        ...prev,
+                        end_date: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 sm:w-auto"
+                    min={dateRange.start_date}
+                    max={today}
+                  />
+                </div>
+              )}
             </div>
-            {(appliedPeriodSummary || filtersApplied?.search) && (
+
+            {(appliedPeriodSummary || activeSearchSummary) && (
               <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600 lg:justify-end">
                 {appliedPeriodSummary && (
                   <div className="inline-flex max-w-full items-center gap-2 text-sm text-gray-700">
@@ -996,11 +927,11 @@ export function VentasFacturadasList() {
                     <span className="break-words">{appliedPeriodSummary}</span>
                   </div>
                 )}
-                {filtersApplied?.search && (
+                {activeSearchSummary && (
                   <div className="inline-flex max-w-full items-center gap-2 text-sm text-gray-700">
                     <Search className="h-4 w-4 text-gray-500" />
                     <span className="break-words">
-                      Búsqueda: {filtersApplied.search}
+                      Búsqueda: {activeSearchSummary}
                     </span>
                   </div>
                 )}
@@ -1029,7 +960,9 @@ export function VentasFacturadasList() {
               variant="outline"
               size="sm"
               className="mt-2"
-              onClick={() => void cargarFacturas(currentPage, appliedFilters)}
+              onClick={() =>
+                activeFilters && void cargarFacturas(currentPage, activeFilters)
+              }
             >
               Reintentar
             </Button>

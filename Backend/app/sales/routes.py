@@ -7,6 +7,8 @@ import random
 
 from app.auth.routes import get_current_user
 from app.utils.timezone import today_str, today
+from app.commissions.comision_engine import resolver_config_comision, calcular_comision
+from app.commissions.comision_context import construir_contexto
 from app.bills.routes import obtener_porcentaje_comision_producto
 from app.database.mongo import (
     collection_products,
@@ -240,11 +242,16 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
             "sede_id": venta.sede_id,
             "$expr": {
                 "$eq": [
-                    {"$toLower": {"$trim": {"input": {"$concat": ["$nombre", " ", "$apellido"]}}}},
-                    nombre_vendedor.lower()
-                ]
-            }
-        })
+                    {"$toLower": {"$trim": {"input": {
+                        "$concat": [
+                            "$nombre", 
+                            " ", 
+                            {"$ifNull": ["$apellido", ""]}  # ← AQUÍ el fix
+                        ]
+                    }}}},
+                nombre_vendedor.lower()
+            ]
+        }})
         if estilista_doc:
             print(f"🔍 Estilista resuelto por nombre: {nombre_vendedor} → {estilista_doc.get('profesional_id')}")
         else:
@@ -319,13 +326,42 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
         subtotal = round(item.cantidad * precio_unitario, 2)
 
         # Comisión por producto (solo si aplica)
-        comision_porcentaje = 0
-        comision_valor      = 0
+        comision_valor = 0
+        comision_porcentaje_aplicado = 0  # ← nuevo
+
         if aplica_comision:
-            comision_porcentaje = obtener_porcentaje_comision_producto(
-                producto_db, vendedor_doc_para_comision, inventario
+            config = resolver_config_comision(
+                producto_db,
+                vendedor_doc_para_comision,
+                inventario,
+                sede,
             )
-            comision_valor      = round((subtotal * comision_porcentaje) / 100, 2)
+            ctx = await construir_contexto(
+                profesional_id=profesional_id_guardado,
+                sede_id=venta.sede_id,
+                cantidad_actual=item.cantidad,
+                moneda_sede=moneda,
+            )
+            resultado = calcular_comision(config, subtotal, ctx)
+            comision_valor = resultado.valor
+
+            # ── Extraer el porcentaje real aplicado según el tipo ──────────
+            if config.tipo in ("porcentaje", "fijo", "por_unidad"):
+                comision_porcentaje_aplicado = config.valor
+            elif config.tipo == "escalonado" and resultado.nivel_nuevo:
+                # Subió de nivel en esta venta
+                comision_porcentaje_aplicado = resultado.nivel_nuevo.valor
+            elif config.tipo == "escalonado":
+                # Sin cambio de nivel — buscar el tramo activo directamente
+                total = ctx.cantidad_acumulada_periodo + ctx.cantidad_actual
+                tramo_activo = next(
+                    (t for t in sorted(config.tramos, key=lambda t: t.desde)
+                    if total >= t.desde and (t.hasta is None or total <= t.hasta)),
+                    None
+                )
+                comision_porcentaje_aplicado = tramo_activo.valor if tramo_activo else 0
+            # ──────────────────────────────────────────────────────────────
+
             total_comision_productos += comision_valor
 
         item_doc = {
@@ -336,8 +372,8 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
             "precio_unitario": num(precio_unitario),
             "subtotal": num(subtotal),
             "moneda": moneda,
-            "comision": num(comision_valor),          # ⭐ valor de comisión calculado
-            "comision_porcentaje": comision_porcentaje,
+            "comision": num(comision_valor),
+            "comision_porcentaje": comision_porcentaje_aplicado,  # ← ahora refleja el nivel real
         }
         items.append(item_doc)
         total_venta += subtotal
@@ -425,6 +461,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
         "desglose_pagos": {venta.metodo_pago: num(abono_real), "total": num(total_venta)},
         # ⭐ Vendedor: puede ser el usuario autenticado, un nombre libre, o el estilista asignado
         "vendido_por": nombre_vendedor,
+        "profesional_nombre": nombre_vendedor,  # para facilitar búsquedas y reportes sin tener que resolver ID → nombre
         "profesional_id": profesional_id_guardado,        # ⭐ null si no se asignó estilista
         "facturado_por": email_usuario,
         "notas": venta.notas,

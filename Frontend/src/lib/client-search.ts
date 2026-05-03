@@ -1,5 +1,4 @@
 import type { Cliente } from "../types/cliente"
-import { calcularDiasSinVenir } from "./clientMetrics"
 import { formatDateDMY } from "./dateFormat"
 
 export type MatchType =
@@ -214,21 +213,8 @@ export const getLastVisitLabel = (cliente: Cliente): string => {
     return formatDateDMY(ultimaVisita, "—")
   }
 
-  if (Number.isFinite(cliente.diasSinVenir)) {
-    const dias = Math.max(0, Math.trunc(cliente.diasSinVenir))
-    return dias === 0 ? "Hoy" : `Hace ${dias} días`
-  }
-
-  const diasCalculados = calcularDiasSinVenir({
-    dias_sin_visitar: (cliente as any).dias_sin_visitar,
-    ultima_visita: (cliente as any).ultima_visita,
-    fecha_creacion: cliente.fecha_creacion,
-    created_at: (cliente as any).created_at,
-  })
-
-  if (Number.isFinite(diasCalculados)) {
-    const dias = Math.max(0, Math.trunc(diasCalculados))
-    return dias === 0 ? "Hoy" : `Hace ${dias} días`
+  if (Number.isFinite(cliente.diasSinVenir) && cliente.diasSinVenir > 0) {
+    return `Hace ${Math.trunc(cliente.diasSinVenir)} días`
   }
 
   return "Sin visitas registradas"

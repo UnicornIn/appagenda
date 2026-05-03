@@ -1,38 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Loader2,
-  Plus,
-  Search,
-  ShoppingCart,
-  Trash2,
-  X,
-} from "lucide-react";
-import { Button } from "../../../components/ui/button";
-import { Input } from "../../../components/ui/input";
-import { Badge } from "../../../components/ui/badge";
+import { ChevronDown, Loader2, Search, X } from "lucide-react";
 import { useAuth } from "../../../components/Auth/AuthContext";
-import { giftcardsService } from "../../GiftCards/giftcardsService";
-import type { GiftCardClientOption } from "../../GiftCards/types";
-import { PAYROLL_PAYMENT_METHOD } from "../../../lib/payment-methods";
 import {
   createDirectSale,
-  deleteAllDirectSaleProducts,
   deleteDirectSaleProduct,
-  type DirectSaleLineItem,
   type DirectSaleSellerOption,
+  fetchAllDirectSaleSellers,
   fetchInventoryProductDetail,
   fetchInventoryProducts,
   type InventoryProduct,
   type PaymentMethod,
   registerDirectSalePayment,
-  searchDirectSaleSellers,
   verifyDirectSaleInBillingReport,
 } from "./directSalesApi";
-import { handleFacturarRequest, type FacturarTipo } from "./facturarApi";
-import { crearCliente, type CrearClienteRequest } from "../../../components/Quotes/clientsService";
-import { rankClientsByRelevance, toClienteFromPartial, type RankedClient, getLastVisitLabel } from "../../../lib/client-search";
+import { handleFacturarRequest } from "./facturarApi";
 
 interface DirectSaleModalProps {
   isOpen: boolean;
@@ -44,596 +27,319 @@ interface CartItem {
   productId: string;
   inventoryId: string;
   name: string;
-  category?: string;
+  ref: string;
+  category: string;
   quantity: number;
   unitPrice: number;
+  discountPct: number;
+  sellerId: string;
   stockAvailable: number;
 }
 
-const DEFAULT_PAYMENT_METHOD: PaymentMethod = "efectivo";
-const CLIENTS_SEARCH_PAGE_SIZE = 30;
-const SELLERS_SEARCH_PAGE_SIZE = 30;
-const ALL_PAYMENT_BREAKDOWN_METHODS = [
-  "efectivo",
-  "transferencia",
-  "tarjeta_credito",
-  "tarjeta_debito",
-  "giftcard",
-  "addi",
-  PAYROLL_PAYMENT_METHOD,
-] as const;
-type PaymentBreakdownMethod = (typeof ALL_PAYMENT_BREAKDOWN_METHODS)[number];
-
-const ALL_PAYMENT_METHOD_OPTIONS: Array<{ value: PaymentMethod; label: string }> = [
+const UI_PAYMENT_METHODS = [
   { value: "efectivo", label: "Efectivo" },
   { value: "transferencia", label: "Transferencia" },
-  { value: "tarjeta_credito", label: "Tarjeta de Crédito" },
-  { value: "tarjeta_debito", label: "Tarjeta de Débito" },
-  { value: "giftcard", label: "Gift Card" },
-  { value: "addi", label: "Addi" },
-  { value: PAYROLL_PAYMENT_METHOD, label: "Descuento por nómina" },
-  { value: "tarjeta", label: "Tarjeta (legacy)" },
+  { value: "tarjeta", label: "Tarjeta" },
+  { value: "nequi", label: "Nequi" },
+  { value: "daviplata", label: "Daviplata" },
 ];
 
-const buildEmptyPaymentBreakdown = (): Record<PaymentBreakdownMethod, number> => ({
-  efectivo: 0,
-  transferencia: 0,
-  tarjeta_credito: 0,
-  tarjeta_debito: 0,
-  giftcard: 0,
-  addi: 0,
-  [PAYROLL_PAYMENT_METHOD]: 0,
-});
+const roundMoney = (v: number) => Math.round(v * 100) / 100;
 
-const roundMoney = (value: number): number => Math.round(value * 100) / 100;
+const getInitials = (name: string) =>
+  name
+    .split(" ")
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 
-function mergeClientOptions(
-  current: GiftCardClientOption[],
-  incoming: GiftCardClientOption[]
-): GiftCardClientOption[] {
-  const byId = new Map<string, GiftCardClientOption>();
-
-  for (const client of current) {
-    byId.set(client.id, client);
-  }
-
-  for (const client of incoming) {
-    const existing = byId.get(client.id);
-    byId.set(client.id, {
-      id: client.id,
-      nombre: client.nombre || existing?.nombre || "",
-      email: client.email || existing?.email,
-      telefono: client.telefono || existing?.telefono,
-    });
-  }
-
-  return Array.from(byId.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
-}
-
-function mergeSellerOptions(
-  current: DirectSaleSellerOption[],
-  incoming: DirectSaleSellerOption[]
-): DirectSaleSellerOption[] {
-  const byId = new Map<string, DirectSaleSellerOption>();
-
-  for (const seller of current) {
-    byId.set(seller.id, seller);
-  }
-
-  for (const seller of incoming) {
-    const existing = byId.get(seller.id);
-    byId.set(seller.id, {
-      id: seller.id,
-      nombre: seller.nombre || existing?.nombre || "",
-      tipo: seller.tipo || existing?.tipo || "usuario",
-      profesionalId: seller.profesionalId || existing?.profesionalId,
-      email: seller.email || existing?.email,
-      rol: seller.rol || existing?.rol,
-      sedeId: seller.sedeId || existing?.sedeId,
-    });
-  }
-
-  return Array.from(byId.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
-}
-
-export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSaleModalProps) {
+export function DirectSaleModal({
+  isOpen,
+  onClose,
+  onSaleCompleted,
+}: DirectSaleModalProps) {
   const { user } = useAuth();
-
-  const [products, setProducts] = useState<InventoryProduct[]>([]);
-  const [cartByProductId, setCartByProductId] = useState<Record<string, CartItem>>({});
-  const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>({});
-  const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
-  const [searchTerm, setSearchTerm] = useState("");
-  const [buyerSearch, setBuyerSearch] = useState("");
-  const [knownClients, setKnownClients] = useState<GiftCardClientOption[]>([]);
-  const [buyerOptions, setBuyerOptions] = useState<GiftCardClientOption[]>([]);
-  const [rankedSuggestions, setRankedSuggestions] = useState<RankedClient[]>([]);
-  const [selectedBuyerId, setSelectedBuyerId] = useState("");
-  const [isLoadingClients, setIsLoadingClients] = useState(false);
-  const [clientsError, setClientsError] = useState<string | null>(null);
-  const [isBuyerFocused, setIsBuyerFocused] = useState(false);
-  const [showClientModal, setShowClientModal] = useState(false);
-  const [newClient, setNewClient] = useState<CrearClienteRequest & { notas?: string }>({
-    nombre: "",
-    correo: "",
-    telefono: "",
-    cedula: "",
-    ciudad: "",
-    fecha_de_nacimiento: "",
-    sede_id: "",
-    notas: "",
-  });
-  const [isCreatingClient, setIsCreatingClient] = useState(false);
-  const [createClientError, setCreateClientError] = useState<string | null>(null);
-  const [sellerSearch, setSellerSearch] = useState("");
-  const [knownSellers, setKnownSellers] = useState<DirectSaleSellerOption[]>([]);
-  const [sellerOptions, setSellerOptions] = useState<DirectSaleSellerOption[]>([]);
-  const [selectedSellerId, setSelectedSellerId] = useState("");
-  const [isLoadingSellers, setIsLoadingSellers] = useState(false);
-  const [sellersError, setSellersError] = useState<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(DEFAULT_PAYMENT_METHOD);
-  const [deliveryCostInput, setDeliveryCostInput] = useState("0");
-  const [giftCardCode, setGiftCardCode] = useState("");
-  const [paymentBreakdown, setPaymentBreakdown] = useState<Record<PaymentBreakdownMethod, number>>(
-    buildEmptyPaymentBreakdown()
-  );
-  const [saleId, setSaleId] = useState<string | null>(null);
-
-  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
-  const [isCreatingSale, setIsCreatingSale] = useState(false);
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-  const [isClearingSale, setIsClearingSale] = useState(false);
-  const [isVerifyingReport, setIsVerifyingReport] = useState(false);
-  const [validatingProductId, setValidatingProductId] = useState<string | null>(null);
-  const [removingProductId, setRemovingProductId] = useState<string | null>(null);
-
-  const [productsError, setProductsError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const latestBuyerSearchRequestRef = useRef(0);
-  const latestSellerSearchRequestRef = useRef(0);
 
   const token =
     user?.access_token ||
     sessionStorage.getItem("access_token") ||
     localStorage.getItem("access_token") ||
     "";
+  const sedeId =
+    user?.sede_id ||
+    sessionStorage.getItem("beaux-sede_id") ||
+    localStorage.getItem("beaux-sede_id") ||
+    "";
+  const currency = String(
+    user?.moneda || sessionStorage.getItem("beaux-moneda") || "USD"
+  ).toUpperCase();
 
-  const sedeId = user?.sede_id || sessionStorage.getItem("beaux-sede_id") || "";
-  const resolvedSedeId = useMemo(
-    () =>
-      String(
-        sedeId ||
-          user?.sede_id ||
-          sessionStorage.getItem("beaux-sede_id") ||
-          localStorage.getItem("beaux-sede_id") ||
-          ""
-      ).trim(),
-    [sedeId, user?.sede_id]
-  );
-  const currency = String(user?.moneda || sessionStorage.getItem("beaux-moneda") || "USD").toUpperCase();
-  const isCopCurrency = currency === "COP";
+  // ── Products ────────────────────────────────────────────────────────────
+  const [products, setProducts] = useState<InventoryProduct[]>([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+  const [productsError, setProductsError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
 
-  const cartItems = useMemo(() => Object.values(cartByProductId), [cartByProductId]);
-  const selectedBuyer = useMemo(
-    () => knownClients.find((client) => client.id === selectedBuyerId) ?? null,
-    [knownClients, selectedBuyerId]
+  // ── Cart ────────────────────────────────────────────────────────────────
+  const [cartByProductId, setCartByProductId] = useState<
+    Record<string, CartItem>
+  >({});
+  const [validatingProductId, setValidatingProductId] = useState<string | null>(
+    null
   );
-  const selectedSeller = useMemo(
-    () => knownSellers.find((seller) => seller.id === selectedSellerId) ?? null,
-    [knownSellers, selectedSellerId]
+  const [removingProductId, setRemovingProductId] = useState<string | null>(
+    null
   );
-  const hasBuyerQuery = buyerSearch.trim().length > 0;
-  const hasSellerQuery = sellerSearch.trim().length > 0;
+
+  // ── Sellers ─────────────────────────────────────────────────────────────
+  const [allSellers, setAllSellers] = useState<DirectSaleSellerOption[]>([]);
+  const [openSellerDropdownId, setOpenSellerDropdownId] = useState<
+    string | null
+  >(null);
+
+  // ── Client ──────────────────────────────────────────────────────────────
+  const [clientName, setClientName] = useState("");
+
+  // ── Payment ─────────────────────────────────────────────────────────────
+  const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<
+    Set<string>
+  >(new Set());
+  const [paymentAmounts, setPaymentAmounts] = useState<Record<string, number>>(
+    {}
+  );
+  const [showDeliveryInput, setShowDeliveryInput] = useState(false);
+  const [deliveryCostInput, setDeliveryCostInput] = useState("0");
+
+  // ── Sale state ──────────────────────────────────────────────────────────
+  const [saleId, setSaleId] = useState<string | null>(null);
+  const [saleComplete, setSaleComplete] = useState(false);
+  const [isCreatingSale, setIsCreatingSale] = useState(false);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [isVerifyingReport, setIsVerifyingReport] = useState(false);
+
+  // ── Errors ──────────────────────────────────────────────────────────────
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Derived values ──────────────────────────────────────────────────────
+  const cartItems = useMemo(
+    () => Object.values(cartByProductId),
+    [cartByProductId]
+  );
+
   const cartTotal = useMemo(
-    () => cartItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
+    () =>
+      roundMoney(
+        cartItems.reduce((sum, item) => {
+          const effectivePrice =
+            item.unitPrice * (1 - item.discountPct / 100);
+          return sum + effectivePrice * item.quantity;
+        }, 0)
+      ),
     [cartItems]
   );
+
   const deliveryCost = useMemo(() => {
-    const parsed = Number.parseFloat(deliveryCostInput);
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      return 0;
-    }
-    return roundMoney(parsed);
+    const p = Number.parseFloat(deliveryCostInput);
+    return Number.isFinite(p) && p > 0 ? roundMoney(p) : 0;
   }, [deliveryCostInput]);
-  const finalTotal = useMemo(() => roundMoney(cartTotal + deliveryCost), [cartTotal, deliveryCost]);
-  const availablePaymentMethodOptions = useMemo(
-    () => ALL_PAYMENT_METHOD_OPTIONS.filter((option) => isCopCurrency || option.value !== "addi"),
-    [isCopCurrency]
+
+  const finalTotal = useMemo(
+    () => roundMoney(cartTotal + deliveryCost),
+    [cartTotal, deliveryCost]
   );
-  const availablePaymentBreakdownMethods = useMemo(
-    () => ALL_PAYMENT_BREAKDOWN_METHODS.filter((method) => isCopCurrency || method !== "addi"),
-    [isCopCurrency]
-  );
+
   const paymentBreakdownTotal = useMemo(
     () =>
       roundMoney(
-        availablePaymentBreakdownMethods.reduce(
-          (sum, method) => sum + (Number.isFinite(paymentBreakdown[method]) ? paymentBreakdown[method] : 0),
+        [...selectedPaymentMethods].reduce(
+          (sum, m) => sum + (paymentAmounts[m] || 0),
           0
         )
       ),
-    [availablePaymentBreakdownMethods, paymentBreakdown]
+    [selectedPaymentMethods, paymentAmounts]
   );
-  const hasCustomPaymentBreakdown = paymentBreakdownTotal > 0;
-  const paymentBreakdownDelta = roundMoney(finalTotal - paymentBreakdownTotal);
-  const paymentBreakdownOverpaid = hasCustomPaymentBreakdown && paymentBreakdownDelta < -0.009;
-  const paymentBreakdownIncomplete = hasCustomPaymentBreakdown && paymentBreakdownDelta > 0.009;
-  const hasGiftCardInBreakdown = (paymentBreakdown.giftcard || 0) > 0;
-  const requiresGiftCardInput = paymentMethod === "giftcard" || hasGiftCardInBreakdown;
+
+  const isBalanced =
+    paymentBreakdownTotal > 0 &&
+    Math.abs(paymentBreakdownTotal - finalTotal) < 0.01;
+  const pendingAmount = Math.max(0, roundMoney(finalTotal - paymentBreakdownTotal));
 
   const filteredProducts = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
-    if (!query) {
-      return products;
-    }
-    return products.filter((product) => {
-      const name = product.name.toLowerCase();
-      const category = product.category.toLowerCase();
-      const description = product.description.toLowerCase();
-      return name.includes(query) || category.includes(query) || description.includes(query);
-    });
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q) ||
+        p.ref.toLowerCase().includes(q)
+    );
   }, [products, searchTerm]);
 
-  const isCatalogLocked = Boolean(saleId);
-  const isClientLocked = Boolean(saleId);
-  const isSellerLocked = Boolean(saleId);
+  const hasItems = cartItems.length > 0;
   const isBusy =
     isLoadingProducts ||
     isCreatingSale ||
     isProcessingPayment ||
-    isClearingSale ||
     isVerifyingReport;
 
-  useEffect(() => {
-    setNewClient((prev) => ({
-      ...prev,
-      sede_id: resolvedSedeId,
-    }));
-  }, [resolvedSedeId]);
+  const canConfirm =
+    !isBusy &&
+    cartItems.length > 0 &&
+    selectedPaymentMethods.size > 0 &&
+    isBalanced &&
+    !saleComplete;
 
-  const getSellerTypeLabel = (seller: DirectSaleSellerOption): string => {
-    if (seller.tipo === "profesional") return "Profesional";
-    if (seller.tipo === "recepcionista") return "Recepcionista";
-    if (seller.rol && seller.rol.trim().length > 0) return seller.rol;
-    return "Usuario";
-  };
-
-  const sanitizePaymentMethodForCurrency = (method: PaymentMethod): PaymentMethod => {
-    if (!isCopCurrency && method === "addi") {
-      return DEFAULT_PAYMENT_METHOD;
-    }
-    return method;
-  };
-
-  const resetModalState = () => {
+  // ── Reset ────────────────────────────────────────────────────────────────
+  const resetState = () => {
     setProducts([]);
-    setCartByProductId({});
-    setQuantityInputs({});
-    setSearchTerm("");
-    setBuyerSearch("");
-    setKnownClients([]);
-    setBuyerOptions([]);
-    setSelectedBuyerId("");
-    setIsLoadingClients(false);
-    setClientsError(null);
-    setShowClientModal(false);
-    setNewClient({
-      nombre: "",
-      correo: "",
-      telefono: "",
-      cedula: "",
-      ciudad: "",
-      fecha_de_nacimiento: "",
-      sede_id: resolvedSedeId,
-      notas: "",
-    });
-    setIsCreatingClient(false);
-    setCreateClientError(null);
-    setSellerSearch("");
-    setKnownSellers([]);
-    setSellerOptions([]);
-    setSelectedSellerId("");
-    setIsLoadingSellers(false);
-    setSellersError(null);
-    setPaymentMethod(DEFAULT_PAYMENT_METHOD);
-    setDeliveryCostInput("0");
-    setGiftCardCode("");
-    setPaymentBreakdown(buildEmptyPaymentBreakdown());
-    setSaleId(null);
     setProductsError(null);
-    setActionError(null);
-    setSuccessMessage(null);
+    setSearchTerm("");
+    setCartByProductId({});
     setValidatingProductId(null);
     setRemovingProductId(null);
-    setIsLoadingProducts(false);
+    setAllSellers([]);
+    setOpenSellerDropdownId(null);
+    setClientName("");
+    setSelectedPaymentMethods(new Set());
+    setPaymentAmounts({});
+    setShowDeliveryInput(false);
+    setDeliveryCostInput("0");
+    setSaleId(null);
+    setSaleComplete(false);
     setIsCreatingSale(false);
     setIsProcessingPayment(false);
-    setIsClearingSale(false);
     setIsVerifyingReport(false);
+    setActionError(null);
   };
 
-  const handleCloseModal = () => {
-    resetModalState();
+  const handleClose = () => {
+    resetState();
     onClose();
   };
 
-  const loadProducts = async () => {
-    if (!token) {
-      setProductsError("No se encontró token de autenticación.");
-      return;
-    }
-
-    try {
-      setIsLoadingProducts(true);
-      setProductsError(null);
-      const result = await fetchInventoryProducts(token, currency);
-      setProducts(result.filter((product) => product.active));
-    } catch (error) {
-      setProductsError(error instanceof Error ? error.message : "No se pudieron cargar los productos.");
-    } finally {
-      setIsLoadingProducts(false);
-    }
-  };
-
+  // ── Load products & sellers ──────────────────────────────────────────────
   useEffect(() => {
     if (!isOpen) {
-      resetModalState();
+      resetState();
       return;
     }
-    void loadProducts();
-  }, [isOpen, currency]);
+    if (!token) return;
 
-  useEffect(() => {
-    if (!isOpen || !token) return;
-
-    let cancelled = false;
-    const requestId = ++latestBuyerSearchRequestRef.current;
-    const query = buyerSearch.trim();
-
-    if (!query) {
-      setBuyerOptions([]);
-      setRankedSuggestions([]);
-      setClientsError(null);
-      setIsLoadingClients(false);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const loadClients = async () => {
+    const load = async () => {
+      setIsLoadingProducts(true);
+      setProductsError(null);
       try {
-        setIsLoadingClients(true);
-        setClientsError(null);
-
-        const result = await giftcardsService.searchClientsForSelector(token, query, {
-          limit: CLIENTS_SEARCH_PAGE_SIZE,
-          page: 1,
-        });
-
-        if (cancelled || requestId !== latestBuyerSearchRequestRef.current) return;
-
-        const merged = mergeClientOptions(mergeClientOptions([], knownClients), result.clients);
-        setKnownClients(merged);
-        const ranked = rankClientsByRelevance(
-          merged.map(toClienteFromPartial),
-          query,
-          10
+        const [prods, sellers] = await Promise.all([
+          fetchInventoryProducts(token, currency),
+          fetchAllDirectSaleSellers(token).catch(() => [] as DirectSaleSellerOption[]),
+        ]);
+        setProducts(prods.filter((p) => p.active));
+        setAllSellers(sellers);
+      } catch (err) {
+        setProductsError(
+          err instanceof Error
+            ? err.message
+            : "No se pudieron cargar los productos."
         );
-        setRankedSuggestions(ranked);
-        setBuyerOptions(result.clients);
-      } catch (error) {
-        if (cancelled || requestId !== latestBuyerSearchRequestRef.current) return;
-        setBuyerOptions([]);
-        setRankedSuggestions([]);
-        setClientsError(error instanceof Error ? error.message : "No se pudieron cargar clientes");
       } finally {
-        if (!cancelled && requestId === latestBuyerSearchRequestRef.current) {
-          setIsLoadingClients(false);
-        }
+        setIsLoadingProducts(false);
       }
     };
 
-    const timeout = setTimeout(() => {
-      void loadClients();
-    }, 250);
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
-    return () => {
-      cancelled = true;
-      clearTimeout(timeout);
-    };
-  }, [isOpen, token, buyerSearch]);
-
+  // F2 → focus search
   useEffect(() => {
-    if (!isOpen || !token) return;
-
-    let cancelled = false;
-    const requestId = ++latestSellerSearchRequestRef.current;
-    const query = sellerSearch.trim();
-
-    if (!query) {
-      setSellerOptions([]);
-      setSellersError(null);
-      setIsLoadingSellers(false);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const loadSellers = async () => {
-      try {
-        setIsLoadingSellers(true);
-        setSellersError(null);
-
-        const result = await searchDirectSaleSellers(token, query, {
-          sedeId,
-          limit: SELLERS_SEARCH_PAGE_SIZE,
-        });
-
-        if (cancelled || requestId !== latestSellerSearchRequestRef.current) return;
-
-        setSellerOptions(result);
-        setKnownSellers((prev) => mergeSellerOptions(prev, result));
-      } catch (error) {
-        if (cancelled || requestId !== latestSellerSearchRequestRef.current) return;
-        setSellerOptions([]);
-        setSellersError(error instanceof Error ? error.message : "No se pudieron cargar vendedores");
-      } finally {
-        if (!cancelled && requestId === latestSellerSearchRequestRef.current) {
-          setIsLoadingSellers(false);
-        }
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "F2" && isOpen) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
       }
     };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isOpen]);
 
-    const timeout = setTimeout(() => {
-      void loadSellers();
-    }, 250);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timeout);
-    };
-  }, [isOpen, token, sellerSearch, sedeId]);
-
+  // Close seller dropdown on outside click
   useEffect(() => {
-    if (!isCopCurrency && paymentMethod === "addi") {
-      setPaymentMethod(DEFAULT_PAYMENT_METHOD);
-    }
-  }, [isCopCurrency, paymentMethod]);
+    if (!openSellerDropdownId) return;
+    const handler = () => setOpenSellerDropdownId(null);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, [openSellerDropdownId]);
 
-  useEffect(() => {
-    if (!isCopCurrency && paymentBreakdown.addi > 0) {
-      setPaymentBreakdown((prev) => ({
-        ...prev,
-        addi: 0,
-      }));
-    }
-  }, [isCopCurrency, paymentBreakdown.addi]);
-
-  useEffect(() => {
-    if (!requiresGiftCardInput && giftCardCode) {
-      setGiftCardCode("");
-    }
-  }, [requiresGiftCardInput, giftCardCode]);
-
-  const formatCurrency = (value: number): string => {
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  const formatCurrency = (v: number) => {
     try {
       return new Intl.NumberFormat("es-CO", {
         style: "currency",
         currency,
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
-      }).format(value);
+      }).format(v);
     } catch {
-      return new Intl.NumberFormat("es-CO", {
-        style: "currency",
-        currency: "USD",
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0,
-      }).format(value);
+      return (
+        "$" +
+        Math.round(v ?? 0).toLocaleString("es-CO", { maximumFractionDigits: 0 })
+      );
     }
   };
 
-  const getQuantityInput = (productId: string): string => quantityInputs[productId] || "1";
-  const getPriceInput = (productId: string, fallback?: number): string =>
-    priceInputs[productId] ?? (fallback !== undefined ? String(fallback) : "");
+  const getDefaultSellerId = () => allSellers[0]?.id ?? "";
 
-  const parseInputQuantity = (value: string): number => {
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed)) {
-      return 0;
-    }
-    return parsed;
-  };
-
-  const parseInputPrice = (value: string, fallback: number): number => {
-    const parsed = Number.parseFloat(value);
-    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-    return parsed;
-  };
-
-  const setError = (message: string) => {
-    setActionError(message);
-    setSuccessMessage(null);
-  };
-
-  const setSuccess = (message: string) => {
-    setSuccessMessage(message);
-    setActionError(null);
-  };
-
-  const updatePaymentBreakdown = (method: PaymentBreakdownMethod, rawValue: string) => {
-    const parsed = Number.parseFloat(rawValue);
-    const nextValue = Number.isFinite(parsed) ? Math.max(0, roundMoney(parsed)) : 0;
-    setPaymentBreakdown((prev) => ({
-      ...prev,
-      [method]: nextValue,
-    }));
-  };
-
-  const clearPaymentBreakdown = () => {
-    setPaymentBreakdown(buildEmptyPaymentBreakdown());
-  };
-
-  const toSaleLineItems = (): DirectSaleLineItem[] =>
-    cartItems.map((item) => ({
-      productId: item.productId,
-      inventoryId: item.inventoryId,
-      name: item.name,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-    }));
-
-  const calculateProductsTotal = (): number => roundMoney(cartTotal);
-
-  const calculateFinalTotal = (): number => roundMoney(cartTotal + deliveryCost);
-
-  const handleFacturar = async ({
-    id,
-    tipo,
-  }: {
-    id: string;
-    tipo: FacturarTipo;
-  }) => {
-    const productosParaFacturar = cartItems.map((item) => ({
-      producto_id: item.productId,
-      nombre: item.name,
-      precio: roundMoney(item.unitPrice),
-      cantidad: item.quantity,
-      categoria: item.category || "",
-    }));
-
-    return handleFacturarRequest({
-      id,
-      tipo,
-      token,
-      productos: productosParaFacturar,
-      total_productos: calculateProductsTotal(),
-      total_final: calculateFinalTotal(),
+  const togglePaymentMethod = (method: string) => {
+    setSelectedPaymentMethods((prev) => {
+      const next = new Set(prev);
+      if (next.has(method)) {
+        next.delete(method);
+        setPaymentAmounts((a) => {
+          const n = { ...a };
+          delete n[method];
+          return n;
+        });
+      } else {
+        next.add(method);
+        const currentTotal = [...prev].reduce(
+          (sum, m) => sum + (paymentAmounts[m] || 0),
+          0
+        );
+        const remaining = roundMoney(finalTotal - currentTotal);
+        if (remaining > 0) {
+          setPaymentAmounts((a) => ({ ...a, [method]: remaining }));
+        }
+      }
+      return next;
     });
   };
 
-  const handleFacturarVenta = async (ventaId: string) => {
-    return handleFacturar({
-      id: ventaId,
-      tipo: "venta",
+  const removePaymentMethod = (method: string) => {
+    setSelectedPaymentMethods((prev) => {
+      const next = new Set(prev);
+      next.delete(method);
+      return next;
+    });
+    setPaymentAmounts((prev) => {
+      const next = { ...prev };
+      delete next[method];
+      return next;
     });
   };
 
+  // ── Cart actions ─────────────────────────────────────────────────────────
   const addProductToCart = async (product: InventoryProduct) => {
-    if (isCatalogLocked) {
-      setError("La venta ya fue creada. Solo puedes eliminar productos antes de registrar el pago.");
+    if (saleId) {
+      setActionError("La venta ya fue creada. Completa el pago.");
       return;
     }
-
-    const desiredQuantity = parseInputQuantity(getQuantityInput(product.productId));
-    if (desiredQuantity <= 0) {
-      setError("La cantidad debe ser mayor a 0.");
-      return;
-    }
-
     if (!token) {
-      setError("No se encontró token de autenticación.");
+      setActionError("Sin token de autenticación.");
       return;
     }
 
@@ -641,23 +347,19 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     setActionError(null);
 
     try {
-      const productDetail = await fetchInventoryProductDetail({
+      const detail = await fetchInventoryProductDetail({
         token,
         inventoryId: product.inventoryId,
         fallbackInventoryId: product.productId,
         currency,
       });
-      const priceValue = parseInputPrice(
-        getPriceInput(product.productId, productDetail.unitPrice),
-        productDetail.unitPrice
-      );
 
-      const currentQuantity = cartByProductId[product.productId]?.quantity || 0;
-      const nextQuantity = currentQuantity + desiredQuantity;
+      const existing = cartByProductId[product.productId];
+      const nextQty = (existing?.quantity ?? 0) + 1;
 
-      if (nextQuantity > productDetail.stockAvailable) {
-        setError(
-          `Stock insuficiente para "${productDetail.name}". Disponible: ${productDetail.stockAvailable}.`
+      if (nextQty > detail.stockAvailable) {
+        setActionError(
+          `Stock insuficiente para "${detail.name}". Disponible: ${detail.stockAvailable}.`
         );
         return;
       }
@@ -667,322 +369,174 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
         [product.productId]: {
           productId: product.productId,
           inventoryId: product.inventoryId,
-          name: productDetail.name,
+          name: detail.name,
+          ref: detail.ref || product.ref,
           category: product.category,
-          quantity: nextQuantity,
-          unitPrice: priceValue,
-          stockAvailable: productDetail.stockAvailable,
+          quantity: nextQty,
+          unitPrice: detail.unitPrice,
+          discountPct: existing?.discountPct ?? 0,
+          sellerId: existing?.sellerId ?? getDefaultSellerId(),
+          stockAvailable: detail.stockAvailable,
         },
       }));
 
-      setPriceInputs((prev) => ({
-        ...prev,
-        [product.productId]: getPriceInput(product.productId, productDetail.unitPrice),
-      }));
-      setQuantityInputs((prev) => ({ ...prev, [product.productId]: "1" }));
-      setSuccess(`"${productDetail.name}" agregado (${desiredQuantity}).`);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "No se pudo validar el stock del producto.");
+      if (hasItems) setSearchTerm("");
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "No se pudo validar el stock."
+      );
     } finally {
       setValidatingProductId(null);
     }
   };
 
-  const updateLocalQuantity = (productId: string, nextQuantity: number) => {
-    if (isCatalogLocked) {
-      setError("No puedes editar cantidades después de crear la venta.");
+  const updateQuantity = (productId: string, delta: number) => {
+    if (saleId) return;
+    const item = cartByProductId[productId];
+    if (!item) return;
+    const next = item.quantity + delta;
+    if (next <= 0) {
+      setCartByProductId((prev) => {
+        const n = { ...prev };
+        delete n[productId];
+        return n;
+      });
       return;
     }
-
-    const current = cartByProductId[productId];
-    if (!current) {
+    if (next > item.stockAvailable) {
+      setActionError(`Stock máximo disponible: ${item.stockAvailable}.`);
       return;
     }
-
-    if (nextQuantity <= 0) {
-      const updated = { ...cartByProductId };
-      delete updated[productId];
-      setCartByProductId(updated);
-      return;
-    }
-
-    if (nextQuantity > current.stockAvailable) {
-      setError(`Stock máximo disponible para "${current.name}": ${current.stockAvailable}.`);
-      return;
-    }
-
     setCartByProductId((prev) => ({
       ...prev,
-      [productId]: {
-        ...current,
-        quantity: nextQuantity,
-      },
+      [productId]: { ...item, quantity: next },
     }));
   };
 
-  const updateCartItemPrice = (productId: string, raw: string) => {
-    if (isCatalogLocked) {
-      setError("No puedes editar precios después de crear la venta.");
-      return;
-    }
-
-    const current = cartByProductId[productId];
-    if (!current) return;
-
-    const nextPrice = parseInputPrice(raw, current.unitPrice);
-    setPriceInputs((prev) => ({ ...prev, [productId]: raw }));
+  const updateDiscount = (productId: string, value: string) => {
+    if (saleId) return;
+    const item = cartByProductId[productId];
+    if (!item) return;
+    const parsed = Math.min(100, Math.max(0, Number.parseFloat(value) || 0));
     setCartByProductId((prev) => ({
       ...prev,
-      [productId]: { ...current, unitPrice: nextPrice },
+      [productId]: { ...item, discountPct: parsed },
+    }));
+  };
+
+  const updateSeller = (productId: string, sellerId: string) => {
+    const item = cartByProductId[productId];
+    if (!item) return;
+    setCartByProductId((prev) => ({
+      ...prev,
+      [productId]: { ...item, sellerId },
     }));
   };
 
   const removeProduct = async (productId: string) => {
-    const current = cartByProductId[productId];
-    if (!current) {
-      return;
-    }
-
-    setActionError(null);
+    const item = cartByProductId[productId];
+    if (!item) return;
     setRemovingProductId(productId);
-
     try {
-      if (saleId) {
-        if (!token) {
-          throw new Error("No se encontró token de autenticación.");
-        }
+      if (saleId && token) {
         await deleteDirectSaleProduct(token, saleId, productId);
       }
-
       setCartByProductId((prev) => {
-        const updated = { ...prev };
-        delete updated[productId];
-        return updated;
+        const n = { ...prev };
+        delete n[productId];
+        return n;
       });
-
-      setSuccess(`"${current.name}" eliminado correctamente.`);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "No se pudo eliminar el producto.");
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "No se pudo eliminar el producto."
+      );
     } finally {
       setRemovingProductId(null);
     }
   };
 
-  const handleCreateClient = async () => {
-    if (isClientLocked) {
-      setCreateClientError("No puedes cambiar el cliente una vez creada la venta.");
-      return;
-    }
+  // ── Sale creation ────────────────────────────────────────────────────────
+  const toLineItems = () =>
+    cartItems.map((item) => ({
+      productId: item.productId,
+      inventoryId: item.inventoryId,
+      name: item.name,
+      quantity: item.quantity,
+      unitPrice: roundMoney(item.unitPrice * (1 - item.discountPct / 100)),
+    }));
 
-    const nombre = newClient.nombre?.trim();
-    if (!nombre) {
-      setCreateClientError("El nombre del cliente es requerido.");
-      return;
-    }
-
-    if (!token) {
-      setCreateClientError("No se encontró token de autenticación.");
-      return;
-    }
-
-    const targetSedeId = resolvedSedeId;
-    if (!targetSedeId) {
-      setCreateClientError("No se pudo determinar la sede activa.");
-      return;
-    }
-
-    setIsCreatingClient(true);
-    setCreateClientError(null);
-
-    try {
-      const result = await crearCliente(token, {
-        ...newClient,
-        nombre,
-        sede_id: targetSedeId,
-      });
-
-      const mappedId = String(result?.cliente?.cliente_id || result?.cliente?._id || "").trim();
-      if (!mappedId) {
-        throw new Error("El cliente se creó pero no se recibió el identificador.");
-      }
-
-      const mappedClient: GiftCardClientOption = {
-        id: mappedId,
-        nombre: result.cliente.nombre,
-        email: result.cliente.correo,
-        telefono: result.cliente.telefono,
-      };
-
-      setKnownClients((prev) => mergeClientOptions(prev, [mappedClient]));
-      setBuyerOptions((prev) => mergeClientOptions(prev, [mappedClient]));
-      setSelectedBuyerId(mappedClient.id);
-      setBuyerSearch(mappedClient.nombre);
-      setShowClientModal(false);
-      setNewClient({
-        nombre: "",
-        correo: "",
-        telefono: "",
-        cedula: "",
-        ciudad: "",
-        fecha_de_nacimiento: "",
-        sede_id: targetSedeId,
-        notas: "",
-      });
-    } catch (error) {
-      setCreateClientError(error instanceof Error ? error.message : "No se pudo crear el cliente.");
-    } finally {
-      setIsCreatingClient(false);
-    }
+  const getPrimarySeller = () => {
+    const id = cartItems[0]?.sellerId;
+    return allSellers.find((s) => s.id === id) ?? null;
   };
 
-  const clearSale = async () => {
-    setActionError(null);
-
-    try {
-      setIsClearingSale(true);
-      if (saleId) {
-        if (!token) {
-          throw new Error("No se encontró token de autenticación.");
-        }
-        await deleteAllDirectSaleProducts(token, saleId);
-      }
-      setCartByProductId({});
-      setDeliveryCostInput("0");
-      setSaleId(null);
-      setSuccess("Venta limpiada correctamente.");
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "No se pudo limpiar la venta.");
-    } finally {
-      setIsClearingSale(false);
-    }
-  };
-
-  const createSale = async (
-    initialPaymentMethod: PaymentMethod = paymentMethod,
-    giftCardCodeOverride?: string
+  const createSaleIfNeeded = async (
+    firstMethod: PaymentMethod
   ): Promise<string> => {
-    if (saleId) {
-      return saleId;
-    }
-
-    if (!token) {
-      throw new Error("No se encontró token de autenticación.");
-    }
-    if (!sedeId) {
-      throw new Error("No se pudo determinar la sede del usuario.");
-    }
-    if (cartItems.length === 0) {
-      throw new Error("Agrega al menos un producto antes de crear la venta.");
-    }
+    if (saleId) return saleId;
+    if (!token) throw new Error("Sin token de autenticación.");
+    if (!sedeId) throw new Error("Sin sede activa.");
+    if (cartItems.length === 0) throw new Error("Agrega al menos un producto.");
 
     setIsCreatingSale(true);
-    const safeInitialPaymentMethod = sanitizePaymentMethodForCurrency(initialPaymentMethod);
-    const codigoGiftcard = (giftCardCodeOverride ?? giftCardCode).trim();
-    if (safeInitialPaymentMethod === "giftcard" && !codigoGiftcard) {
-      throw new Error("Debes ingresar el codigo de la Gift Card para crear la venta.");
-    }
+    const seller = getPrimarySeller();
 
     const created = await createDirectSale({
       token,
       sedeId,
-      total: calculateFinalTotal(),
+      total: finalTotal,
       deliveryCost,
-      paymentMethod: safeInitialPaymentMethod,
-      giftCardCode: safeInitialPaymentMethod === "giftcard" ? codigoGiftcard : undefined,
-      items: toSaleLineItems(),
-      client: selectedBuyer
+      paymentMethod: firstMethod,
+      items: toLineItems(),
+      seller: seller
         ? {
-            id: selectedBuyer.id,
-            nombre: selectedBuyer.nombre,
-            email: selectedBuyer.email,
-            telefono: selectedBuyer.telefono,
-          }
-        : undefined,
-      seller: selectedSeller
-        ? {
-            id: selectedSeller.id,
-            nombre: selectedSeller.nombre,
-            tipo: selectedSeller.tipo,
-            profesionalId: selectedSeller.profesionalId,
-            email: selectedSeller.email,
-            rol: selectedSeller.rol,
-            sedeId: selectedSeller.sedeId,
+            id: seller.id,
+            nombre: seller.nombre,
+            tipo: seller.tipo,
+            profesionalId: seller.profesionalId,
+            email: seller.email,
+            rol: seller.rol,
+            sedeId: seller.sedeId,
           }
         : undefined,
     });
+
     setSaleId(created.saleId);
     setIsCreatingSale(false);
     return created.saleId;
   };
 
-  const handleCreateSale = async () => {
-    setActionError(null);
-    setSuccessMessage(null);
-    try {
-      if (paymentMethod === "giftcard" && !giftCardCode.trim()) {
-        throw new Error("Ingresa el codigo de la Gift Card.");
-      }
-      const createdSaleId = await createSale();
-      setSuccess(`Venta creada correctamente. ID: ${createdSaleId}`);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "No se pudo crear la venta.");
-    } finally {
-      setIsCreatingSale(false);
-    }
-  };
-
-  const handlePaySale = async () => {
+  const handleConfirm = async () => {
     if (cartItems.length === 0) {
-      setError("No hay productos en la venta.");
+      setActionError("Agrega al menos un producto.");
+      return;
+    }
+    if (selectedPaymentMethods.size === 0) {
+      setActionError("Selecciona un método de pago.");
+      return;
+    }
+    if (!isBalanced) {
+      setActionError("El total cobrado no coincide con el total de la venta.");
       return;
     }
 
-    if (!token) {
-      setError("No se encontró token de autenticación.");
+    const plannedPayments = [...selectedPaymentMethods]
+      .map((m) => ({
+        method: m as PaymentMethod,
+        amount: roundMoney(paymentAmounts[m] || 0),
+      }))
+      .filter((p) => p.amount > 0);
+
+    if (plannedPayments.length === 0) {
+      setActionError("Ingresa los montos de pago.");
       return;
     }
+
+    setIsProcessingPayment(true);
+    setActionError(null);
 
     try {
-      const safeMainMethod = sanitizePaymentMethodForCurrency(paymentMethod);
-      const plannedPayments = hasCustomPaymentBreakdown
-        ? availablePaymentBreakdownMethods
-            .map((method) => ({
-              method: method as PaymentMethod,
-              amount: roundMoney(paymentBreakdown[method] || 0),
-            }))
-            .filter((payment) => payment.amount > 0)
-        : [{ method: safeMainMethod, amount: roundMoney(finalTotal) }];
-
-      if (plannedPayments.length === 0) {
-        setError("Define al menos un pago para continuar.");
-        return;
-      }
-
-      const plannedTotal = roundMoney(plannedPayments.reduce((sum, payment) => sum + payment.amount, 0));
-      if (plannedTotal > roundMoney(finalTotal) + 0.009) {
-        setError(`El total de pagos (${formatCurrency(plannedTotal)}) no puede superar la venta (${formatCurrency(finalTotal)}).`);
-        return;
-      }
-      if (plannedTotal < roundMoney(finalTotal) - 0.009) {
-        setError(`Falta asignar ${formatCurrency(roundMoney(finalTotal - plannedTotal))} para completar la venta.`);
-        return;
-      }
-
-      const codigoGiftcard = giftCardCode.trim();
-      const needsGiftCardCode = plannedPayments.some((payment) => payment.method === "giftcard");
-      if (needsGiftCardCode && !codigoGiftcard) {
-        setError("Ingresa el codigo de la Gift Card para continuar.");
-        return;
-      }
-
-      setIsProcessingPayment(true);
-      setActionError(null);
-      setSuccessMessage(null);
-
-      const targetSaleId = await createSale(plannedPayments[0].method, codigoGiftcard);
-      if (!targetSaleId?.trim()) {
-        throw new Error("No se pudo determinar el ID de la venta creada.");
-      }
+      const targetSaleId = await createSaleIfNeeded(plannedPayments[0].method);
 
       for (const payment of plannedPayments) {
         await registerDirectSalePayment({
@@ -990,7 +544,6 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
           saleId: targetSaleId,
           amount: payment.amount,
           paymentMethod: payment.method,
-          giftCardCode: payment.method === "giftcard" ? codigoGiftcard : undefined,
         });
       }
 
@@ -1000,18 +553,35 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
           token,
           sedeId,
           saleId: targetSaleId,
-        });
+        }).catch(() => {});
+        setIsVerifyingReport(false);
       }
 
-      await handleFacturarVenta(targetSaleId);
+      await handleFacturarRequest({
+        id: targetSaleId,
+        tipo: "venta",
+        token,
+        productos: cartItems.map((i) => ({
+          producto_id: i.productId,
+          nombre: i.name,
+          precio: roundMoney(i.unitPrice * (1 - i.discountPct / 100)),
+          cantidad: i.quantity,
+          categoria: i.category || "",
+        })),
+        total_productos: roundMoney(cartTotal),
+        total_final: finalTotal,
+      }).catch(() => {});
 
-      setSuccess(`Venta ${targetSaleId} cobrada y cerrada correctamente. Factura generada correctamente.`);
+      setSaleComplete(true);
       onSaleCompleted?.(targetSaleId);
+
       setTimeout(() => {
-        handleCloseModal();
-      }, 1000);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "No se pudo registrar el pago.");
+        handleClose();
+      }, 1500);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Error al registrar el pago."
+      );
     } finally {
       setIsCreatingSale(false);
       setIsProcessingPayment(false);
@@ -1019,903 +589,636 @@ export function DirectSaleModal({ isOpen, onClose, onSaleCompleted }: DirectSale
     }
   };
 
-  if (!isOpen) {
-    return null;
-  }
+  const handleImprimir = async () => {
+    if (cartItems.length === 0) return;
+    try {
+      const firstMethod =
+        ([...selectedPaymentMethods][0] as PaymentMethod) ?? "efectivo";
+      const targetSaleId = await createSaleIfNeeded(firstMethod);
+      await handleFacturarRequest({
+        id: targetSaleId,
+        tipo: "venta",
+        token,
+        productos: cartItems.map((i) => ({
+          producto_id: i.productId,
+          nombre: i.name,
+          precio: roundMoney(i.unitPrice * (1 - i.discountPct / 100)),
+          cantidad: i.quantity,
+          categoria: i.category || "",
+        })),
+        total_productos: roundMoney(cartTotal),
+        total_final: finalTotal,
+      });
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Error al imprimir."
+      );
+    }
+  };
+
+  if (!isOpen) return null;
+
+  const showSearchDropdown = hasItems && searchTerm.trim().length > 0;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 p-3 sm:p-4">
-      <div className="mx-auto flex h-full items-center justify-center">
-        <div className="flex w-full max-w-7xl max-h-[90vh] flex-col overflow-hidden rounded-xl bg-white">
-        <div className="flex items-center justify-between border-b border-gray-200 p-5">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">Venta directa</h2>
-            <p className="text-sm text-gray-600">
-              Factura productos sin crear cita. Flujo rápido de mostrador.
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-9 w-9 p-0 text-gray-600 hover:bg-gray-100"
-            onClick={handleCloseModal}
-            disabled={isBusy}
-          >
-            <X className="h-4 w-4" />
-            <span className="sr-only">Cerrar</span>
-          </Button>
-        </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="flex flex-col w-full max-w-[1060px] max-h-[90vh] bg-white rounded-2xl shadow-2xl overflow-hidden">
 
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <div className="grid grid-cols-1 gap-4 border-b border-gray-200 px-5 py-4 lg:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600">
-              Método principal
-            </label>
-            <select
-              className="h-9 w-full rounded-md border border-gray-300 px-3 text-sm"
-              value={paymentMethod}
-              onChange={(event) => setPaymentMethod(event.target.value)}
-              disabled={isBusy}
+        {/* ── Header ──────────────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold text-gray-900">Venta directa</h2>
+            <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest bg-gray-100 text-gray-500 rounded">
+              Facturación rápida
+            </span>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-gray-400">Sin cita · Productos</span>
+            <button
+              onClick={handleClose}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
             >
-              {availablePaymentMethodOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-end justify-start lg:justify-end">
-            <Badge variant="outline" className="border-gray-300 px-3 py-1 text-sm text-gray-700">
-              Moneda: {currency}
-            </Badge>
+              <X className="h-5 w-5" />
+            </button>
           </div>
         </div>
 
-          <div className="border-b border-gray-200 px-5 py-4">
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600">
-              Cliente (opcional)
-            </label>
+        {/* ── Body ────────────────────────────────────────────────────────── */}
+        <div className="flex flex-1 min-h-0">
 
-            <div className="max-w-xl flex items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                <Input
-                  value={buyerSearch}
-                  onChange={(event) => setBuyerSearch(event.target.value)}
-                  onFocus={() => setIsBuyerFocused(true)}
-                  onBlur={() => setTimeout(() => setIsBuyerFocused(false), 120)}
-                  placeholder="Buscar cliente por nombre..."
-                  className="h-10 pl-9 pr-4"
-                  disabled={isBusy || isClientLocked}
+          {/* Left panel */}
+          <div className="flex flex-1 flex-col min-h-0 min-w-0">
+
+            {/* Search bar */}
+            <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  placeholder="Buscar producto por nombre, referencia o categoría..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-14 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-gray-400 bg-gray-50 placeholder:text-gray-400"
                 />
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setCreateClientError(null);
-                  setNewClient((prev) => ({
-                    ...prev,
-                    nombre: buyerSearch.trim() || prev.nombre,
-                    sede_id: resolvedSedeId,
-                  }));
-                  setShowClientModal(true);
-                }}
-                disabled={isBusy || isClientLocked}
-                className="flex h-10 items-center justify-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-300"
-                title="Crear cliente"
-              >
-                <Plus className="mr-1 h-4 w-4" />
-                Crear
-              </button>
-            </div>
+                <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded font-mono select-none">
+                  F2
+                </span>
 
-            {selectedBuyer ? (
-              <div className="mt-2 max-w-xl rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-gray-900">{selectedBuyer.nombre}</p>
-                    <p className="truncate text-xs text-gray-500">
-                      {selectedBuyer.email || selectedBuyer.telefono || "Sin datos de contacto"}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedBuyerId("")}
-                    className="text-xs font-medium text-gray-600 hover:text-gray-900 disabled:cursor-not-allowed disabled:text-gray-400"
-                    disabled={isBusy || isClientLocked}
-                  >
-                    Quitar
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-2 text-xs text-gray-500">
-                Si no seleccionas cliente, la factura se registrará sin asociación.
-              </p>
-            )}
-
-            {hasBuyerQuery && isBuyerFocused ? (
-              <div className="mt-2 max-w-xl overflow-hidden rounded-lg border border-gray-200 bg-white">
-                <div className="max-h-56 overflow-y-auto">
-                  {isLoadingClients && (
-                    <div className="flex items-center gap-2 px-3 py-3 text-xs text-gray-500">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Cargando clientes...
-                    </div>
-                  )}
-
-                  {!isLoadingClients && rankedSuggestions.length === 0 ? (
-                    <p className="px-3 py-3 text-xs text-gray-500">
-                      No hay resultados para la búsqueda actual.
-                    </p>
-                  ) : (
-                    rankedSuggestions.map((result) => {
-                      const client = result.cliente;
-                      const option = buyerOptions.find((c) => c.id === client.id) || {
-                        id: client.id,
-                        nombre: client.nombre,
-                        email: client.email,
-                        telefono: client.telefono,
-                        cedula: client.cedula,
-                      };
-                      const isSelected = option.id === selectedBuyerId;
-
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => setSelectedBuyerId(option.id)}
-                          className={`flex w-full items-start justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 ${
-                            isSelected ? "bg-gray-100" : "hover:bg-gray-50"
-                          }`}
-                          disabled={isBusy || isClientLocked}
-                        >
-                          <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-gray-900">{client.nombre}</p>
-                          <p className="truncate text-xs text-gray-700">
-                            {client.telefono || "—"} • {client.cedula || "—"}
-                          </p>
-                          {client.email ? (
-                            <p className="truncate text-[11px] text-gray-600">{client.email}</p>
-                          ) : null}
-                          <p className="text-[11px] text-gray-500">{getLastVisitLabel(client)}</p>
-                        </div>
-                        {isSelected ? (
-                          <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
-                            Seleccionado
-                            </span>
-                          ) : null}
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            ) : (
-              <p className="mt-2 text-xs text-gray-500">Escribe el nombre del cliente para buscar.</p>
-            )}
-
-            {hasBuyerQuery && isLoadingClients ? (
-              <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Cargando clientes...
-              </div>
-            ) : null}
-            {hasBuyerQuery && clientsError ? (
-              <p className="mt-2 text-xs text-amber-700">{clientsError}</p>
-            ) : null}
-            {isClientLocked && selectedBuyer ? (
-              <p className="mt-2 text-xs text-gray-500">
-                Cliente fijado para la venta creada: {selectedBuyer.nombre}.
-              </p>
-            ) : null}
-          </div>
-
-          {showClientModal ? (
-            <div
-              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4"
-              onClick={() => {
-                if (!isCreatingClient) {
-                  setShowClientModal(false);
-                }
-              }}
-            >
-              <div
-                className="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-xl"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="flex items-start justify-between border-b border-gray-200 px-4 py-3">
-                  <div>
-                    <h3 className="text-base font-semibold text-gray-900">Nuevo Cliente</h3>
-                    <p className="text-xs text-gray-600">Completa los datos del nuevo cliente</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowClientModal(false)}
-                    disabled={isCreatingClient}
-                    className="rounded p-1 text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-300"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                <div className="max-h-[70vh] space-y-3 overflow-y-auto px-4 py-3">
-                  {createClientError ? (
-                    <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                      {createClientError}
-                    </div>
-                  ) : null}
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-medium text-gray-700">Nombre completo *</label>
-                    <input
-                      type="text"
-                      value={newClient.nombre}
-                      onChange={(event) => setNewClient((prev) => ({ ...prev, nombre: event.target.value }))}
-                      placeholder="Ej: María González"
-                      required
-                      disabled={isCreatingClient}
-                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="block text-xs font-medium text-gray-700">Cédula</label>
-                      <input
-                        type="text"
-                        value={newClient.cedula ?? ""}
-                        onChange={(event) => setNewClient((prev) => ({ ...prev, cedula: event.target.value }))}
-                        placeholder="123456789"
-                        disabled={isCreatingClient}
-                        className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-xs font-medium text-gray-700">Teléfono</label>
-                      <input
-                        type="tel"
-                        value={newClient.telefono ?? ""}
-                        onChange={(event) => setNewClient((prev) => ({ ...prev, telefono: event.target.value }))}
-                        placeholder="3001234567"
-                        disabled={isCreatingClient}
-                        className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-medium text-gray-700">Email</label>
-                    <input
-                      type="email"
-                      value={newClient.correo ?? ""}
-                      onChange={(event) => setNewClient((prev) => ({ ...prev, correo: event.target.value }))}
-                      placeholder="cliente@email.com"
-                      disabled={isCreatingClient}
-                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-medium text-gray-700">Ciudad</label>
-                    <input
-                      type="text"
-                      value={newClient.ciudad ?? ""}
-                      onChange={(event) => setNewClient((prev) => ({ ...prev, ciudad: event.target.value }))}
-                      placeholder="Bogotá"
-                      disabled={isCreatingClient}
-                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-medium text-gray-700">Fecha de nacimiento</label>
-                    <input
-                      type="date"
-                      value={newClient.fecha_de_nacimiento ?? ""}
-                      onChange={(event) =>
-                        setNewClient((prev) => ({ ...prev, fecha_de_nacimiento: event.target.value }))
-                      }
-                      disabled={isCreatingClient}
-                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-medium text-gray-700">
-                      Notas <span className="text-gray-400">(opcional)</span>
-                    </label>
-                    <textarea
-                      value={newClient.notas ?? ""}
-                      onChange={(event) => setNewClient((prev) => ({ ...prev, notas: event.target.value }))}
-                      rows={3}
-                      placeholder="Información adicional del cliente..."
-                      disabled={isCreatingClient}
-                      className="w-full resize-none rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-2 border-t border-gray-200 px-4 py-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowClientModal(false)}
-                    disabled={isCreatingClient}
-                    className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCreateClient}
-                    disabled={isCreatingClient}
-                    className="flex-1 inline-flex items-center justify-center gap-2 rounded bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {isCreatingClient ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Creando...
-                      </>
+                {/* Search dropdown (when cart has items) */}
+                {showSearchDropdown && (
+                  <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-72 overflow-y-auto">
+                    {filteredProducts.length === 0 ? (
+                      <p className="px-4 py-3 text-sm text-gray-400">
+                        Sin resultados
+                      </p>
                     ) : (
-                      "Crear Cliente"
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          <div className="border-b border-gray-200 px-5 py-4">
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600">
-              Vendido por (usuario del sistema)
-            </label>
-
-            <div className="relative max-w-xl">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <Input
-                value={sellerSearch}
-                onChange={(event) => setSellerSearch(event.target.value)}
-                placeholder="Buscar vendedor por nombre..."
-                className="h-10 pl-9"
-                disabled={isBusy || isSellerLocked}
-              />
-            </div>
-
-            {selectedSeller ? (
-              <div className="mt-2 max-w-xl rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="truncate text-sm font-medium text-gray-900">{selectedSeller.nombre}</p>
-                      <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
-                        {getSellerTypeLabel(selectedSeller)}
-                      </span>
-                    </div>
-                    <p className="truncate text-xs text-gray-500">
-                      {selectedSeller.email || selectedSeller.rol || "Sin datos adicionales"}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedSellerId("")}
-                    className="text-xs font-medium text-gray-600 hover:text-gray-900 disabled:cursor-not-allowed disabled:text-gray-400"
-                    disabled={isBusy || isSellerLocked}
-                  >
-                    Quitar
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-2 text-xs text-gray-500">
-                Si no seleccionas vendedor, la venta queda con el usuario autenticado.
-              </p>
-            )}
-
-            {selectedSeller?.tipo === "profesional" ? (
-              <p className="mt-2 text-xs text-emerald-700">
-                Las comisiones de productos se calcularán para este profesional.
-              </p>
-            ) : null}
-
-            {hasSellerQuery ? (
-              <div className="mt-2 max-w-xl overflow-hidden rounded-lg border border-gray-200 bg-white">
-                <div className="max-h-56 overflow-y-auto">
-                  {!isLoadingSellers && sellerOptions.length === 0 ? (
-                    <p className="px-3 py-3 text-xs text-gray-500">
-                      No hay vendedores para la búsqueda actual.
-                    </p>
-                  ) : (
-                    sellerOptions.map((seller) => {
-                      const isSelected = seller.id === selectedSellerId;
-
-                      return (
-                        <button
-                          key={seller.id}
-                          type="button"
-                          onClick={() => setSelectedSellerId(seller.id)}
-                          className={`flex w-full items-start justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 ${
-                            isSelected ? "bg-gray-100" : "hover:bg-gray-50"
-                          }`}
-                          disabled={isBusy || isSellerLocked}
-                        >
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="truncate text-sm font-medium text-gray-900">{seller.nombre}</p>
-                              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
-                                {getSellerTypeLabel(seller)}
+                      filteredProducts.map((product) => {
+                        const isValidating =
+                          validatingProductId === product.productId;
+                        return (
+                          <button
+                            key={product.productId}
+                            onClick={() => void addProductToCart(product)}
+                            disabled={isBusy || isValidating}
+                            className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-0 text-left disabled:opacity-50"
+                          >
+                            <div>
+                              <span className="text-sm font-medium text-gray-900">
+                                {product.name}
+                              </span>
+                              {product.ref && (
+                                <span className="ml-2 text-xs text-gray-400">
+                                  {product.ref}
+                                </span>
+                              )}
+                              <span className="ml-2 text-xs text-gray-400">
+                                · {product.category}
                               </span>
                             </div>
-                            <p className="truncate text-xs text-gray-500">
-                              {seller.email || seller.rol || "Sin datos de contacto"}
-                            </p>
-                          </div>
-                          {isSelected ? (
-                            <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
-                              Seleccionado
-                            </span>
-                          ) : null}
-                        </button>
-                      );
-                    })
+                            <div className="text-right flex-shrink-0 ml-4">
+                              <span className="text-sm font-bold text-gray-900">
+                                {formatCurrency(product.unitPrice)}
+                              </span>
+                              <span className="ml-2 text-xs text-gray-400">
+                                Stock: {product.stockAvailable}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Main content area */}
+            <div className="flex-1 overflow-y-auto min-h-0">
+              {!hasItems ? (
+                /* ── Product catalog table ── */
+                isLoadingProducts ? (
+                  <div className="flex items-center justify-center h-40 text-sm text-gray-400">
+                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                    Cargando productos...
+                  </div>
+                ) : productsError ? (
+                  <div className="p-5 text-sm text-red-500">{productsError}</div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        <th className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 px-5 py-3">
+                          Producto
+                        </th>
+                        <th className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 px-3 py-3 w-24">
+                          Ref
+                        </th>
+                        <th className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 px-3 py-3 w-32">
+                          Categoría
+                        </th>
+                        <th className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 px-3 py-3 w-20">
+                          Stock
+                        </th>
+                        <th className="text-right text-[10px] font-bold uppercase tracking-widest text-gray-400 px-5 py-3 w-28">
+                          Precio
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredProducts.map((product) => {
+                        const isValidating =
+                          validatingProductId === product.productId;
+                        return (
+                          <tr
+                            key={product.productId}
+                            onClick={() =>
+                              !isBusy &&
+                              !isValidating &&
+                              void addProductToCart(product)
+                            }
+                            className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors ${
+                              isValidating ? "opacity-50 pointer-events-none" : ""
+                            }`}
+                          >
+                            <td className="px-5 py-3 font-medium text-gray-900">
+                              {product.name}
+                            </td>
+                            <td className="px-3 py-3 text-gray-400 text-xs">
+                              {product.ref || "—"}
+                            </td>
+                            <td className="px-3 py-3 text-gray-500">
+                              {product.category}
+                            </td>
+                            <td className="px-3 py-3 text-gray-500">
+                              {product.stockAvailable}
+                            </td>
+                            <td className="px-5 py-3 text-right font-bold text-gray-900">
+                              {formatCurrency(product.unitPrice)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {filteredProducts.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="px-5 py-12 text-center text-sm text-gray-400"
+                          >
+                            No hay productos disponibles
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                )
+              ) : (
+                /* ── Cart items table ── */
+                <div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        <th className="text-left text-[10px] font-bold uppercase tracking-widest text-gray-400 px-4 py-3">
+                          Estilista / Producto
+                        </th>
+                        <th className="text-center text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2 py-3 w-28">
+                          Cant.
+                        </th>
+                        <th className="text-center text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2 py-3 w-24">
+                          Dcto %
+                        </th>
+                        <th className="text-center text-[10px] font-bold uppercase tracking-widest text-gray-400 px-2 py-3 w-44">
+                          Vendedor
+                        </th>
+                        <th className="text-right text-[10px] font-bold uppercase tracking-widest text-gray-400 px-4 py-3 w-28">
+                          Subtotal
+                        </th>
+                        <th className="w-8" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cartItems.map((item) => {
+                        const isRemoving = removingProductId === item.productId;
+                        const seller = allSellers.find(
+                          (s) => s.id === item.sellerId
+                        );
+                        const sellerName = seller?.nombre ?? "";
+                        const avatarInitials = sellerName
+                          ? getInitials(sellerName)
+                          : getInitials(item.name);
+                        const subtotal = roundMoney(
+                          item.unitPrice *
+                            (1 - item.discountPct / 100) *
+                            item.quantity
+                        );
+                        const isDropOpen =
+                          openSellerDropdownId === item.productId;
+
+                        return (
+                          <tr
+                            key={item.productId}
+                            className="border-b border-gray-50"
+                          >
+                            {/* Product info */}
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-full bg-gray-900 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+                                  {avatarInitials}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-gray-900 truncate">
+                                    {item.name}
+                                  </div>
+                                  <div className="text-xs text-gray-400 mt-0.5">
+                                    {item.ref && (
+                                      <span>{item.ref} · </span>
+                                    )}
+                                    <span>{formatCurrency(item.unitPrice)}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Quantity */}
+                            <td className="px-2 py-3">
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  onClick={() =>
+                                    updateQuantity(item.productId, -1)
+                                  }
+                                  disabled={isBusy || !!saleId}
+                                  className="w-7 h-7 flex items-center justify-center border border-gray-200 rounded text-gray-600 hover:bg-gray-50 disabled:opacity-40 text-sm font-medium"
+                                >
+                                  −
+                                </button>
+                                <span className="w-6 text-center font-semibold text-gray-900 text-sm">
+                                  {item.quantity}
+                                </span>
+                                <button
+                                  onClick={() =>
+                                    updateQuantity(item.productId, 1)
+                                  }
+                                  disabled={isBusy || !!saleId}
+                                  className="w-7 h-7 flex items-center justify-center border border-gray-200 rounded text-gray-600 hover:bg-gray-50 disabled:opacity-40 text-sm font-medium"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </td>
+
+                            {/* Discount */}
+                            <td className="px-2 py-3">
+                              <div className="flex items-center justify-center gap-1">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  value={
+                                    item.discountPct !== 0
+                                      ? item.discountPct
+                                      : ""
+                                  }
+                                  placeholder="0"
+                                  onChange={(e) =>
+                                    updateDiscount(
+                                      item.productId,
+                                      e.target.value
+                                    )
+                                  }
+                                  disabled={!!saleId || isBusy}
+                                  className="w-12 h-8 text-center border border-gray-200 rounded text-sm focus:outline-none focus:border-gray-400 disabled:opacity-40"
+                                />
+                                <span className="text-gray-400 text-xs">%</span>
+                              </div>
+                            </td>
+
+                            {/* Seller dropdown */}
+                            <td className="px-2 py-3">
+                              <div className="relative">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenSellerDropdownId(
+                                      isDropOpen ? null : item.productId
+                                    );
+                                  }}
+                                  disabled={!!saleId || isBusy}
+                                  className="flex items-center justify-between gap-1 w-full h-8 px-3 border border-gray-200 rounded text-sm bg-white hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                                >
+                                  <span className="truncate text-gray-700">
+                                    {sellerName || "Seleccionar"}
+                                  </span>
+                                  <ChevronDown className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                                </button>
+
+                                {isDropOpen && (
+                                  <div className="absolute top-full left-0 z-40 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                                    {allSellers.map((s) => (
+                                      <button
+                                        key={s.id}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          updateSeller(item.productId, s.id);
+                                          setOpenSellerDropdownId(null);
+                                        }}
+                                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors ${
+                                          s.id === item.sellerId
+                                            ? "bg-blue-50 text-blue-700 font-medium"
+                                            : "text-gray-700"
+                                        }`}
+                                      >
+                                        {s.nombre}
+                                      </button>
+                                    ))}
+                                    {allSellers.length === 0 && (
+                                      <p className="px-3 py-2 text-xs text-gray-400">
+                                        Sin vendedores
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Subtotal */}
+                            <td className="px-4 py-3 text-right font-bold text-gray-900">
+                              {formatCurrency(subtotal)}
+                            </td>
+
+                            {/* Remove */}
+                            <td className="pr-3">
+                              <button
+                                onClick={() => void removeProduct(item.productId)}
+                                disabled={isBusy || isRemoving}
+                                className="text-gray-300 hover:text-gray-500 disabled:opacity-40 p-1 transition-colors"
+                              >
+                                {isRemoving ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <X className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  {/* Cart footer */}
+                  <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+                    <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">
+                      {cartItems.length} producto
+                      {cartItems.length !== 1 ? "s" : ""}
+                    </span>
+                    <span className="font-bold text-gray-900">
+                      {formatCurrency(cartTotal)}
+                    </span>
+                  </div>
+
+                  {/* Action error */}
+                  {actionError && (
+                    <div className="mx-4 mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                      {actionError}
+                    </div>
                   )}
                 </div>
-              </div>
-            ) : (
-              <p className="mt-2 text-xs text-gray-500">
-                Escribe el nombre del usuario para buscar.
-              </p>
-            )}
-
-            {hasSellerQuery && isLoadingSellers ? (
-              <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Cargando vendedores...
-              </div>
-            ) : null}
-            {hasSellerQuery && sellersError ? (
-              <p className="mt-2 text-xs text-amber-700">{sellersError}</p>
-            ) : null}
-            {isSellerLocked && selectedSeller ? (
-              <p className="mt-2 text-xs text-gray-500">
-                Vendedor fijado para la venta creada: {selectedSeller.nombre}.
-              </p>
-            ) : null}
+              )}
+            </div>
           </div>
 
-          {requiresGiftCardInput && (
-            <div className="border-b border-gray-200 px-5 py-4">
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600">
-                Codigo Gift Card
-              </label>
-              <Input
-                value={giftCardCode}
-                onChange={(event) => setGiftCardCode(event.target.value)}
-                placeholder="Ej: RFC-GCP-1234"
-                className="h-9 max-w-md"
-                disabled={isBusy}
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Obligatorio cuando el pago principal o el desglose incluye Gift Card.
-              </p>
-            </div>
-          )}
+          {/* ── Right panel ───────────────────────────────────────────────── */}
+          <div className="w-[340px] flex-shrink-0 border-l border-gray-100 flex flex-col overflow-y-auto">
 
-          {(productsError || actionError || successMessage) && (
-            <div className="space-y-2 border-b border-gray-200 px-5 py-3">
-              {productsError && (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {productsError}
+            {/* Client */}
+            <div className="px-5 py-4 border-b border-gray-100">
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">
+                Cliente
+              </label>
+              <input
+                type="text"
+                placeholder="Nombre del cliente (opcional)"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                disabled={isBusy}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400 placeholder:text-gray-400"
+              />
+            </div>
+
+            {/* Summary */}
+            <div className="px-5 py-4 border-b border-gray-100">
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">
+                Resumen
+              </label>
+              <div className="space-y-2.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Subtotal</span>
+                  <span className="font-medium text-gray-900">
+                    {formatCurrency(cartTotal)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm items-center">
+                  <span className="text-gray-500">Envío</span>
+                  {showDeliveryInput ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-gray-400">$</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={deliveryCostInput}
+                        onChange={(e) => setDeliveryCostInput(e.target.value)}
+                        className="w-20 h-7 text-right border border-gray-200 rounded text-sm px-2 focus:outline-none focus:border-gray-400"
+                      />
+                    </div>
+                  ) : deliveryCost > 0 ? (
+                    <button
+                      onClick={() => setShowDeliveryInput(true)}
+                      className="font-medium text-gray-900 text-sm hover:underline"
+                    >
+                      {formatCurrency(deliveryCost)}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setShowDeliveryInput(true)}
+                      className="text-gray-400 text-xs hover:text-gray-600 transition-colors"
+                    >
+                      + Agregar
+                    </button>
+                  )}
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                  <span className="font-bold text-gray-900 text-base">
+                    Total
+                  </span>
+                  <span className="font-bold text-gray-900 text-xl">
+                    {formatCurrency(finalTotal)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Payment methods */}
+            <div className="px-5 py-4 flex-1">
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">
+                Métodos de pago
+              </label>
+
+              {/* Toggle pills */}
+              <div className="flex flex-wrap gap-2 mb-4">
+                {UI_PAYMENT_METHODS.map((m) => (
+                  <button
+                    key={m.value}
+                    onClick={() => togglePaymentMethod(m.value)}
+                    disabled={isBusy || saleComplete}
+                    className={`px-3.5 py-1.5 text-sm rounded-lg border transition-colors font-medium ${
+                      selectedPaymentMethods.has(m.value)
+                        ? "bg-gray-900 text-white border-gray-900"
+                        : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Amount inputs */}
+              {selectedPaymentMethods.size > 0 && (
+                <div className="space-y-2">
+                  {[...selectedPaymentMethods].map((method) => {
+                    const label =
+                      UI_PAYMENT_METHODS.find((m) => m.value === method)
+                        ?.label ?? method;
+                    return (
+                      <div key={method} className="flex items-center gap-2">
+                        <span className="text-sm text-gray-600 w-28 truncate flex-shrink-0">
+                          {label}
+                        </span>
+                        <span className="text-sm text-gray-400 flex-shrink-0">
+                          $
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={paymentAmounts[method] ?? ""}
+                          onChange={(e) => {
+                            const v = Number.parseFloat(e.target.value);
+                            setPaymentAmounts((prev) => ({
+                              ...prev,
+                              [method]: Number.isFinite(v)
+                                ? Math.max(0, v)
+                                : 0,
+                            }));
+                          }}
+                          disabled={isBusy || saleComplete}
+                          placeholder="0"
+                          className="flex-1 h-8 text-right border border-gray-200 rounded px-2 text-sm focus:outline-none focus:border-gray-400"
+                        />
+                        <button
+                          onClick={() => removePaymentMethod(method)}
+                          disabled={isBusy || saleComplete}
+                          className="text-gray-300 hover:text-gray-500 flex-shrink-0 transition-colors"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  {/* Balance indicator */}
+                  {isBalanced && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700 font-medium mt-1">
+                      ✓ Cuadrado
+                    </div>
+                  )}
                 </div>
               )}
-              {actionError && (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            </div>
+
+            {/* Bottom action area */}
+            <div className="px-5 pb-5 flex-shrink-0">
+              {/* Cobrado / Pendiente */}
+              {selectedPaymentMethods.size > 0 && (
+                <div className="flex justify-between text-xs text-gray-500 mb-3">
+                  <span>
+                    Cobrado:{" "}
+                    <span className="font-semibold text-gray-700">
+                      {formatCurrency(paymentBreakdownTotal)}
+                    </span>
+                  </span>
+                  <span>
+                    Pendiente:{" "}
+                    <span
+                      className={`font-semibold ${
+                        pendingAmount > 0 ? "text-red-500" : "text-gray-700"
+                      }`}
+                    >
+                      {formatCurrency(pendingAmount)}
+                    </span>
+                  </span>
+                </div>
+              )}
+
+              {/* Action error (right panel fallback) */}
+              {actionError && !hasItems && (
+                <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
                   {actionError}
                 </div>
               )}
-              {successMessage && (
-                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
-                  {successMessage}
-                </div>
-              )}
-            </div>
-          )}
 
-          <div className="flex flex-col lg:flex-row">
-            <div className="flex flex-1 flex-col border-gray-200 lg:border-r">
-            <div className="border-b border-gray-200 p-4">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-500" />
-                <Input
-                  className="pl-9"
-                  placeholder="Buscar por nombre, categoría o descripción..."
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="p-4">
-              {isLoadingProducts ? (
-                <div className="flex h-40 flex-col items-center justify-center text-gray-600">
-                  <Loader2 className="mb-2 h-6 w-6 animate-spin" />
-                  Cargando productos...
-                </div>
-              ) : filteredProducts.length === 0 ? (
-                <div className="flex h-40 flex-col items-center justify-center text-center text-gray-600">
-                  <ShoppingCart className="mb-2 h-8 w-8 text-gray-400" />
-                  No hay productos disponibles.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  {filteredProducts.map((product) => {
-                    const isValidating = validatingProductId === product.productId;
-                    const quantityValue = getQuantityInput(product.productId);
-                    const priceValue = getPriceInput(product.productId, product.unitPrice);
-                    return (
-                      <div key={product.productId} className="rounded-lg border border-gray-200 p-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="font-semibold text-gray-900">{product.name}</p>
-                            <p className="text-xs text-gray-600">{product.category}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-semibold text-gray-900">{formatCurrency(product.unitPrice)}</p>
-                            <p className="text-xs text-gray-500">Stock: {product.stockAvailable}</p>
-                          </div>
-                        </div>
-
-                        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                          <div className="flex items-center gap-2">
-                            <Input
-                              type="number"
-                              min={1}
-                              value={quantityValue}
-                              onChange={(event) =>
-                                setQuantityInputs((prev) => ({
-                                  ...prev,
-                                  [product.productId]: event.target.value,
-                                }))
-                              }
-                              className="h-9 w-20"
-                              disabled={isCatalogLocked || isBusy}
-                            />
-                            <Input
-                              type="number"
-                              min={0}
-                              step="100"
-                              value={priceValue}
-                              onChange={(event) =>
-                                setPriceInputs((prev) => ({
-                                  ...prev,
-                                  [product.productId]: event.target.value,
-                                }))
-                              }
-                              className="h-9 w-28"
-                              disabled={isCatalogLocked || isBusy}
-                            />
-                          </div>
-                          <Button
-                            className="h-9 flex-1 bg-black text-white hover:bg-gray-800"
-                            onClick={() => {
-                              void addProductToCart(product);
-                            }}
-                            disabled={isCatalogLocked || isBusy || isValidating}
-                          >
-                            {isValidating ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Validando...
-                              </>
-                            ) : (
-                              <>
-                                <Plus className="mr-2 h-4 w-4" />
-                                Agregar
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-
-            <div className="flex w-full flex-col bg-gray-50 lg:w-[420px]">
-            <div className="border-b border-gray-200 p-4">
-              <h3 className="flex items-center gap-2 text-lg font-bold text-gray-900">
-                <ShoppingCart className="h-5 w-5" />
-                Resumen de venta
-              </h3>
-              {saleId ? <p className="mt-1 text-xs text-gray-600">Venta creada: {saleId}</p> : null}
-            </div>
-
-            <div className="p-4">
-              {cartItems.length === 0 ? (
-                <div className="flex h-40 flex-col items-center justify-center text-center text-gray-600">
-                  <ShoppingCart className="mb-2 h-8 w-8 text-gray-400" />
-                  Agrega productos para iniciar la venta.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {cartItems.map((item) => {
-                    const isRemoving = removingProductId === item.productId;
-                    return (
-                      <div key={item.productId} className="rounded-lg border border-gray-200 bg-white p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="font-medium text-gray-900">{item.name}</p>
-                            <p className="text-xs text-gray-600">
-                              {formatCurrency(item.unitPrice)} x {item.quantity}
-                            </p>
-                          </div>
-                          <p className="font-semibold text-gray-900">
-                            {formatCurrency(item.unitPrice * item.quantity)}
-                          </p>
-                        </div>
-
-                        <div className="mt-3 flex items-center justify-between gap-2">
-                          {saleId ? (
-                            <p className="text-xs text-gray-600">
-                              Cantidad fija tras crear venta. Usa eliminar si te equivocaste.
-                            </p>
-                          ) : (
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="outline"
-                                className="h-8 w-8 p-0"
-                                onClick={() => updateLocalQuantity(item.productId, item.quantity - 1)}
-                                disabled={isBusy}
-                              >
-                                -
-                              </Button>
-                              <span className="min-w-[2rem] text-center text-sm font-semibold text-gray-900">
-                                {item.quantity}
-                              </span>
-                              <Button
-                                variant="outline"
-                                className="h-8 w-8 p-0"
-                                onClick={() => updateLocalQuantity(item.productId, item.quantity + 1)}
-                                disabled={isBusy}
-                              >
-                                +
-                              </Button>
-                              <Input
-                                type="number"
-                                min={0}
-                                step="100"
-                                value={getPriceInput(item.productId, item.unitPrice)}
-                                onChange={(event) => updateCartItemPrice(item.productId, event.target.value)}
-                                className="h-9 w-24"
-                                disabled={isBusy}
-                              />
-                            </div>
-                          )}
-
-                          <Button
-                            variant="ghost"
-                            className="h-8 px-2 text-red-600 hover:bg-red-50 hover:text-red-700"
-                            onClick={() => {
-                              void removeProduct(item.productId);
-                            }}
-                            disabled={isBusy || isRemoving}
-                          >
-                            {isRemoving ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-gray-200 bg-white p-4">
-              <div className="mb-4">
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-600">
-                  Costo de domicilio (opcional)
-                </label>
-                <div className="mt-1 flex items-center gap-2">
-                  <Input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={deliveryCostInput}
-                    onChange={(event) => setDeliveryCostInput(event.target.value)}
-                    disabled={isBusy || isCatalogLocked}
-                    className="h-9 w-36"
-                  />
-                  <p className="text-xs text-gray-500">Se suma al total y se factura.</p>
-                </div>
-              </div>
-
-              <div className="mb-4 space-y-2">
-                <div className="flex items-center justify-between text-sm text-gray-700">
-                  <span>Subtotal productos</span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(cartTotal)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm text-gray-700">
-                  <span>Domicilio</span>
-                  <span className="font-semibold text-gray-900">{formatCurrency(deliveryCost)}</span>
-                </div>
-                <div className="flex items-center justify-between pt-2">
-                  <p className="text-sm font-semibold text-gray-800">Total a cobrar</p>
-                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(finalTotal)}</p>
-                </div>
-              </div>
-
-              <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-700">Desglose de pagos</p>
-                  <Button
-                    variant="ghost"
-                    className="h-7 px-2 text-xs text-gray-600 hover:bg-gray-100"
-                    onClick={clearPaymentBreakdown}
-                    disabled={isBusy}
-                  >
-                    Limpiar
-                  </Button>
-                </div>
-                <p className="mb-3 text-xs text-gray-600">
-                  Opcional. Si no defines montos, se cobra todo por el método principal.
-                </p>
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                  {availablePaymentBreakdownMethods.map((method) => (
-                    <div key={method} className="rounded-md border border-gray-200 bg-white p-2">
-                      <label className="mb-1 block text-[11px] font-medium text-gray-700">
-                        {
-                          method === "tarjeta_credito"
-                            ? "Tarjeta de Crédito"
-                            : method === "tarjeta_debito"
-                            ? "Tarjeta de Débito"
-                            : method === "transferencia"
-                            ? "Transferencia"
-                            : method === "giftcard"
-                            ? "Gift Card"
-                            : method === "addi"
-                            ? "Addi"
-                            : method === PAYROLL_PAYMENT_METHOD
-                            ? "Descuento por nómina"
-                            : "Efectivo"
-                        }
-                      </label>
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={paymentBreakdown[method] || ""}
-                        onChange={(event) => updatePaymentBreakdown(method, event.target.value)}
-                        disabled={isBusy}
-                        placeholder="0"
-                        className="h-8"
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-3 rounded-md border border-gray-200 bg-white p-2 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Total asignado:</span>
-                    <span className="font-semibold text-gray-900">{formatCurrency(paymentBreakdownTotal)}</span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between">
-                    <span className="text-gray-600">Diferencia:</span>
-                    <span
-                      className={`font-semibold ${
-                        paymentBreakdownOverpaid
-                          ? "text-red-700"
-                          : paymentBreakdownIncomplete
-                          ? "text-amber-700"
-                          : "text-emerald-700"
-                      }`}
-                    >
-                      {paymentBreakdownDelta >= 0 ? formatCurrency(paymentBreakdownDelta) : `-${formatCurrency(Math.abs(paymentBreakdownDelta))}`}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                {!saleId ? (
-                  <>
-                    <Button
-                      className="h-11 w-full bg-black text-white hover:bg-gray-800"
-                      onClick={() => {
-                        void handlePaySale();
-                      }}
-                      disabled={isBusy || cartItems.length === 0 || paymentBreakdownOverpaid || paymentBreakdownIncomplete}
-                    >
-                      {isProcessingPayment ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Procesando...
-                        </>
-                      ) : (
-                        "Crear y cobrar venta"
-                      )}
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      className="h-11 w-full border-gray-300 text-gray-800 hover:bg-gray-100"
-                      onClick={() => {
-                        void handleCreateSale();
-                      }}
-                      disabled={isBusy || cartItems.length === 0}
-                    >
-                      {isCreatingSale ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Creando venta...
-                        </>
-                      ) : (
-                        "Crear venta (sin cobrar)"
-                      )}
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button
-                      className="h-11 w-full bg-black text-white hover:bg-gray-800"
-                      onClick={() => {
-                        void handlePaySale();
-                      }}
-                      disabled={isBusy || cartItems.length === 0 || paymentBreakdownOverpaid || paymentBreakdownIncomplete}
-                    >
-                      {isProcessingPayment ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Registrando pago...
-                        </>
-                      ) : (
-                        "Registrar pago y cerrar"
-                      )}
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      className="h-11 w-full border-red-300 text-red-700 hover:bg-red-50"
-                      onClick={() => {
-                        void clearSale();
-                      }}
-                      disabled={isBusy}
-                    >
-                      {isClearingSale ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Cancelando venta...
-                        </>
-                      ) : (
-                        "Cancelar venta"
-                      )}
-                    </Button>
-                  </>
-                )}
-
-                <Button
-                  variant="outline"
-                  className="h-10 w-full border-gray-300 text-gray-800 hover:bg-gray-100"
-                  onClick={handleCloseModal}
-                  disabled={isBusy}
+              {/* Buttons */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void handleConfirm()}
+                  disabled={!canConfirm}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+                    saleComplete
+                      ? "bg-gray-900 text-white cursor-default"
+                      : canConfirm
+                        ? "bg-gray-900 text-white hover:bg-gray-800"
+                        : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                  }`}
                 >
-                  Cerrar
-                </Button>
+                  {isProcessingPayment || isCreatingSale ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Procesando...
+                    </>
+                  ) : saleComplete ? (
+                    "✓ Venta registrada"
+                  ) : (
+                    "Confirmar venta"
+                  )}
+                </button>
+                <button
+                  onClick={() => void handleImprimir()}
+                  disabled={isBusy || cartItems.length === 0}
+                  className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40"
+                >
+                  Imprimir
+                </button>
               </div>
-
-              {isVerifyingReport && (
-                <p className="mt-2 text-xs text-gray-600">Verificando persistencia en reportes...</p>
-              )}
             </div>
           </div>
-        </div>
-        </div>
         </div>
       </div>
     </div>

@@ -1007,12 +1007,14 @@ async def _build_period_report_data(
         "tarjeta_debito",
         "abonos",
         "link_de_pago",
+        "link_pago",
         "giftcard",
         "addi",
         "pos",
         "transferencia",
         "otros",
-        "descuento_por_nomina"
+        "descuento_por_nomina",
+        "descuento_nomina"
     ]
 
     resumen_total: Dict[str, Any] = {
@@ -1039,8 +1041,8 @@ async def _build_period_report_data(
         },
         "egresos_por_metodo": {   # ← NUEVO
             "efectivo": 0.0, "tarjeta_credito": 0.0, "tarjeta_debito": 0.0,
-            "pos": 0.0, "transferencia": 0.0, "link_de_pago": 0.0,
-            "giftcard": 0.0, "addi": 0.0, "abonos": 0.0, "otros": 0.0,
+            "pos": 0.0, "transferencia": 0.0, "link_de_pago": 0.0, "link_pago": 0.0,
+            "giftcard": 0.0, "addi": 0.0, "abonos": 0.0, "otros": 0.0, "descuento_por_nomina": 0.0, "descuento_nomina": 0.0
         },
         "efectivo_esperado": 0.0,
         "total_vendido": 0.0,
