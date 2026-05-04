@@ -146,6 +146,14 @@ interface AuthUserRaw {
 const AUTH_USERS_CACHE_TTL_MS = 60_000;
 const directSaleAuthUsersCache = new Map<string, { expiresAt: number; items: DirectSaleSellerOption[] }>();
 
+function buildAuthHeadersWithSede(token: string, sedeId?: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+    ...(sedeId ? { "X-Sede-Id": sedeId } : {}),
+  };
+}
+
 function buildAuthHeaders(token: string): HeadersInit {
   return {
     Authorization: `Bearer ${token}`,
@@ -388,16 +396,17 @@ function normalizeSellerOptionFromAuthUser(raw: AuthUserRaw): DirectSaleSellerOp
   };
 }
 
-async function fetchDirectSaleSellersFromAuthUsers(token: string): Promise<DirectSaleSellerOption[]> {
+async function fetchDirectSaleSellersFromAuthUsers(token: string, sedeId?: string): Promise<DirectSaleSellerOption[]> {
   const now = Date.now();
-  const cached = directSaleAuthUsersCache.get(token);
+  const cacheKey = sedeId ? `${token}|${sedeId}` : token;
+  const cached = directSaleAuthUsersCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
     return cached.items;
   }
 
   const response = await fetch(`${API_BASE_URL}auth/users?activo=true`, {
     method: "GET",
-    headers: buildAuthHeaders(token),
+    headers: buildAuthHeadersWithSede(token, sedeId),
   });
 
   if (!response.ok) {
@@ -411,7 +420,7 @@ async function fetchDirectSaleSellersFromAuthUsers(token: string): Promise<Direc
     .filter((item): item is DirectSaleSellerOption => Boolean(item))
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
-  directSaleAuthUsersCache.set(token, {
+  directSaleAuthUsersCache.set(cacheKey, {
     expiresAt: now + AUTH_USERS_CACHE_TTL_MS,
     items,
   });
@@ -500,21 +509,16 @@ export async function searchDirectSaleSellers(
     return [];
   }
 
-  const normalizedSedeId = typeof options.sedeId === "string" ? options.sedeId.trim() : "";
+  const sedeId = typeof options.sedeId === "string" ? options.sedeId.trim() || undefined : undefined;
   const normalizedQuery = trimmedQuery.toLowerCase();
-  const source = await fetchDirectSaleSellersFromAuthUsers(token);
+  const source = await fetchDirectSaleSellersFromAuthUsers(token, sedeId);
   const normalizedLimit =
     typeof options.limit === "number" && Number.isFinite(options.limit)
       ? Math.max(1, Math.min(100, Math.trunc(options.limit)))
       : 20;
 
   return source
-    .filter((seller) => {
-      if (normalizedSedeId && seller.sedeId && seller.sedeId !== normalizedSedeId) {
-        return false;
-      }
-      return sellerMatchesQuery(seller, normalizedQuery);
-    })
+    .filter((seller) => sellerMatchesQuery(seller, normalizedQuery))
     .slice(0, normalizedLimit);
 }
 
@@ -634,8 +638,8 @@ export async function deleteAllDirectSaleProducts(token: string, saleId: string)
   }
 }
 
-export async function fetchAllDirectSaleSellers(token: string): Promise<DirectSaleSellerOption[]> {
-  return fetchDirectSaleSellersFromAuthUsers(token);
+export async function fetchAllDirectSaleSellers(token: string, sedeId?: string): Promise<DirectSaleSellerOption[]> {
+  return fetchDirectSaleSellersFromAuthUsers(token, sedeId);
 }
 
 export async function verifyDirectSaleInBillingReport(
