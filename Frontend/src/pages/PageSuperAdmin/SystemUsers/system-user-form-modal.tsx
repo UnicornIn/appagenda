@@ -76,7 +76,8 @@ export function SystemUserFormModal({
   const [error, setError] = useState<string | null>(null);
 
   const requiresPrimarySede = formData.role !== "super_admin";
-  const canConfigureSedesPermitidas = formData.role === "admin_sede";
+  const canConfigureSedesPermitidas =
+    formData.role === "admin_sede" || formData.role === "estilista";
   const formatPercentageInput = (value: string) => {
     const normalized = value.replace(/,/g, ".").replace(/[^0-9.]/g, "");
     const [integerPart, decimalPart] = normalized.split(".");
@@ -560,7 +561,7 @@ export function SystemUserFormModal({
                   </div>
                 )}
                 <p className="mt-1 text-xs text-gray-500">
-                  Para `admin_sede`, la sede principal se incluye automáticamente en permitidas.
+                  La sede principal se incluye automáticamente en permitidas.
                 </p>
               </div>
             )}
@@ -570,11 +571,6 @@ export function SystemUserFormModal({
                 Para `super_admin` la sede principal no es obligatoria en el contrato actual.
               </div>
             )}
-
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-              El contrato actual usa `sede_id` principal. Si `PATCH /auth/users/:user_id` no soporta
-              `sedes_permitidas`, el formulario mostrará error para evitar guardar cambios incompletos.
-            </div>
 
             <div className="relative">
               <label className="block text-sm font-medium mb-2">Especialidades (Servicios)</label>
