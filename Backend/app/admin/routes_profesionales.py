@@ -247,6 +247,10 @@ async def list_professionals(
         # Solo puede verse a sí mismo
         query["profesional_id"] = current_user.get("profesional_id")
 
+    elif rol in ("call_center", "recepcionista"):
+        sede = current_user["sede_id"]
+        query["$or"] = [{"sede_id": sede}, {"sedes_permitidas": sede}]
+
     else:
         raise HTTPException(status_code=403, detail="No autorizado")
 
