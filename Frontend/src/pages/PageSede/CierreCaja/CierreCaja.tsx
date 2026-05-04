@@ -27,6 +27,7 @@ import {
   DEFAULT_CASH_PAYMENT_METHOD,
   getCashMovementTypeLabel,
   getCashPaymentMethodLabel,
+  normalizeCashPaymentMethodForBackend,
 } from "./constants";
 
 const toLocalDateString = (date: Date) => {
@@ -1240,7 +1241,7 @@ export default function CierreCajaPage() {
         sede_id: sedeId,
         monto: montoValue,
         tipo: ingresoTipo,
-        metodo_pago: ingresoMetodoPago,
+        metodo_pago: normalizeCashPaymentMethodForBackend(ingresoMetodoPago),
         motivo: ingresoMotivo.trim(),
         fecha: fechaIngresoDMY,
         moneda: monedaSede,
@@ -1367,7 +1368,7 @@ export default function CierreCajaPage() {
         monto: montoValue,
         valor: montoValue,
         efectivo: montoValue,
-        metodo_pago: egresoMetodoPago,
+        metodo_pago: normalizeCashPaymentMethodForBackend(egresoMetodoPago),
         motivo,
         descripcion: motivo,
         nota: motivo,
