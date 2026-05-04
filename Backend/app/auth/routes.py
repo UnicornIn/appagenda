@@ -161,15 +161,30 @@ async def create_user(
 # =========================================================
 @router.get("/users", response_model=List[UserResponse])
 async def list_users(
-    rol: Optional[str] = None,          # Filtro opcional por rol
-    activo: Optional[bool] = None,      # Filtro opcional por estado
+    rol: Optional[str] = None,
+    activo: Optional[bool] = None,
     current_user: dict = Depends(get_current_user)
 ):
     if current_user["rol"] not in ["super_admin", "admin_sede", "recepcionista"]:
-        raise HTTPException(status_code=403, detail="Solo el super_admin puede listar usuarios")
+        raise HTTPException(status_code=403, detail="No autorizado")
 
-    # Construir filtro dinámico
     filtro = {}
+
+    # ── Scope por rol ────────────────────────────────────────────────────
+    if current_user["rol"] == "super_admin":
+        pass  # ve todos, sin restricción de sede
+
+    elif current_user["rol"] in ["admin_sede", "recepcionista"]:
+        sede = current_user.get("sede_id")  # sede ACTIVA — no incluir sedes_permitidas del admin
+        if not sede:
+            raise HTTPException(status_code=400, detail="No tienes sede asignada")
+    
+        # Ver usuarios cuya sede principal es esta sede,
+        # O que tienen esta sede en su sedes_permitidas (profesionales multi-sede)
+        filtro["$or"] = [
+            {"sede_id": sede},
+            {"sedes_permitidas": sede}
+        ]
     if rol:
         filtro["rol"] = rol
     if activo is not None:
