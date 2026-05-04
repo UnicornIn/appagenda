@@ -12,6 +12,7 @@ import { useAuth } from '../../../components/Auth/AuthContext';
 import { getBloqueosMultiplesProfesionales, type Bloqueo } from '../../../components/Quotes/bloqueosApi';
 import { formatSedeNombre } from "../../../lib/sede";
 import { extractAgendaAdditionalNotes } from "../../../lib/agenda";
+import { AgendaDatePicker } from "../../PageSede/Appoinment/AgendaDatePicker";
 
 interface Appointment {
   id: string;
@@ -114,6 +115,7 @@ const CalendarScheduler: React.FC = () => {
   const [citas, setCitas] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [, setShowOptions] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [showBloqueoModal, setShowBloqueoModal] = useState(false);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [selectedCell, setSelectedCell] = useState<{ estilista: EstilistaCompleto, hora: string } | null>(null);
@@ -1116,7 +1118,7 @@ const CalendarScheduler: React.FC = () => {
           <div className="flex items-center gap-2">
             <div
               className="flex items-center gap-0.5 rounded-lg"
-              style={{ background: '#F8FAFC', padding: 3 }}
+              style={{ background: '#F8FAFC', padding: 3, position: 'relative' }}
             >
               <button
                 onClick={() => setSelectedDate(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n; })}
@@ -1128,9 +1130,11 @@ const CalendarScheduler: React.FC = () => {
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <button
-                onClick={() => setSelectedDate(today)}
-                className="text-xs font-medium transition-colors"
-                style={{ padding: '0 8px', color: '#334155' }}
+                onClick={() => setShowDatePicker(v => !v)}
+                className="text-xs font-medium transition-colors rounded-md"
+                style={{ padding: '5px 10px', color: '#334155', cursor: 'pointer' }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#E2E8F0')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
                 {todayLabel}
               </button>
@@ -1143,6 +1147,16 @@ const CalendarScheduler: React.FC = () => {
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
+              {showDatePicker && (
+                <AgendaDatePicker
+                  selectedDate={selectedDate}
+                  today={today}
+                  onSelect={(date) => {
+                    setSelectedDate(new Date(date.getFullYear(), date.getMonth(), date.getDate()));
+                  }}
+                  onClose={() => setShowDatePicker(false)}
+                />
+              )}
             </div>
 
             <select

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ChevronLeft, ChevronRight, ChevronDown, Check, X,
-  Clock, Calendar as CalendarIcon, Search
+  Clock, Calendar as CalendarIcon, Search, Wand2
 } from 'lucide-react';
 import { useAuth } from '../../components/Auth/AuthContext';
 import { getEstilistas, getEstilistaCompleto, Estilista } from '../../components/Professionales/estilistasApi';
@@ -331,6 +331,8 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
   // Step 2 — services / pro / time
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState(horaSeleccionada || '10:00');
+  const [horaFinValue, setHoraFinValue] = useState('');
+  const [horaFinManual, setHoraFinManual] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [servicioSearch, setServicioSearch] = useState('');
   const [serviciosSeleccionados, setServiciosSeleccionados] = useState<SelectedService[]>([]);
@@ -455,6 +457,10 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
     [selectedTime, duracionTotal]
   );
 
+  useEffect(() => {
+    if (!horaFinManual) setHoraFinValue(horaFin);
+  }, [horaFin, horaFinManual]);
+
   const lastServiceName = useMemo(() => {
     if (!clientHistorial.length) return null;
     const last = clientHistorial[0];
@@ -534,7 +540,7 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
         })),
         fecha: formatDateForBackend(selectedDate),
         hora_inicio: selectedTime,
-        hora_fin: horaFin,
+        hora_fin: horaFinValue || horaFin,
         abono: isPreCita ? 0 : parsedAbono,
         metodo_pago: isPreCita || parsedAbono === 0 ? 'sin_pago' : paymentMethod,
         notas: notes,
@@ -732,12 +738,27 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
             </div>
           </div>
 
-          {selectedTime && duracionTotal > 0 && (
-            <p className="text-xs text-gray-500">
-              Fin estimado: <span className="font-medium text-gray-700">{horaFin}</span>
-              {' · '}Duración: <span className="font-medium text-gray-700">{duracionTotal} min</span>
-            </p>
-          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div />
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-gray-700">Hora fin</label>
+                <button
+                  type="button"
+                  onClick={() => { setHoraFinManual(false); setHoraFinValue(horaFin); }}
+                  className="inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 transition-colors"
+                  style={{ fontSize: 9, color: '#64748B', borderColor: '#E2E8F0', background: '#fff' }}
+                >
+                  <Wand2 className="h-2.5 w-2.5" />
+                  Auto
+                </button>
+              </div>
+              <TimePicker
+                value={horaFinValue}
+                onChange={(v) => { setHoraFinManual(true); setHoraFinValue(v); }}
+              />
+            </div>
+          </div>
 
           {showCalendar && (
             <div className="fixed inset-0 z-40" onClick={() => setShowCalendar(false)} />
@@ -778,7 +799,7 @@ const AppointmentScheduler: React.FC<AppointmentSchedulerProps> = ({
                 <span className="text-sm font-bold text-gray-900">{currency} {montoTotal}</span>
               </div>
               <div className="text-xs text-gray-500 mt-0.5">
-                {formatDateShort(selectedDate)} · {selectedTime} — {horaFin}
+                {formatDateShort(selectedDate)} · {selectedTime} — {horaFinValue || horaFin}
               </div>
             </div>
           </div>

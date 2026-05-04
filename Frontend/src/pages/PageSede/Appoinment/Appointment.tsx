@@ -17,6 +17,7 @@ import {
   type Estilista,
 } from "../../../components/Professionales/estilistasApi";
 import AppointmentDetailsModal from "./AppointmentDetailsModal";
+import { AgendaDatePicker } from "./AgendaDatePicker";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import {
   getBloqueosEstilista,
@@ -300,6 +301,7 @@ const CalendarScheduler: React.FC = () => {
   const [selectedBloqueo, setSelectedBloqueo] =
     useState<BloqueoCalendario | null>(null);
   const [calendarViewportWidth, setCalendarViewportWidth] = useState(0);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const optionsRef = useRef<HTMLDivElement>(null);
   const tooltipTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -1737,7 +1739,7 @@ const CalendarScheduler: React.FC = () => {
             {/* Day navigation */}
             <div
               className="flex items-center gap-0.5 rounded-lg"
-              style={{ background: "#F8FAFC", padding: 3 }}
+              style={{ background: "#F8FAFC", padding: 3, position: "relative" }}
             >
               <button
                 onClick={() =>
@@ -1759,11 +1761,27 @@ const CalendarScheduler: React.FC = () => {
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <button
-                onClick={() => setSelectedDate(today)}
-                className="text-xs font-medium transition-colors"
-                style={{ padding: "0 8px", color: "#334155" }}
+                onClick={() => setShowDatePicker((v) => !v)}
+                className="text-xs font-medium transition-colors rounded-md"
+                style={{ padding: "5px 10px", color: "#334155", cursor: "pointer" }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.background = "#E2E8F0")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.background = "transparent")
+                }
               >
-                Hoy
+                {(() => {
+                  const isToday =
+                    selectedDate.getFullYear() === today.getFullYear() &&
+                    selectedDate.getMonth() === today.getMonth() &&
+                    selectedDate.getDate() === today.getDate();
+                  if (isToday) return "Hoy";
+                  return selectedDate.toLocaleDateString("es-CO", {
+                    day: "numeric",
+                    month: "short",
+                  });
+                })()}
               </button>
               <button
                 onClick={() =>
@@ -1784,6 +1802,19 @@ const CalendarScheduler: React.FC = () => {
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
+
+              {showDatePicker && (
+                <AgendaDatePicker
+                  selectedDate={selectedDate}
+                  today={today}
+                  onSelect={(date) => {
+                    setSelectedDate(
+                      new Date(date.getFullYear(), date.getMonth(), date.getDate())
+                    );
+                  }}
+                  onClose={() => setShowDatePicker(false)}
+                />
+              )}
             </div>
 
             {/* Nueva cita */}
