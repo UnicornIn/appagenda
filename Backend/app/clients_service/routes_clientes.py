@@ -111,32 +111,17 @@ def _normalizar_telefono(tel: str) -> str:
  
  
 def _score_nombre(termino: str, nombre: str) -> int:
-    """
-    Score en 4 capas:
-    1. base: para 1 token usa partial_ratio (búsqueda parcial útil);
-             para 2+ tokens usa token_set + token_sort SIN partial_ratio.
-             partial_ratio causa falsos positivos en multi-token porque
-             evalúa substrings ('arredondo' matchea 94% en 'catalina arredondo montoya').
-    2. prefix boost: el último token puede estar incompleto mientras se escribe.
-    3. token coverage penalty: penaliza nombres que no cubren todos los tokens del término.
-    4. first-token penalty: penaliza si el nombre de pila no coincide (umbral 85, no 80).
-    """
     t = termino.lower().strip()
     n = nombre.lower().strip()
 
     tokens_termino = t.split()
     tokens_nombre  = n.split()
 
-    # ── 1. Base score ──────────────────────────────────────────────────
     if len(tokens_termino) == 1:
-        # Un solo token: partial_ratio es útil para encontrar "Ana" dentro de "Ana María"
         base = max(fuzz.token_set_ratio(t, n), fuzz.partial_ratio(t, n))
     else:
-        # Multi-token: token_sort es más estricto que token_set y no sufre del
-        # problema de substring. Tomamos el máximo entre ambos.
         base = max(fuzz.token_set_ratio(t, n), fuzz.token_sort_ratio(t, n))
 
-    # ── 2. Prefix boost (usuario escribiendo el último token) ──────────
     if tokens_termino:
         ultimo_token = tokens_termino[-1]
         if len(ultimo_token) >= 2:
@@ -150,19 +135,20 @@ def _score_nombre(termino: str, nombre: str) -> int:
                 boost = 22 if contexto_ok else 10
                 base = min(100, base + boost)
 
-    # ── 3. Token coverage penalty ──────────────────────────────────────
+    # ✅ FIX: umbral subido de 70 → 82 en el coverage check.
+    # Con 70, fuzz.ratio("dios", "rios") = 75 contaba como cobertura válida,
+    # haciendo que "Juan Jose Rios De La Ossa" pasara sin penalización.
+    # Con 82, solo coincidencias reales cuentan.
     if len(tokens_termino) >= 2:
         tokens_cubiertos = sum(
             1 for tt in tokens_termino
-            if any(fuzz.ratio(tt, tn) >= 70 or tn.startswith(tt) or tt.startswith(tn)
+            if any(fuzz.ratio(tt, tn) >= 82 or tn.startswith(tt) or tt.startswith(tn)
                    for tn in tokens_nombre)
         )
         cobertura = tokens_cubiertos / len(tokens_termino)
         penalizacion = round((1 - cobertura) * 50)
         base = max(0, base - penalizacion)
 
-    # ── 4. First-token boost/penalty ───────────────────────────────────
-    # Umbral en 85 (no 80): fuzz.ratio('natalia','catalina')=80 era falso positivo
     if tokens_termino and tokens_nombre:
         primer_token = tokens_termino[0]
         if len(primer_token) >= 3:
@@ -255,6 +241,10 @@ async def _get_query_base(rol: str, current_user: dict) -> dict:
     return query_base
  
  
+# Stopwords de nombres en español — no aportan discriminación
+_STOPWORDS_NOMBRES = {"de", "del", "la", "las", "los", "el", "y", "e", "o", "en", "al", "con"}
+
+
 async def _buscar_candidatos(
     query_base: dict,
     termino: str,
@@ -264,19 +254,80 @@ async def _buscar_candidatos(
 ) -> List[dict]:
 
     if tipo == "nombre":
-        tokens = [re.escape(t) for t in termino.split() if len(t) >= 2]
-        if tokens:
-            query = {
+        partes = [t for t in termino.split() if len(t) >= 2]
+
+        if not partes:
+            return await (
+                collection_clients.find(query_base, projection)
+                .limit(max_candidatos).to_list(max_candidatos)
+            )
+
+        tokens_escaped = [re.escape(t) for t in partes]
+
+        # ── Tokens significativos: excluyen stopwords para el $and de precisión ──
+        # "juan de dios" → significativos: ["juan", "dios"]
+        # Esto garantiza que "Juan de Dios García" aparezca en candidatos
+        # aunque el $or amplio no lo incluya en los primeros 2000.
+        tokens_significativos = [
+            re.escape(t) for t in partes
+            if t.lower() not in _STOPWORDS_NOMBRES
+        ]
+
+        # ── Query de PRECISIÓN: $and sobre tokens significativos ──────────────
+        # Solo se ejecuta si hay 2+ tokens significativos.
+        # Ejemplo: "juan dios" → nombre contiene "juan" AND "dios"
+        candidatos_precision: List[dict] = []
+        if len(tokens_significativos) >= 2:
+            query_precision = {
                 **query_base,
-                "$or": [
+                "$and": [
                     {"nombre": {"$regex": t, "$options": "i"}}
-                    for t in tokens
+                    for t in tokens_significativos
                 ]
             }
-        else:
-            query = query_base
+            candidatos_precision = await (
+                collection_clients.find(query_precision, projection)
+                .limit(max_candidatos).to_list(max_candidatos)
+            )
+            logger.info(f"[BUSCAR] precisión ($and significativos): {len(candidatos_precision)}")
 
-    elif tipo == "correo":                                   # ← NUEVO
+        # ── Query AMPLIA: $or sobre todos los tokens ───────────────────────────
+        # Red ancha para cubrir coincidencias parciales. Los falsos positivos
+        # los elimina _score_nombre en la siguiente etapa.
+        query_amplia = {
+            **query_base,
+            "$or": [
+                {"nombre": {"$regex": t, "$options": "i"}}
+                for t in tokens_escaped
+            ]
+        }
+        candidatos_amplia = await (
+            collection_clients.find(query_amplia, projection)
+            .limit(max_candidatos).to_list(max_candidatos)
+        )
+        logger.info(f"[BUSCAR] amplia ($or): {len(candidatos_amplia)}")
+
+        # ── Merge: precisión primero, luego amplia, sin duplicados ────────────
+        ids_vistos: set = set()
+        candidatos: List[dict] = []
+        for c in candidatos_precision + candidatos_amplia:
+            cid = str(c.get("_id", ""))
+            if cid not in ids_vistos:
+                ids_vistos.add(cid)
+                candidatos.append(c)
+                if len(candidatos) >= max_candidatos:
+                    break
+
+        # ── Fallback total si aún hay muy pocos ───────────────────────────────
+        if len(candidatos) < 3:
+            candidatos = await (
+                collection_clients.find(query_base, projection)
+                .limit(max_candidatos).to_list(max_candidatos)
+            )
+
+        return candidatos
+
+    elif tipo == "correo":
         query = {
             **query_base,
             "correo": {"$regex": re.escape(termino), "$options": "i"}
@@ -306,18 +357,14 @@ async def _buscar_candidatos(
         }
 
     candidatos = await (
-        collection_clients
-        .find(query, projection)
-        .limit(max_candidatos)
-        .to_list(max_candidatos)
+        collection_clients.find(query, projection)
+        .limit(max_candidatos).to_list(max_candidatos)
     )
 
     if len(candidatos) < 3 and tipo == "nombre":
         candidatos = await (
-            collection_clients
-            .find(query_base, projection)
-            .limit(max_candidatos)
-            .to_list(max_candidatos)
+            collection_clients.find(query_base, projection)
+            .limit(max_candidatos).to_list(max_candidatos)
         )
 
     return candidatos
@@ -463,15 +510,10 @@ async def listar_clientes(
 # ============================================================
 @router.get("/buscar", response_model=List[dict])
 async def buscar_clientes_ligero(
-    filtro: str = Query(..., min_length=2, description="Nombre, teléfono, cédula, correo o ID"),
+    filtro: str = Query(..., min_length=2),
     limite: int = Query(15, ge=1, le=50),
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Búsqueda rápida de clientes para gestión operativa (citas, giftcards, ventas).
-    Devuelve solo los campos esenciales para identificar al cliente.
-    Soporta: nombre (fuzzy), teléfono, cédula, correo, cliente_id.
-    """
     try:
         rol = current_user.get("rol")
         if rol not in ["admin_sede", "super_admin", "estilista", "call_center", "recepcionista"]:
@@ -480,29 +522,33 @@ async def buscar_clientes_ligero(
         query_base = await _get_query_base(rol, current_user)
         filtro_limpio = filtro.strip()
 
-        # Proyección mínima — solo lo necesario para identificar al cliente
+        # 🔍 DEBUG
+        logger.info(f"[BUSCAR] filtro='{filtro_limpio}' rol='{rol}' query_base={query_base}")
+
         projection = {
-            "_id": 1,
-            "cliente_id": 1,
-            "nombre": 1,
-            "correo": 1,
-            "cedula": 1,
-            "telefono": 1,
-            "sede_id": 1,
-            "franquicia_id": 1,
+            "_id": 1, "cliente_id": 1, "nombre": 1,
+            "correo": 1, "cedula": 1, "telefono": 1,
+            "sede_id": 1, "franquicia_id": 1,
         }
 
         tipo = _tipo_busqueda(filtro_limpio)
+        logger.info(f"[BUSCAR] tipo='{tipo}'")
 
         candidatos = await _buscar_candidatos(
             query_base=query_base,
             termino=filtro_limpio,
             tipo=tipo,
             projection=projection,
-            max_candidatos=2000   # techo más bajo — no necesitamos toda la base
+            max_candidatos=2000
         )
 
+        # 🔍 DEBUG
+        logger.info(f"[BUSCAR] candidatos MongoDB: {len(candidatos)} — sample: {[c.get('nombre') for c in candidatos[:5]]}")
+
         resultado = _puntuar_y_ordenar(candidatos, filtro_limpio, tipo)
+
+        # 🔍 DEBUG
+        logger.info(f"[BUSCAR] resultado tras scoring: {len(resultado)} — top5: {[c.get('nombre') for c in resultado[:5]]}")
 
         return [
             {
