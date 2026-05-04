@@ -293,7 +293,7 @@ interface MovimientosTabProps {
 
 type MovFiltroTipo = "todos" | "Entrada" | "Salida";
 
-export function InventoryMovimientosTab({ productos, sedeLabel = "Sede", sedeId: sedeIdProp }: MovimientosTabProps) {
+export function InventoryMovimientosTab({ productos, sedeLabel: _sedeLabel = "Sede", sedeId: sedeIdProp }: MovimientosTabProps) {
   const { user, activeSedeId } = useAuth();
   const [filtroTipo, setFiltroTipo] = useState<MovFiltroTipo>("todos");
   const [search, setSearch] = useState("");

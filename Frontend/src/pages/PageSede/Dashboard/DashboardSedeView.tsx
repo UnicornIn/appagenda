@@ -1166,7 +1166,7 @@ export function DashboardSedeView({
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Método de pago</label>
-                      <select value={egresoMayorForm.metodo} onChange={(e) => setEgresoMayorForm((f) => ({ ...f, metodo: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800">
+                      <select value={egresoMayorForm.metodo} onChange={(e) => setEgresoMayorForm((f) => ({ ...f, metodo: e.target.value as typeof f.metodo }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800">
                         {CASH_PAYMENT_METHOD_OPTIONS.map((opt) => (
                           <option key={opt.value} value={opt.value}>{opt.label}</option>
                         ))}
@@ -1198,7 +1198,7 @@ export function DashboardSedeView({
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Método</label>
-                      <select value={ingresoMayorForm.metodo} onChange={(e) => setIngresoMayorForm((f) => ({ ...f, metodo: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800">
+                      <select value={ingresoMayorForm.metodo} onChange={(e) => setIngresoMayorForm((f) => ({ ...f, metodo: e.target.value as typeof f.metodo }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800">
                         {CASH_PAYMENT_METHOD_OPTIONS.map((opt) => (
                           <option key={opt.value} value={opt.value}>{opt.label}</option>
                         ))}

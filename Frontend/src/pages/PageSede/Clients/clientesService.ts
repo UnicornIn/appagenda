@@ -226,9 +226,10 @@ const calcDiasSinVisitar = (fecha?: string): number => {
 };
 
 const resolveDiasSinVenir = (cliente: any): number => {
-  if (cliente.dias_sin_visitar != null) return Number(cliente.dias_sin_visitar);
   const fecha = cliente.ultima_visita || cliente.fecha_ultima_visita || cliente.last_visit;
-  return calcDiasSinVisitar(fecha);
+  if (fecha) return calcDiasSinVisitar(fecha);
+  if (cliente.dias_sin_visitar != null) return Number(cliente.dias_sin_visitar);
+  return 0;
 };
 
 const resolveLtv = (cliente: any): number =>

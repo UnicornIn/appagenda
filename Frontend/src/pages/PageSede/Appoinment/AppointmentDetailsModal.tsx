@@ -1,32 +1,21 @@
 // components/Quotes/AppointmentDetailsModal.tsx
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  User,
-  XCircle,
-  UserX,
   Loader2,
   CheckCircle,
   Plus,
   Minus,
   Package,
-  CreditCard,
   CreditCard as CardIcon,
   Wallet,
-  CalendarDays,
   Tag,
-  Users,
   X,
   Bug,
-  Landmark,
   Wand2,
   Phone,
   Mail,
   DollarSign,
-  AlertCircle,
   Save,
-  ShoppingBag,
-  Trash2,
-  Gift,
   MessageCircle,
   ChevronLeft,
   Search,
@@ -44,12 +33,10 @@ import {
   type Estilista,
 } from "../../../components/Professionales/estilistasApi";
 import { API_BASE_URL } from "../../../types/config";
-import { clientesService } from "../Clients/clientesService";
 import type { Cliente } from "../../../types/cliente";
 import TimeInputWithPicker from "../../../components/ui/time-input-with-picker";
 import {
   extractAgendaAdditionalNotes,
-  formatAgendaTime,
   normalizeAgendaTimeValue,
 } from "../../../lib/agenda";
 import {
@@ -471,7 +458,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   >([]);
   const [productosCatalogoCargado, setProductosCatalogoCargado] =
     useState(false);
-  const [selectedProductId, setSelectedProductId] = useState("");
+  const [_selectedProductId, setSelectedProductId] = useState("");
   const [loadingProductosDisponibles, setLoadingProductosDisponibles] =
     useState(false);
   const [prodSearchQuery, setProdSearchQuery] = useState("");
@@ -502,7 +489,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
   const [serviciosOriginales, setServiciosOriginales] = useState<
     ServicioSeleccionado[]
   >([]);
-  const [selectedServiceId, setSelectedServiceId] = useState("");
+  const [_selectedServiceId, setSelectedServiceId] = useState("");
   const [loadingServiciosDisponibles, setLoadingServiciosDisponibles] =
     useState(false);
   const [svcSearchQuery, setSvcSearchQuery] = useState("");
@@ -1469,44 +1456,6 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     setServiceError(null);
   };
 
-  const handleAgregarServicio = () => {
-    if (!selectedServiceId) return;
-
-    if (
-      serviciosSeleccionados.some(
-        (servicio) => servicio.servicio_id === selectedServiceId,
-      )
-    ) {
-      setServiceError("El servicio ya está agregado en la cita.");
-      return;
-    }
-
-    const servicioCatalogo = serviciosDisponibles.find(
-      (servicio) => servicio.servicio_id === selectedServiceId,
-    );
-    if (!servicioCatalogo) {
-      setServiceError("No se encontró el servicio seleccionado.");
-      return;
-    }
-
-    const nuevoServicio: ServicioSeleccionado = {
-      servicio_id: servicioCatalogo.servicio_id,
-      nombre: servicioCatalogo.nombre,
-      precio_unitario: servicioCatalogo.precio,
-      precio_unitario_input: String(servicioCatalogo.precio),
-      precio_base: servicioCatalogo.precio,
-      cantidad: 1,
-      duracion_minutos: servicioCatalogo.duracion_minutos || 0,
-      subtotal: roundMoney(servicioCatalogo.precio),
-      precio_personalizado: null,
-      usa_precio_personalizado: false,
-    };
-
-    setServiciosSeleccionados((prev) => [...prev, nuevoServicio]);
-    setSelectedServiceId("");
-    setServiceError(null);
-  };
-
   const handleEliminarServicio = (servicioId: string) => {
     setServiciosSeleccionados((prev) =>
       prev.filter((servicio) => servicio.servicio_id !== servicioId),
@@ -1568,50 +1517,6 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     );
   };
 
-  const handleAgregarProducto = async () => {
-    if (!productosCatalogoCargado) {
-      await cargarProductosDisponibles(true);
-      return;
-    }
-
-    if (!selectedProductId) return;
-
-    if (
-      productos.some((producto) => producto.producto_id === selectedProductId)
-    ) {
-      setServiceError("El producto ya está agregado en la cita.");
-      return;
-    }
-
-    const productoCatalogo = productosDisponibles.find(
-      (producto) => producto.producto_id === selectedProductId,
-    );
-    if (!productoCatalogo) {
-      setServiceError("No se encontró el producto seleccionado.");
-      return;
-    }
-
-    const nuevoProducto: ProductoSeleccionado = {
-      producto_id: productoCatalogo.producto_id,
-      nombre: productoCatalogo.nombre,
-      cantidad: 1,
-      precio_unitario: productoCatalogo.precio,
-      subtotal: roundMoney(productoCatalogo.precio),
-      moneda: productoCatalogo.moneda,
-      comision_porcentaje: 0,
-      comision_valor: 0,
-      agregado_por_email: user?.email,
-      agregado_por_rol: (user as any)?.rol || user?.role,
-      fecha_agregado: new Date().toISOString(),
-      profesional_id:
-        profesionalEditadoId || appointmentDetails?.rawData?.profesional_id,
-    };
-
-    setProductos((prev) => [...prev, nuevoProducto]);
-    setSelectedProductId("");
-    setServiceError(null);
-  };
-
   const handleEliminarProducto = (productoId: string) => {
     setProductos((prev) =>
       prev.filter((producto) => producto.producto_id !== productoId),
@@ -1661,12 +1566,6 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
         };
       }),
     );
-  };
-
-  const handleOpenProductosSelector = async () => {
-    if (!productosCatalogoCargado) {
-      await cargarProductosDisponibles();
-    }
   };
 
   const handleAgregarProductoById = (productoId: string) => {
@@ -1903,33 +1802,6 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     }
   };
 
-  const getStatusColor = (_: string) => {
-    return "bg-gray-100 text-gray-900 border border-gray-300";
-  };
-
-  const getEstadoPagoColor = (_: string) => {
-    return "bg-gray-100 text-gray-900 border border-gray-300";
-  };
-
-  const getEstadoPagoTexto = (estado: string, pagosData: any) => {
-    if (!pagosData) return "PENDIENTE";
-
-    switch (estado?.toLowerCase()) {
-      case "pagado":
-        return "PAGADO";
-      case "abonado":
-        return "PAGO PARCIAL";
-      case "pendiente":
-        return pagosData.tieneAbono ? "PAGO PARCIAL" : "SIN PAGO";
-      default:
-        return estado?.toUpperCase() || "PENDIENTE";
-    }
-  };
-
-  const formatFechaSegura = (fechaString: string) => {
-    return formatDateDMY(fechaString, "Fecha no especificada");
-  };
-
   const getPrecio = () => {
     if (!appointmentDetails) return "0";
 
@@ -1963,17 +1835,6 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
       (total, producto) => total + toNumber(producto.comision_valor),
       0,
     );
-  };
-
-  const formatFechaHora = (fechaString: string) => {
-    if (!fechaString) return "Fecha no disponible";
-    const fecha = new Date(fechaString);
-    if (Number.isNaN(fecha.getTime())) {
-      return formatDateDMY(fechaString, fechaString);
-    }
-    const horas = String(fecha.getHours()).padStart(2, "0");
-    const minutos = String(fecha.getMinutes()).padStart(2, "0");
-    return `${formatDateDMY(fecha)} ${horas}:${minutos}`;
   };
 
   const renderPagoModal = () => {

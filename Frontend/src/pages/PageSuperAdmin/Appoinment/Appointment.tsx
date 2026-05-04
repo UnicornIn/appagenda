@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, User, X, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, User, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Sidebar } from '../../../components/Layout/Sidebar';
 import Bloqueos from "../../../components/Quotes/Bloqueos";
 import AppointmentScheduler from "../../../components/Quotes/AppointmentForm";
@@ -118,12 +118,12 @@ const CalendarScheduler: React.FC = () => {
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [selectedCell, setSelectedCell] = useState<{ estilista: EstilistaCompleto, hora: string } | null>(null);
   const [citaTooltip, setCitaTooltip] = useState({ visible: false, x: 0, y: 0, cita: null as Appointment | null });
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [_refreshTrigger, setRefreshTrigger] = useState(0);
   const [showAppointmentDetails, setShowAppointmentDetails] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [bloqueos, setBloqueos] = useState<BloqueoCalendario[]>([]);
   const [loadingBloqueos, setLoadingBloqueos] = useState(false);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [_isInitialLoad, setIsInitialLoad] = useState(true);
   const [calendarViewportWidth, setCalendarViewportWidth] = useState(0);
 
   const optionsRef = useRef<HTMLDivElement>(null);
@@ -847,181 +847,6 @@ const CalendarScheduler: React.FC = () => {
     setShowBloqueoModal(true);
     setShowOptions(false);
   }, []);
-
-  const formatearFecha = useCallback((fecha: string | Date) => {
-    const date = new Date(fecha);
-    const year = date.getFullYear();
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }, []);
-
-  // COMPONENTE MINICALENDAR - EXACTAMENTE IGUAL AL DE SEDE
-  const MiniCalendar = useCallback(() => {
-    const [currentMonth, setCurrentMonth] = useState<Date>(() => {
-      const date = new Date(selectedDate);
-      return new Date(date.getFullYear(), date.getMonth(), 1);
-    });
-
-    const generateCalendarDays = useCallback(() => {
-      const year = currentMonth.getFullYear();
-      const month = currentMonth.getMonth();
-      const firstDay = new Date(year, month, 1);
-      const lastDay = new Date(year, month + 1, 0);
-      const firstDayOfWeek = firstDay.getDay();
-      const daysInMonth = lastDay.getDate();
-      const prevMonthLastDay = new Date(year, month, 0).getDate();
-      const days = [];
-
-      for (let i = 0; i < firstDayOfWeek; i++) {
-        const day = prevMonthLastDay - firstDayOfWeek + i + 1;
-        const date = new Date(year, month - 1, day);
-        const dateFormatted = formatearFecha(date);
-        const selectedDateFormatted = formatearFecha(selectedDate);
-        const todayFormatted = formatearFecha(new Date());
-
-        days.push({
-          date,
-          isCurrentMonth: false,
-          isToday: dateFormatted === todayFormatted,
-          isSelected: dateFormatted === selectedDateFormatted
-        });
-      }
-
-      for (let day = 1; day <= daysInMonth; day++) {
-        const date = new Date(year, month, day);
-        const dateFormatted = formatearFecha(date);
-        const selectedDateFormatted = formatearFecha(selectedDate);
-        const todayFormatted = formatearFecha(new Date());
-
-        days.push({
-          date,
-          isCurrentMonth: true,
-          isToday: dateFormatted === todayFormatted,
-          isSelected: dateFormatted === selectedDateFormatted
-        });
-      }
-
-      const totalCells = 42;
-      const remainingDays = totalCells - days.length;
-      for (let day = 1; day <= remainingDays; day++) {
-        const date = new Date(year, month + 1, day);
-        days.push({
-          date,
-          isCurrentMonth: false,
-          isToday: false,
-          isSelected: false
-        });
-      }
-
-      return days;
-    }, [currentMonth, selectedDate, formatearFecha]);
-
-    const navigateMonth = useCallback((direction: 'prev' | 'next') => {
-      setCurrentMonth(prev => {
-        const newDate = new Date(prev);
-        if (direction === 'prev') {
-          newDate.setMonth(prev.getMonth() - 1);
-        } else {
-          newDate.setMonth(prev.getMonth() + 1);
-        }
-        return newDate;
-      });
-    }, []);
-
-    const handleDateSelect = useCallback((date: Date) => {
-      setSelectedDate(date);
-      setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1));
-      setRefreshTrigger(prev => prev + 1);
-    }, [formatearFecha]);
-
-    const calendarDays = useMemo(() => generateCalendarDays(), [generateCalendarDays]);
-    const dayHeaders = useMemo(() => ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'], []);
-
-    const formatMonthYear = useCallback((date: Date) => {
-      const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-      return `${months[date.getMonth()]} ${date.getFullYear()}`;
-    }, []);
-
-    useEffect(() => {
-      const selectedYear = selectedDate.getFullYear();
-      const selectedMonth = selectedDate.getMonth();
-      const currentYear = currentMonth.getFullYear();
-      const currentMonthIndex = currentMonth.getMonth();
-
-      if (selectedYear !== currentYear || selectedMonth !== currentMonthIndex) {
-        setCurrentMonth(new Date(selectedYear, selectedMonth, 1));
-      }
-    }, [selectedDate]);
-
-    return (
-      <div className="bg-white rounded-xl p-3 border border-gray-200 shadow-sm">
-        <h3 className="font-semibold text-gray-900 mb-2 text-sm">Calendario</h3>
-
-        <div className="flex items-center justify-between mb-2">
-          <button
-            onClick={() => navigateMonth('prev')}
-            className="p-0.5 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <ChevronLeft className="w-3.5 h-3.5 text-gray-600" />
-          </button>
-          <div className="font-semibold text-xs text-gray-900">
-            {formatMonthYear(currentMonth)}
-          </div>
-          <button
-            onClick={() => navigateMonth('next')}
-            className="p-0.5 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <ChevronRight className="w-3.5 h-3.5 text-gray-600" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-7 gap-0.5 mb-1.5">
-          {dayHeaders.map((day, i) => (
-            <div key={`day-header-${i}`} className="text-[10px] font-semibold text-gray-500 text-center py-0.5">
-              {day}
-            </div>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-7 gap-0.5">
-          {calendarDays.map(({ date, isCurrentMonth, isToday, isSelected }, i) => {
-            return (
-              <button
-                key={`calendar-day-${date.toISOString()}-${i}`}
-                onClick={() => isCurrentMonth && handleDateSelect(date)}
-                disabled={!isCurrentMonth}
-                className={`h-6 w-6 text-[10px] flex items-center justify-center rounded-lg transition-all relative
-                ${!isCurrentMonth ? 'text-gray-300 cursor-default' : ''}
-                ${isSelected ? 'bg-gray-900 text-white shadow scale-105' : ''}
-                ${isToday && !isSelected ? 'bg-gray-100 text-gray-900 border border-gray-300' : ''}
-                ${isCurrentMonth && !isSelected && !isToday ? 'hover:bg-gray-100 text-gray-700 hover:scale-105' : ''}`}
-              >
-                {date.getDate()}
-                {isSelected && (
-                  <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-gray-900 rounded-full animate-pulse" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="mt-2 pt-2 border-t border-gray-200">
-          <button
-            onClick={() => {
-              const today = new Date();
-              setSelectedDate(today);
-              setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
-              setRefreshTrigger(prev => prev + 1);
-            }}
-            className="w-full text-[10px] text-gray-900 hover:text-white hover:bg-gray-900 font-medium py-1.5 rounded-lg transition-colors"
-          >
-            ⭐ Hoy
-          </button>
-        </div>
-      </div>
-    );
-  }, [selectedDate, formatearFecha, refreshTrigger]);
 
   // COMPONENTE CELDA DE CALENDARIO - EXACTAMENTE IGUAL
   const CalendarCell = React.memo(({ prof, hour }: { prof: any; hour: string }) => {
