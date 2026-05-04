@@ -16,6 +16,9 @@ import {
   verifyDirectSaleInBillingReport,
 } from "./directSalesApi";
 import { handleFacturarRequest } from "./facturarApi";
+import { CASH_PAYMENT_METHOD_OPTIONS } from "../CierreCaja/constants";
+import { ClientSearch } from "../Appoinment/Clients/ClientSearch";
+import type { Cliente } from "../../../components/Quotes/clientsService";
 
 interface DirectSaleModalProps {
   isOpen: boolean;
@@ -36,13 +39,7 @@ interface CartItem {
   stockAvailable: number;
 }
 
-const UI_PAYMENT_METHODS = [
-  { value: "efectivo", label: "Efectivo" },
-  { value: "transferencia", label: "Transferencia" },
-  { value: "tarjeta", label: "Tarjeta" },
-  { value: "nequi", label: "Nequi" },
-  { value: "daviplata", label: "Daviplata" },
-];
+const UI_PAYMENT_METHODS = CASH_PAYMENT_METHOD_OPTIONS;
 
 const roundMoney = (v: number) => Math.round(v * 100) / 100;
 
@@ -100,7 +97,7 @@ export function DirectSaleModal({
   >(null);
 
   // ── Client ──────────────────────────────────────────────────────────────
-  const [clientName, setClientName] = useState("");
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<Cliente | null>(null);
 
   // ── Payment ─────────────────────────────────────────────────────────────
   const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<
@@ -204,7 +201,7 @@ export function DirectSaleModal({
     setRemovingProductId(null);
     setAllSellers([]);
     setOpenSellerDropdownId(null);
-    setClientName("");
+    setClienteSeleccionado(null);
     setSelectedPaymentMethods(new Set());
     setPaymentAmounts({});
     setShowDeliveryInput(false);
@@ -236,7 +233,7 @@ export function DirectSaleModal({
       try {
         const [prods, sellers] = await Promise.all([
           fetchInventoryProducts(token, currency),
-          fetchAllDirectSaleSellers(token).catch(() => [] as DirectSaleSellerOption[]),
+          fetchAllDirectSaleSellers(token, sedeId).catch(() => [] as DirectSaleSellerOption[]),
         ]);
         setProducts(prods.filter((p) => p.active));
         setAllSellers(sellers);
@@ -499,6 +496,14 @@ export function DirectSaleModal({
             sedeId: seller.sedeId,
           }
         : undefined,
+      ...(clienteSeleccionado && {
+        client: {
+          id: clienteSeleccionado.cliente_id,
+          nombre: clienteSeleccionado.nombre,
+          email: clienteSeleccionado.correo,
+          telefono: clienteSeleccionado.telefono,
+        },
+      }),
     });
 
     setSaleId(created.saleId);
@@ -1012,16 +1017,12 @@ export function DirectSaleModal({
 
             {/* Client */}
             <div className="px-5 py-4 border-b border-gray-100">
-              <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">
-                Cliente
-              </label>
-              <input
-                type="text"
-                placeholder="Nombre del cliente (opcional)"
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-                disabled={isBusy}
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-gray-400 placeholder:text-gray-400"
+              <ClientSearch
+                sedeId={sedeId}
+                selectedClient={clienteSeleccionado}
+                onClientSelect={setClienteSeleccionado}
+                onClientClear={() => setClienteSeleccionado(null)}
+                required={false}
               />
             </div>
 
