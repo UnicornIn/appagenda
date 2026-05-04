@@ -67,7 +67,7 @@ const RF_STATUSES = {
   'pre-cita':    { color: '#9CA3AF', bg: '#F3F4F6', label: 'Pre-cita' },
   'confirmed':   { color: '#3B82F6', bg: '#EFF6FF', label: 'Confirmada' },
   'in-progress': { color: '#8B5CF6', bg: '#F5F3FF', label: 'En curso' },
-  'completed':   { color: '#10B981', bg: '#ECFDF5', label: 'Completada' },
+  'completed':   { color: '#10B981', bg: '#ECFDF5', label: 'Facturada' },
   'cancelled':   { color: '#EF4444', bg: '#FEF2F2', label: 'Cancelada' },
 } as const;
 type RFStatusKey = keyof typeof RF_STATUSES;
@@ -1328,7 +1328,7 @@ const CalendarScheduler: React.FC = () => {
               </span>
               <span className="flex items-center gap-1">
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: '#10B981', display: 'inline-block' }} />
-                Completada
+                Facturada
               </span>
               <span className="flex items-center gap-1">
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: '#EF4444', display: 'inline-block' }} />

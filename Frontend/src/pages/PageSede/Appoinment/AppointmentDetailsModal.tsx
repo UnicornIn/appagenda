@@ -42,6 +42,7 @@ import {
 import {
   normalizePaymentMethodForBackend,
   PAYROLL_PAYMENT_METHOD,
+  PAYMENT_METHOD_OPTIONS,
 } from "../../../lib/payment-methods";
 
 // ── RF design status system — estados backend: pre_reservada, confirmada, cancelada, completada, no_asistio ──
@@ -49,7 +50,7 @@ const RF_STATUSES = {
   pre_reservada: { color: "#F59E0B", bg: "#FFFBEB", label: "Pre-reservada" },
   confirmada:    { color: "#3B82F6", bg: "#EFF6FF", label: "Confirmada" },
   "in-progress": { color: "#8B5CF6", bg: "#F5F3FF", label: "En curso" },
-  completada:    { color: "#10B981", bg: "#ECFDF5", label: "Completada" },
+  completada:    { color: "#10B981", bg: "#ECFDF5", label: "Facturada" },
   cancelada:     { color: "#EF4444", bg: "#FEF2F2", label: "Cancelada" },
   no_asistio:    { color: "#6B7280", bg: "#F3F4F6", label: "No asistió" },
 } as const;
@@ -86,16 +87,7 @@ interface PagoModalData {
   show: boolean;
   tipo: "pago" | "abono";
   monto: number;
-  metodoPago:
-    | "efectivo"
-    | "transferencia"
-    | "tarjeta"
-    | "tarjeta_credito"
-    | "tarjeta_debito"
-    | "addi"
-    | "giftcard"
-    | typeof PAYROLL_PAYMENT_METHOD
-    | "descuento_nomina";
+  metodoPago: string;
   codigoGiftcard: string;
 }
 
@@ -1844,17 +1836,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
     const maxMonto = pagosData.saldoPendiente;
     const fmtPago = (n: number) => "$" + Math.round(n).toLocaleString("es-CO");
 
-    type MetodoEntry = { key: PagoModalData["metodoPago"]; label: string };
-    const metodos: MetodoEntry[] = [
-      { key: "efectivo", label: "Efectivo" },
-      { key: "transferencia", label: "Transferencia" },
-      { key: "tarjeta_credito", label: "Tarjeta" },
-      { key: "giftcard", label: "Gift Card" },
-      ...(isCopCurrency
-        ? [{ key: "addi" as PagoModalData["metodoPago"], label: "Addi" }]
-        : []),
-      { key: PAYROLL_PAYMENT_METHOD, label: "Nómina" },
-    ];
+    const metodos = PAYMENT_METHOD_OPTIONS;
 
     return (
       <div
@@ -1970,18 +1952,14 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
             Método de pago
           </p>
           <div className="flex flex-wrap gap-2">
-            {metodos.map(({ key, label }) => {
-              const isSelected =
-                pagoModal.metodoPago === key ||
-                (key === PAYROLL_PAYMENT_METHOD &&
-                  sanitizeMetodoPago(pagoModal.metodoPago) ===
-                    PAYROLL_PAYMENT_METHOD);
+            {metodos.map(({ id, label }) => {
+              const isSelected = sanitizeMetodoPago(pagoModal.metodoPago) === id;
               return (
                 <button
-                  key={key}
+                  key={id}
                   type="button"
                   onClick={() =>
-                    setPagoModal((prev) => ({ ...prev, metodoPago: key }))
+                    setPagoModal((prev) => ({ ...prev, metodoPago: id }))
                   }
                   disabled={registrandoPago}
                   className="px-3 py-1.5 rounded-full text-xs transition-colors disabled:opacity-50"
@@ -2535,7 +2513,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           pre_reservada: "Pre-reservada",
           confirmada: "Confirmada",
           "in-progress": "En curso",
-          completada: "Completada",
+          completada: "Facturada",
         };
         const stepIcon: Record<string, string> = {
           pre_reservada: "⏳",
@@ -3650,7 +3628,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                       onClick={handleConfirmarCita}
                       disabled={confirmandoCita}
                       className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
-                      style={{ background: "#3B82F6" }}
+                      style={{ background: "#1E293B" }}
                     >
                       {confirmandoCita ? (
                         <><Loader2 className="w-4 h-4 animate-spin" /> Confirmando...</>

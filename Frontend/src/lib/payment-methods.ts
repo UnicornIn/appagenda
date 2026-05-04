@@ -1,5 +1,20 @@
 export const PAYROLL_PAYMENT_METHOD = "descuento_nomina" as const;
 
+export const PAYMENT_METHOD_OPTIONS: { id: string; label: string }[] = [
+  { id: "efectivo",           label: "Efectivo" },
+  { id: "transferencia",      label: "Transferencia" },
+  { id: "tarjeta",            label: "Tarjeta" },
+  { id: "tarjeta_credito",    label: "Tarjeta Crédito" },
+  { id: "tarjeta_debito",     label: "Tarjeta Débito" },
+  { id: "sin_pago",           label: "Sin pago" },
+  { id: "otros",              label: "Otros" },
+  { id: "addi",               label: "Addi" },
+  { id: "giftcard",           label: "Gift Card" },
+  { id: "link_de_pago",       label: "Link de pago" },
+  { id: "descuento_nomina",   label: "Desc. nómina" },
+  { id: "abono_transferencia",label: "Abono transf." },
+];
+
 const LEGACY_PAYMENT_METHOD_MAP: Record<string, string> = {
   descuento_por_nomina: PAYROLL_PAYMENT_METHOD,
 };
