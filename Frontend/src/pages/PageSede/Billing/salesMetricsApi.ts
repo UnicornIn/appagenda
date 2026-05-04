@@ -8,14 +8,7 @@ import {
 } from "../../../lib/currency";
 import { parseDateToDate, toDMY } from "../../../lib/dateFormat";
 
-export interface SalesMetricsData {
-  ventas_totales: number;
-  ventas_servicios: number;
-  ventas_productos: number;
-  cantidad_ventas?: number;
-  ticket_promedio?: number;
-  crecimiento_ventas?: string;
-  // Payment method breakdown
+export interface MetodosPagoData {
   efectivo?: number;
   transferencia?: number;
   tarjeta?: number;
@@ -25,19 +18,38 @@ export interface SalesMetricsData {
   otros?: number;
   addi?: number;
   giftcard?: number;
+  link_pago?: number;
   link_de_pago?: number;
   descuento_nomina?: number;
+  descuento_por_nomina?: number;
   abono_transferencia?: number;
   abonos?: number;
+}
+
+export interface SalesMetricsData {
+  ventas_totales: number;
+  ventas_servicios: number;
+  ventas_productos: number;
+  cantidad_ventas?: number;
+  ticket_promedio?: number;
+  crecimiento_ventas?: string;
+  abonos?: number;
+  metodos_pago?: MetodosPagoData;
 }
 
 export interface PaymentMethodTotals {
   efectivo: number;
   transferencia: number;
   tarjeta: number;
-  nequi: number;
-  daviplata: number;
+  tarjeta_credito: number;
+  tarjeta_debito: number;
+  sin_pago: number;
   otros: number;
+  addi: number;
+  giftcard: number;
+  link_de_pago: number;
+  descuento_nomina: number;
+  abono_transferencia: number;
 }
 
 export interface SalesMetricsResponse {
@@ -167,8 +179,7 @@ export function extractMainMetrics(data: SalesMetricsResponse): {
 
 /**
  * Extrae el desglose por método de pago desde la respuesta del dashboard.
- * Nequi y Daviplata no tienen campo propio en el backend; se muestran como 0.
- * "otros" agrupa: addi, giftcard, link_de_pago, descuento_nomina, sin_pago, otros.
+ * Cada método se mapea directamente desde el campo correspondiente del backend.
  */
 export function extractPaymentMethods(data: SalesMetricsResponse): PaymentMethodTotals {
   const fallbackCurrency = normalizeCurrencyCode(getStoredCurrency("USD"));
@@ -179,14 +190,21 @@ export function extractPaymentMethods(data: SalesMetricsResponse): PaymentMethod
     {} as SalesMetricsData;
 
   const n = (v: number | undefined) => (typeof v === "number" && isFinite(v) ? v : 0);
+  const p = m.metodos_pago ?? {};
 
   return {
-    efectivo: n(m.efectivo),
-    transferencia: n(m.transferencia) + n(m.abono_transferencia) + n(m.abonos),
-    tarjeta: n(m.tarjeta) + n(m.tarjeta_credito) + n(m.tarjeta_debito),
-    nequi: 0,     // no existe como campo separado en el backend
-    daviplata: 0, // no existe como campo separado en el backend
-    otros: n(m.addi) + n(m.giftcard) + n(m.link_de_pago) + n(m.descuento_nomina) + n(m.sin_pago) + n(m.otros),
+    efectivo:            n(p.efectivo),
+    transferencia:       n(p.transferencia),
+    tarjeta:             n(p.tarjeta),
+    tarjeta_credito:     n(p.tarjeta_credito),
+    tarjeta_debito:      n(p.tarjeta_debito),
+    sin_pago:            n(p.sin_pago),
+    otros:               n(p.otros),
+    addi:                n(p.addi),
+    giftcard:            n(p.giftcard),
+    link_de_pago:        n(p.link_pago) + n(p.link_de_pago),
+    descuento_nomina:    n(p.descuento_nomina) + n(p.descuento_por_nomina),
+    abono_transferencia: n(p.abono_transferencia) + n(p.abonos),
   };
 }
 

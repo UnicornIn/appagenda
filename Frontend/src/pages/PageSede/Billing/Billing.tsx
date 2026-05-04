@@ -184,9 +184,15 @@ export default function Billing() {
     efectivo: 0,
     transferencia: 0,
     tarjeta: 0,
-    nequi: 0,
-    daviplata: 0,
+    tarjeta_credito: 0,
+    tarjeta_debito: 0,
+    sin_pago: 0,
     otros: 0,
+    addi: 0,
+    giftcard: 0,
+    link_de_pago: 0,
+    descuento_nomina: 0,
+    abono_transferencia: 0,
   })
   const [loadingMetrics, setLoadingMetrics] = useState(true)
   const [currency, setCurrency] = useState(getStoredCurrency("USD"))
@@ -649,16 +655,21 @@ export default function Billing() {
               </div>
 
               {/* Row 2: Payment methods — from api/sales-dashboard/ventas/dashboard */}
-              <div className="grid grid-cols-5 gap-1.5">
+              <div className="grid grid-cols-6 gap-1.5">
                 {(
                   [
-                    { label: "Efectivo",      value: paymentMethods.efectivo },
-                    { label: "Transferencia", value: paymentMethods.transferencia },
-                    { label: "Tarjeta",       value: paymentMethods.tarjeta },
-                    // Nequi y Daviplata no tienen campo propio en el backend; se muestran si el
-                    // backend los agrega como campos separados en el futuro.
-                    { label: "Nequi",         value: paymentMethods.nequi },
-                    { label: "Daviplata",     value: paymentMethods.daviplata },
+                    { label: "Efectivo",         value: paymentMethods.efectivo },
+                    { label: "Transferencia",    value: paymentMethods.transferencia },
+                    { label: "Tarjeta",          value: paymentMethods.tarjeta },
+                    { label: "T. Crédito",       value: paymentMethods.tarjeta_credito },
+                    { label: "T. Débito",        value: paymentMethods.tarjeta_debito },
+                    { label: "Sin pago",         value: paymentMethods.sin_pago },
+                    { label: "Otros",            value: paymentMethods.otros },
+                    { label: "Addi",             value: paymentMethods.addi },
+                    { label: "Gift Card",        value: paymentMethods.giftcard },
+                    { label: "Link de pago",     value: paymentMethods.link_de_pago },
+                    { label: "Desc. nómina",     value: paymentMethods.descuento_nomina },
+                    { label: "Abono transf.",    value: paymentMethods.abono_transferencia },
                   ] as { label: string; value: number }[]
                 ).map((m) => (
                   <div
