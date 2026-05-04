@@ -1,22 +1,24 @@
-export const PAYROLL_PAYMENT_METHOD = "descuento_por_nomina" as const;
+export const PAYROLL_PAYMENT_METHOD = "descuento_nomina" as const;
 
 const LEGACY_PAYMENT_METHOD_MAP: Record<string, string> = {
-  descuento_nomina: PAYROLL_PAYMENT_METHOD,
+  descuento_por_nomina: PAYROLL_PAYMENT_METHOD,
 };
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   efectivo: "Efectivo",
   transferencia: "Transferencia",
   tarjeta: "Tarjeta",
-  tarjeta_credito: "Tarjeta de Crédito",
-  tarjeta_debito: "Tarjeta de Débito",
+  tarjeta_credito: "Tarjeta de crédito",
+  tarjeta_debito: "Tarjeta de débito",
   giftcard: "Gift Card",
   addi: "Addi",
-  link_pago: "Pago con link",
-  link_de_pago: "Pago con link",
+  link_pago: "Link de pago",
+  link_de_pago: "Link de pago",
   sin_pago: "Sin pago",
-  [PAYROLL_PAYMENT_METHOD]: "Descuento por nómina",
-  descuento_nomina: "Descuento por nómina",
+  otros: "Otros",
+  abono_transferencia: "Abono transferencia",
+  descuento_nomina: "Descuento nómina",
+  descuento_por_nomina: "Descuento nómina",
 };
 
 export const normalizePaymentMethodForBackend = (

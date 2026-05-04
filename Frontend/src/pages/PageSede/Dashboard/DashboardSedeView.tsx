@@ -22,6 +22,7 @@ import {
 } from "../../../lib/currency";
 import { facturaService } from "../Sales-invoiced/facturas";
 import { cashService } from "../CierreCaja/api/cashService";
+import { CASH_PAYMENT_METHOD_OPTIONS, normalizeCashPaymentMethodForBackend } from "../CierreCaja/constants";
 import { RefreshCw } from "lucide-react";
 
 interface DateRange {
@@ -240,11 +241,11 @@ export function DashboardSedeView({
   const resolveToday = () => toLocalYMD(new Date());
 
   const [egresoMayorForm, setEgresoMayorForm] = useState({
-    concepto: "", monto: "", categoria: "", metodo: "Transferencia bancaria",
+    concepto: "", monto: "", categoria: "", metodo: CASH_PAYMENT_METHOD_OPTIONS[0].value,
     fecha: resolveToday(), referencia: "", observaciones: "",
   });
   const [ingresoMayorForm, setIngresoMayorForm] = useState({
-    concepto: "", monto: "", tipo: "", metodo: "Transferencia bancaria",
+    concepto: "", monto: "", tipo: "", metodo: CASH_PAYMENT_METHOD_OPTIONS[0].value,
     fecha: resolveToday(), referencia: "", observaciones: "",
   });
   const [trasladoForm, setTrasladoForm] = useState({
@@ -469,7 +470,7 @@ export function DashboardSedeView({
         concepto, motivo: concepto, descripcion: concepto,
         nota: egresoMayorForm.observaciones || concepto,
         tipo: egresoMayorForm.categoria || "otro_gasto",
-        metodo_pago: egresoMayorForm.metodo, fecha: formatDateDMY(fecha),
+        metodo_pago: normalizeCashPaymentMethodForBackend(egresoMayorForm.metodo), fecha: formatDateDMY(fecha),
         referencia: egresoMayorForm.referencia || undefined,
         moneda: monedaUsuario, caja: "mayor",
       });
@@ -477,7 +478,7 @@ export function DashboardSedeView({
         id: `em-${Date.now()}`, fecha, caja: "Caja Mayor", tipo: "Egreso",
         concepto, categoria: egresoMayorForm.categoria || "Sin categoría", monto, esEgreso: true,
       }, ...prev].slice(0, 10));
-      setEgresoMayorForm({ concepto: "", monto: "", categoria: "", metodo: "Transferencia bancaria", fecha: resolveToday(), referencia: "", observaciones: "" });
+      setEgresoMayorForm({ concepto: "", monto: "", categoria: "", metodo: CASH_PAYMENT_METHOD_OPTIONS[0].value, fecha: resolveToday(), referencia: "", observaciones: "" });
       setRegistrarSuccess("Egreso de Caja Mayor registrado correctamente");
       setTimeout(() => setRegistrarSuccess(null), 3000);
     } catch (err: any) {
@@ -496,7 +497,7 @@ export function DashboardSedeView({
       await cashService.createIngreso({
         sede_id: sedeId, monto, concepto, motivo: concepto,
         tipo: ingresoMayorForm.tipo || "ingreso_extraordinario",
-        metodo_pago: ingresoMayorForm.metodo, fecha: formatDateDMY(fecha),
+        metodo_pago: normalizeCashPaymentMethodForBackend(ingresoMayorForm.metodo), fecha: formatDateDMY(fecha),
         referencia: ingresoMayorForm.referencia || undefined,
         observaciones: ingresoMayorForm.observaciones || undefined,
         moneda: monedaUsuario, caja: "mayor",
@@ -505,7 +506,7 @@ export function DashboardSedeView({
         id: `im-${Date.now()}`, fecha, caja: "Caja Mayor", tipo: "Ingreso",
         concepto, categoria: ingresoMayorForm.tipo || "Sin tipo", monto, esEgreso: false,
       }, ...prev].slice(0, 10));
-      setIngresoMayorForm({ concepto: "", monto: "", tipo: "", metodo: "Transferencia bancaria", fecha: resolveToday(), referencia: "", observaciones: "" });
+      setIngresoMayorForm({ concepto: "", monto: "", tipo: "", metodo: CASH_PAYMENT_METHOD_OPTIONS[0].value, fecha: resolveToday(), referencia: "", observaciones: "" });
       setRegistrarSuccess("Ingreso de Caja Mayor registrado correctamente");
       setTimeout(() => setRegistrarSuccess(null), 3000);
     } catch (err: any) {
@@ -1166,7 +1167,9 @@ export function DashboardSedeView({
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Método de pago</label>
                       <select value={egresoMayorForm.metodo} onChange={(e) => setEgresoMayorForm((f) => ({ ...f, metodo: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800">
-                        <option>Transferencia bancaria</option><option>Débito automático</option><option>Tarjeta corporativa</option><option>Cheque</option><option>Efectivo (desde caja mayor)</option><option>PSE</option>
+                        {CASH_PAYMENT_METHOD_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
                       </select>
                     </div>
                     <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><input type="date" value={egresoMayorForm.fecha} onChange={(e) => setEgresoMayorForm((f) => ({ ...f, fecha: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" /></div>
@@ -1174,7 +1177,7 @@ export function DashboardSedeView({
                     <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Observaciones</label><textarea value={egresoMayorForm.observaciones} onChange={(e) => setEgresoMayorForm((f) => ({ ...f, observaciones: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[12px] resize-y min-h-[56px] leading-relaxed focus:outline-none focus:border-slate-800" placeholder="Detalles adicionales..." /></div>
                   </div>
                   <div className="flex gap-2 justify-end mt-4">
-                    <button onClick={() => setEgresoMayorForm({ concepto: "", monto: "", categoria: "", metodo: "Transferencia bancaria", fecha: resolveToday(), referencia: "", observaciones: "" })} className="px-4 py-2 border border-slate-200 rounded-md text-[12px] font-semibold text-slate-500 hover:bg-slate-50">Cancelar</button>
+                    <button onClick={() => setEgresoMayorForm({ concepto: "", monto: "", categoria: "", metodo: CASH_PAYMENT_METHOD_OPTIONS[0].value, fecha: resolveToday(), referencia: "", observaciones: "" })} className="px-4 py-2 border border-slate-200 rounded-md text-[12px] font-semibold text-slate-500 hover:bg-slate-50">Cancelar</button>
                     <button onClick={handleEgresoMayor} disabled={registrarLoading} className="px-4 py-2 bg-slate-800 text-white rounded-md text-[12px] font-semibold hover:bg-slate-700 disabled:opacity-60">{registrarLoading ? "Registrando..." : "Registrar egreso"}</button>
                   </div>
                 </div>
@@ -1196,7 +1199,9 @@ export function DashboardSedeView({
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Método</label>
                       <select value={ingresoMayorForm.metodo} onChange={(e) => setIngresoMayorForm((f) => ({ ...f, metodo: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800">
-                        <option>Transferencia bancaria</option><option>Consignación</option><option>Otro</option>
+                        {CASH_PAYMENT_METHOD_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
                       </select>
                     </div>
                     <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><input type="date" value={ingresoMayorForm.fecha} onChange={(e) => setIngresoMayorForm((f) => ({ ...f, fecha: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" /></div>
@@ -1204,7 +1209,7 @@ export function DashboardSedeView({
                     <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Observaciones</label><textarea value={ingresoMayorForm.observaciones} onChange={(e) => setIngresoMayorForm((f) => ({ ...f, observaciones: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[12px] resize-y min-h-[56px] leading-relaxed focus:outline-none focus:border-slate-800" placeholder="Detalles adicionales..." /></div>
                   </div>
                   <div className="flex gap-2 justify-end mt-4">
-                    <button onClick={() => setIngresoMayorForm({ concepto: "", monto: "", tipo: "", metodo: "Transferencia bancaria", fecha: resolveToday(), referencia: "", observaciones: "" })} className="px-4 py-2 border border-slate-200 rounded-md text-[12px] font-semibold text-slate-500 hover:bg-slate-50">Cancelar</button>
+                    <button onClick={() => setIngresoMayorForm({ concepto: "", monto: "", tipo: "", metodo: CASH_PAYMENT_METHOD_OPTIONS[0].value, fecha: resolveToday(), referencia: "", observaciones: "" })} className="px-4 py-2 border border-slate-200 rounded-md text-[12px] font-semibold text-slate-500 hover:bg-slate-50">Cancelar</button>
                     <button onClick={handleIngresoMayor} disabled={registrarLoading} className="px-4 py-2 bg-slate-800 text-white rounded-md text-[12px] font-semibold hover:bg-slate-700 disabled:opacity-60">{registrarLoading ? "Registrando..." : "Registrar ingreso"}</button>
                   </div>
                 </div>

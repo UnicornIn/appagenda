@@ -1,14 +1,15 @@
 export const CASH_PAYMENT_METHOD_OPTIONS = [
   { value: "efectivo", label: "Efectivo" },
-  { value: "tarjeta_credito", label: "Tarjeta crédito" },
-  { value: "tarjeta_debito", label: "Tarjeta débito" },
-  { value: "pos", label: "POS" },
   { value: "transferencia", label: "Transferencia" },
+  { value: "tarjeta", label: "Tarjeta" },
+  { value: "tarjeta_credito", label: "Tarjeta de crédito" },
+  { value: "tarjeta_debito", label: "Tarjeta de débito" },
   { value: "link_de_pago", label: "Link de pago" },
-  { value: "giftcard", label: "Giftcard" },
+  { value: "giftcard", label: "Gift Card" },
   { value: "addi", label: "Addi" },
-  { value: "abonos", label: "Abonos" },
-  { value: "descuento_por_nomina", label: "Descuento por nómina" },
+  { value: "abono_transferencia", label: "Abono transferencia" },
+  { value: "descuento_nomina", label: "Descuento nómina" },
+  { value: "sin_pago", label: "Sin pago" },
   { value: "otros", label: "Otros" },
 ] as const;
 
@@ -27,6 +28,14 @@ export const CASH_INCOME_TYPE_OPTIONS = [
 ] as const;
 
 export const DEFAULT_CASH_PAYMENT_METHOD = CASH_PAYMENT_METHOD_OPTIONS[0].value;
+
+const CASH_PAYMENT_METHOD_BACKEND_ALIASES: Record<string, string> = {
+  tarjeta: "otros",
+  sin_pago: "otros",
+};
+
+export const normalizeCashPaymentMethodForBackend = (value: string): string =>
+  CASH_PAYMENT_METHOD_BACKEND_ALIASES[value] ?? value;
 export const DEFAULT_CASH_EXPENSE_TYPE = CASH_EXPENSE_TYPE_OPTIONS[1].value;
 export const DEFAULT_CASH_INCOME_TYPE = CASH_INCOME_TYPE_OPTIONS[0].value;
 
