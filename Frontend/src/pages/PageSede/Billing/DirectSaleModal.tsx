@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Loader2, Search, X } from "lucide-react";
+import { ChevronDown, Loader2, Pencil, Search, X } from "lucide-react";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import {
   createDirectSale,
@@ -115,6 +115,10 @@ export function DirectSaleModal({
   const [isCreatingSale, setIsCreatingSale] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [isVerifyingReport, setIsVerifyingReport] = useState(false);
+
+  // ── Price editing ────────────────────────────────────────────────────────
+  const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+  const [editingPriceValue, setEditingPriceValue] = useState("");
 
   // ── Errors ──────────────────────────────────────────────────────────────
   const [actionError, setActionError] = useState<string | null>(null);
@@ -418,6 +422,17 @@ export function DirectSaleModal({
     setCartByProductId((prev) => ({
       ...prev,
       [productId]: { ...item, discountPct: parsed },
+    }));
+  };
+
+  const updateUnitPrice = (productId: string, rawValue: string) => {
+    if (saleId) return;
+    const item = cartByProductId[productId];
+    if (!item) return;
+    const parsed = Math.max(0, parseFloat(rawValue.replace(/\./g, "").replace(",", ".")) || 0);
+    setCartByProductId((prev) => ({
+      ...prev,
+      [productId]: { ...item, unitPrice: parsed },
     }));
   };
 
@@ -967,7 +982,43 @@ export function DirectSaleModal({
 
                             {/* Subtotal */}
                             <td className="px-4 py-3 text-right font-bold text-gray-900">
-                              {formatCurrency(subtotal)}
+                              {editingPriceId === item.productId ? (
+                                <input
+                                  autoFocus
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={editingPriceValue}
+                                  onChange={(e) => setEditingPriceValue(e.target.value)}
+                                  onBlur={() => {
+                                    updateUnitPrice(item.productId, editingPriceValue);
+                                    setEditingPriceId(null);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      updateUnitPrice(item.productId, editingPriceValue);
+                                      setEditingPriceId(null);
+                                    }
+                                    if (e.key === "Escape") setEditingPriceId(null);
+                                  }}
+                                  className="w-24 text-right border-b border-gray-400 bg-transparent focus:outline-none font-bold text-gray-900 text-sm"
+                                />
+                              ) : (
+                                <div className="inline-flex items-center justify-end gap-1 group">
+                                  <span>{formatCurrency(subtotal)}</span>
+                                  {!saleId && !isBusy && (
+                                    <button
+                                      onClick={() => {
+                                        setEditingPriceId(item.productId);
+                                        setEditingPriceValue(String(item.unitPrice));
+                                      }}
+                                      title="Editar precio"
+                                      className="opacity-30 group-hover:opacity-80 transition-opacity text-gray-500 hover:text-gray-800"
+                                    >
+                                      <Pencil className="h-2.5 w-2.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
                             </td>
 
                             {/* Remove */}

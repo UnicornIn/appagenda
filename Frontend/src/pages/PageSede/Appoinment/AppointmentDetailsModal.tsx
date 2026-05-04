@@ -41,7 +41,6 @@ import {
 } from "../../../lib/agenda";
 import {
   normalizePaymentMethodForBackend,
-  PAYROLL_PAYMENT_METHOD,
   PAYMENT_METHOD_OPTIONS,
 } from "../../../lib/payment-methods";
 
@@ -3661,17 +3660,30 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                   )}
 
                   {!shouldDisableActions() && (
-                    <button
-                      onClick={() => handleUpdateStatus("cancelada")}
-                      className="flex-1 flex items-center justify-center py-3 rounded-xl text-sm font-semibold"
-                      style={{
-                        border: "1px solid #FCA5A5",
-                        color: "#EF4444",
-                        background: "transparent",
-                      }}
-                    >
-                      Cancelar cita
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleUpdateStatus("no_asistio")}
+                        className="flex-1 flex items-center justify-center py-3 rounded-xl text-sm font-semibold"
+                        style={{
+                          border: "1px solid #FDE68A",
+                          color: "#D97706",
+                          background: "transparent",
+                        }}
+                      >
+                        No asistió
+                      </button>
+                      <button
+                        onClick={() => handleUpdateStatus("cancelada")}
+                        className="flex-1 flex items-center justify-center py-3 rounded-xl text-sm font-semibold"
+                        style={{
+                          border: "1px solid #FCA5A5",
+                          color: "#EF4444",
+                          background: "transparent",
+                        }}
+                      >
+                        Cancelar cita
+                      </button>
+                    </>
                   )}
                 </div>
               </>

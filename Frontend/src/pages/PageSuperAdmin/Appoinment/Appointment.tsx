@@ -69,13 +69,15 @@ const RF_STATUSES = {
   'in-progress': { color: '#8B5CF6', bg: '#F5F3FF', label: 'En curso' },
   'completed':   { color: '#10B981', bg: '#ECFDF5', label: 'Facturada' },
   'cancelled':   { color: '#EF4444', bg: '#FEF2F2', label: 'Cancelada' },
+  'no-asistio':  { color: '#CA8A04', bg: '#FEFCE8', label: 'No asistió' },
 } as const;
 type RFStatusKey = keyof typeof RF_STATUSES;
 
 const resolveRFStatus = (estado: string): RFStatusKey => {
   const v = (estado || '').toLowerCase().trim();
   if (v.includes('cancel')) return 'cancelled';
-  if (['pre-cita', 'pre_cita', 'precita'].some(s => v.includes(s))) return 'pre-cita';
+  if (v === 'no_asistio' || v === 'no asistio' || v.includes('no_asistio') || v.includes('no asistio')) return 'no-asistio';
+  if (['pre-cita', 'pre_cita', 'precita', 'pre_reservada'].some(s => v.includes(s))) return 'pre-cita';
   if (['en proc', 'en_proc', 'proceso', 'en curso', 'en_curso', 'en-curso', 'progres', 'in-prog'].some(s => v.includes(s))) return 'in-progress';
   if (['complet', 'finaliz', 'terminad', 'realizad', 'factur'].some(s => v.includes(s))) return 'completed';
   return 'confirmed';
@@ -1333,6 +1335,10 @@ const CalendarScheduler: React.FC = () => {
               <span className="flex items-center gap-1">
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: '#EF4444', display: 'inline-block' }} />
                 Cancelada
+              </span>
+              <span className="flex items-center gap-1">
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: '#CA8A04', display: 'inline-block' }} />
+                No asistió
               </span>
               <span className="flex items-center gap-1">
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />
