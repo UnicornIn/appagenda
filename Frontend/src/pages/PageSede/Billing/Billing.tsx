@@ -432,7 +432,7 @@ export default function Billing() {
         onSaleCompleted={() => setMetricsRefreshKey((k) => k + 1)}
       />
 
-      {/* Custom date range modal — logic preserved, not shown as a period chip */}
+      {/* Custom date range modal */}
       {showDateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-lg w-full max-w-md mx-4 p-6 shadow-xl">
@@ -440,8 +440,42 @@ export default function Billing() {
               Seleccionar rango de fechas
             </h3>
             <p className="text-sm text-gray-600 mb-5">
-              Elige las fechas para filtrar métricas y citas
+              Elige las fechas para filtrar las citas de facturación
             </p>
+
+            {/* Quick ranges */}
+            <div className="mb-4">
+              <p className="text-xs font-medium text-gray-500 mb-2">Rangos rápidos:</p>
+              <div className="flex gap-2">
+                {[
+                  { label: "7 días", days: 6 },
+                  { label: "30 días", days: 29 },
+                  { label: "Mes actual", days: -1 },
+                ].map((r) => {
+                  const today = new Date()
+                  const handleQuick = () => {
+                    let start: Date
+                    if (r.days === -1) {
+                      start = new Date(today.getFullYear(), today.getMonth(), 1)
+                    } else {
+                      start = new Date(today)
+                      start.setDate(start.getDate() - r.days)
+                    }
+                    setTempDateRange({ start_date: toYmd(start), end_date: toYmd(today) })
+                  }
+                  return (
+                    <button
+                      key={r.label}
+                      onClick={handleQuick}
+                      className="px-3 py-1.5 border border-gray-200 rounded-full text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                    >
+                      {r.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -479,6 +513,15 @@ export default function Billing() {
                 />
               </div>
             </div>
+
+            {/* Selected range preview */}
+            {tempDateRange.start_date && tempDateRange.end_date && (
+              <div className="mt-4 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
+                <span className="font-medium">Rango seleccionado:</span>{" "}
+                {tempDateRange.start_date} - {tempDateRange.end_date}
+              </div>
+            )}
+
             <div className="mt-5 flex gap-3">
               <Button
                 className="flex-1 bg-black text-white hover:bg-gray-800"
@@ -547,6 +590,16 @@ export default function Billing() {
                 {c.label}
               </button>
             ))}
+            <button
+              onClick={() => handlePeriodChange("custom")}
+              className={`px-3.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+                period === "custom"
+                  ? "bg-gray-900 text-white border-gray-900"
+                  : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+              }`}
+            >
+              Rango personalizado
+            </button>
           </div>
 
           {/* KPI section — hidden for recepcionista */}

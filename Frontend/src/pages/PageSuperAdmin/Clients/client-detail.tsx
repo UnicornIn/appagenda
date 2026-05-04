@@ -408,7 +408,7 @@ function HistorialTab({ client }: { client: Cliente }) {
               <td style={{ ...S.hTd, color: '#64748B' }}>{h.profesional}</td>
               <td style={S.hTd}>
                 <span style={S.hStatus}>
-                  {h.estado_pago === 'pagado' ? 'Completada' : h.estado_pago || h.estado || 'Pendiente'}
+                  {h.estado_pago === 'pagado' ? 'Facturada' : h.estado_pago || h.estado || 'Pendiente'}
                 </span>
               </td>
               <td style={{ ...S.hTd, textAlign: 'right', fontWeight: 700, fontSize: '13px' }}>
