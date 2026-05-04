@@ -639,14 +639,13 @@ export function ServiceProtocol({
         `✅ Facturación exitosa!\n\n` +
           `📋 Cita marcada como pagada\n` +
           `💵 Comisión generada: $${formatMoney(result.valor_comision_generada || 0)}\n` +
-          `🔄 ${result.comision || "Comisión registrada"}\n\n` +
-          `🔄 La página se recargará en 3 segundos...`,
+          `🔄 ${result.comision || "Comisión registrada"}`,
       );
 
       // Limpiar productos seleccionados
       handleClearProducts();
 
-      // Actualizar el estado de la cita
+      // Notificar al componente padre para que quite la cita de la lista
       if (selectedAppointment) {
         const updatedAppointment = {
           ...selectedAppointment,
@@ -655,14 +654,8 @@ export function ServiceProtocol({
           saldo_pendiente: 0,
         };
 
-        // Notificar al componente padre
         onAppointmentUpdated?.(updatedAppointment);
       }
-
-      // ESPERAR 3 SEGUNDOS Y RECARGAR LA PÁGINA
-      reloadTimeoutRef.current = window.setTimeout(() => {
-        window.location.reload();
-      }, 3000);
     } catch (error) {
       console.error("Error al facturar:", error);
       alert(
