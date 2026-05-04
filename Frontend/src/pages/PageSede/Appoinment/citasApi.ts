@@ -1,6 +1,7 @@
 // components/Quotes/citasApi.ts - Agrega esta función
 import { API_BASE_URL } from '../../../types/config'; // Ajusta la ruta según tu estructura
 import { normalizePaymentMethodForBackend } from '../../../lib/payment-methods';
+import { apiFetch } from '../../../lib/api';
 
 export class ApiRequestError extends Error {
   status: number;
@@ -79,16 +80,10 @@ export const updateQuote = async (citaId: string, cambios: any, token: string) =
 
 export const updateCita = updateQuote;
 // En tu archivo citasApi.ts
-export const confirmarCita = async (citaId: string, token: string) => {
-  const response = await fetch(
-    `${API_BASE_URL}scheduling/quotes/citas/${citaId}/confirmar`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-    }
+export const confirmarCita = async (citaId: string, _token?: string) => {
+  const response = await apiFetch(
+    `${API_BASE_URL}scheduling/quotes/${citaId}/confirmar`,
+    { method: 'POST' }
   );
 
   if (!response.ok) {
