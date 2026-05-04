@@ -277,6 +277,7 @@ export default function Billing() {
       const filtered = citas
         .filter((a) => {
           if (!isBillingVisible(a.estado)) return false
+          if (a.estado_pago?.toLowerCase() === "pagado") return false
           const fecha = getAppointmentDate(a)
           return (
             fecha >= appliedRange.start_date && fecha <= appliedRange.end_date
@@ -359,13 +360,11 @@ export default function Billing() {
   const filteredAppointments = useMemo(() => {
     let result = allAppointments
     if (filterStatus === "paid")
-      result = result.filter(
-        (a) => a.estado_pago?.toLowerCase() === "pagado",
-      )
+      // Pagadas: tienen abono registrado pero aún no están completamente facturadas
+      result = result.filter((a) => (a.abono ?? 0) > 0)
     else if (filterStatus === "pending")
-      result = result.filter(
-        (a) => a.estado_pago?.toLowerCase() !== "pagado",
-      )
+      // Pendientes: sin ningún pago registrado
+      result = result.filter((a) => !((a.abono ?? 0) > 0))
     // "no-ficha" requires per-appointment ficha status — TODO: endpoint needed
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
@@ -381,21 +380,18 @@ export default function Billing() {
 
   // ── Bottom bar stats ──────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const paid = allAppointments.filter(
-      (a) => a.estado_pago?.toLowerCase() === "pagado",
-    )
-    const pending = allAppointments.filter(
-      (a) => a.estado_pago?.toLowerCase() !== "pagado",
-    )
-    const cobrado = paid.reduce((s, a) => s + (a.valor_total ?? 0), 0)
-    const pendienteAmt = pending.reduce(
+    // allAppointments ya excluye las completamente facturadas (estado_pago === "pagado")
+    const withPayment = allAppointments.filter((a) => (a.abono ?? 0) > 0)
+    const noPayment = allAppointments.filter((a) => !((a.abono ?? 0) > 0))
+    const cobrado = withPayment.reduce((s, a) => s + (a.abono ?? 0), 0)
+    const pendienteAmt = noPayment.reduce(
       (s, a) => s + (a.saldo_pendiente ?? a.valor_total ?? 0),
       0,
     )
     return {
       total: allAppointments.length,
-      paid: paid.length,
-      pending: pending.length,
+      paid: withPayment.length,
+      pending: noPayment.length,
       noFicha: 0, // TODO: requires ficha_status per appointment from scheduling/quotes/
       cobrado,
       pendiente: pendienteAmt,
@@ -767,10 +763,12 @@ export default function Billing() {
             ) : filteredAppointments.length === 0 ? (
               <div className="py-12 text-center">
                 <p className="text-sm text-gray-400">
-                  No hay citas finalizadas para el período seleccionado
+                  No hay citas pendientes de facturar
                 </p>
                 <p className="text-xs text-gray-300 mt-1">
-                  Cambia el filtro de período para consultar más resultados
+                  {filterStatus !== "all"
+                    ? "Prueba con otro filtro o cambia el período"
+                    : "Cambia el filtro de período para consultar más resultados"}
                 </p>
               </div>
             ) : (
@@ -784,7 +782,7 @@ export default function Billing() {
                     .slice(0, 2)
                     .join(" ")
                   const serviceName = a.servicio_nombre || a.servicio || "—"
-                  const isPaid = a.estado_pago?.toLowerCase() === "pagado"
+                  const hasAbono = (a.abono ?? 0) > 0
 
                   return (
                     <div
@@ -817,12 +815,12 @@ export default function Billing() {
                       <div className="w-24 flex justify-center">
                         <span
                           className={`text-[9px] font-semibold uppercase tracking-[0.3px] px-1.5 py-0.5 rounded-sm border ${
-                            isPaid
+                            hasAbono
                               ? "border-gray-800 text-gray-800"
                               : "border-gray-300 text-gray-400"
                           }`}
                         >
-                          {isPaid ? "Pagado" : "Pendiente"}
+                          {hasAbono ? "Con pago" : "Pendiente"}
                         </span>
                       </div>
 
@@ -882,16 +880,24 @@ export default function Billing() {
                 selectedAppointment={selectedAppointment}
                 onClose={() => setSelectedAppointment(null)}
                 onAppointmentUpdated={(updated) => {
-                  setAllAppointments((prev) =>
-                    prev.map((a) =>
-                      a._id === updated._id ? { ...a, ...updated } : a,
-                    ),
-                  )
-                  setSelectedAppointment((prev) =>
-                    prev?._id === updated._id
-                      ? { ...prev, ...updated }
-                      : prev,
-                  )
+                  if (updated.estado_pago?.toLowerCase() === "pagado") {
+                    // Cita completamente facturada: quitar de la lista y cerrar panel
+                    setAllAppointments((prev) =>
+                      prev.filter((a) => a._id !== updated._id),
+                    )
+                    setSelectedAppointment(null)
+                  } else {
+                    setAllAppointments((prev) =>
+                      prev.map((a) =>
+                        a._id === updated._id ? { ...a, ...updated } : a,
+                      ),
+                    )
+                    setSelectedAppointment((prev) =>
+                      prev?._id === updated._id
+                        ? { ...prev, ...updated }
+                        : prev,
+                    )
+                  }
                 }}
               />
             </div>
