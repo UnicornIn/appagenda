@@ -65,21 +65,21 @@ export function ProductsList() {
   const [productos, setProductos] = useState<InventarioProducto[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [period, setPeriod] = useState<string>("today")
+  const [period, _setPeriod] = useState<string>("today")
   const [dateRange, setDateRange] = useState<DashboardDateRange>(() =>
     buildInvoiceDateRange("today", { start_date: "", end_date: "" })
   )
-  const [ventasLoading, setVentasLoading] = useState(false)
-  const [ventasError, setVentasError] = useState<string | null>(null)
-  const [productSalesRows, setProductSalesRows] = useState<ProductSalesRow[]>([])
+  const [_ventasLoading, setVentasLoading] = useState(false)
+  const [_ventasError, setVentasError] = useState<string | null>(null)
+  const [_productSalesRows, setProductSalesRows] = useState<ProductSalesRow[]>([])
   const [ventasCurrency, setVentasCurrency] = useState<string>("COP")
   // Default a "all" para que el filtro inicial muestre todas las sedes
   const [selectedDashboardSede, setSelectedDashboardSede] = useState<string>("all")
-  const [multiSedeSales, setMultiSedeSales] = useState<Record<string, ProductSalesRow[]>>({})
-  const [multiSedeCurrency, setMultiSedeCurrency] = useState<Record<string, string>>({})
-  const [countrySales, setCountrySales] = useState<Record<string, ProductSalesRow[]>>({})
-  const [countryCurrency, setCountryCurrency] = useState<Record<string, string>>({})
-  const [missingCountrySedes, setMissingCountrySedes] = useState<string[]>([])
+  const [_multiSedeSales, setMultiSedeSales] = useState<Record<string, ProductSalesRow[]>>({})
+  const [_multiSedeCurrency, setMultiSedeCurrency] = useState<Record<string, string>>({})
+  const [_countrySales, setCountrySales] = useState<Record<string, ProductSalesRow[]>>({})
+  const [_countryCurrency, setCountryCurrency] = useState<Record<string, string>>({})
+  const [_missingCountrySedes, setMissingCountrySedes] = useState<string[]>([])
   const [editingProductId, setEditingProductId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState<string>("")
   const [editingPrice, setEditingPrice] = useState<string>("")
@@ -404,22 +404,6 @@ export function ProductsList() {
       setIsLoading(false)
     }
   }
-
-  const stats = useMemo(() => {
-    const totalProductos = productos.length
-    const productosBajoStock = productos.filter(p => p.stock_actual <= p.stock_minimo).length
-    const productosSinStock = productos.filter(p => p.stock_actual === 0).length
-    const totalStock = productos.reduce((sum, p) => sum + p.stock_actual, 0)
-    const stockPromedio = productos.length > 0 ? Math.round(totalStock / productos.length) : 0
-
-    return {
-      totalProductos,
-      productosBajoStock,
-      productosSinStock,
-      totalStock,
-      stockPromedio
-    }
-  }, [productos])
 
   const lineasDisponibles = useMemo(() => {
     const seen = new Set<string>()
@@ -969,8 +953,6 @@ export function ProductsList() {
     )
   }
 
-  const countryKeys = Object.keys(countrySales)
-  const showCountryView = selectedDashboardSede === "all" && countryKeys.length > 0
   const productCards = useMemo(
     () =>
       {

@@ -42,6 +42,19 @@ const deriveTags = (name: string): string[] => {
   return tags.length > 0 ? tags : [name.split(' ')[0]]
 }
 
+const tabStyle = (active: boolean): CSSProperties => ({
+  padding: '10px 16px', fontSize: '12px',
+  fontWeight: active ? 600 : 500,
+  color: active ? '#1E293B' : '#64748B',
+  borderBottom: `2px solid ${active ? '#1E293B' : 'transparent'}`,
+  cursor: 'pointer', background: 'none', border: 'none',
+  borderBottomStyle: 'solid', fontFamily: 'inherit',
+})
+
+const recFillStyle = (pct: number): CSSProperties => ({
+  height: '100%', background: '#1E293B', borderRadius: '3px', width: `${pct}%`,
+})
+
 const S: Record<string, CSSProperties> = {
   shell: {
     display: 'flex', flexDirection: 'column', height: '100%',
@@ -72,14 +85,6 @@ const S: Record<string, CSSProperties> = {
     background: '#1E293B', fontFamily: 'inherit',
   },
   tabsBar: { display: 'flex', borderBottom: '1px solid #E2E8F0', padding: '0 28px', flexShrink: 0 },
-  tab: (active: boolean): CSSProperties => ({
-    padding: '10px 16px', fontSize: '12px',
-    fontWeight: active ? 600 : 500,
-    color: active ? '#1E293B' : '#64748B',
-    borderBottom: `2px solid ${active ? '#1E293B' : 'transparent'}`,
-    cursor: 'pointer', background: 'none', border: 'none',
-    borderBottomStyle: 'solid', fontFamily: 'inherit',
-  }),
   body: { flex: 1, overflowY: 'auto' as const, padding: '24px 28px' },
   kpiRow: { display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '10px', marginBottom: '24px' },
   kpi: { padding: '14px', border: '1px solid #E2E8F0', borderRadius: '8px' },
@@ -94,7 +99,6 @@ const S: Record<string, CSSProperties> = {
   infoLabel: { fontSize: '10px', color: '#94A3B8', marginBottom: '2px' },
   infoValue: { fontSize: '13px', fontWeight: 500, color: '#1E293B' },
   recBar: { height: '6px', background: '#F1F5F9', borderRadius: '3px', marginTop: '6px' },
-  recFill: (pct: number): CSSProperties => ({ height: '100%', background: '#1E293B', borderRadius: '3px', width: `${pct}%` }),
   growthRow: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px' },
   growthCard: { padding: '12px', border: '1px solid #E2E8F0', borderRadius: '8px', textAlign: 'center' },
   growthLabel: { fontSize: '9px', color: '#94A3B8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.3px', marginBottom: '4px' },
@@ -168,7 +172,7 @@ function ResumenTab({ client }: { client: Cliente }) {
           <span>{daysSince}d transcurridos</span>
         </div>
         <div style={S.recBar}>
-          <div style={S.recFill(Math.min(100, Math.round((daysSince / 30) * 100)))} />
+          <div style={recFillStyle(Math.min(100, Math.round((daysSince / 30) * 100)))} />
         </div>
         <div style={{ fontSize: '10px', color: '#94A3B8', marginTop: '4px' }}>
           {overdue
@@ -517,10 +521,12 @@ function NotasTab({ client, onNoteAdded }: { client: Cliente; onNoteAdded?: () =
   )
 }
 
-export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailProps) {
+export function ClientDetail({ client, onBack: _onBack, onClientUpdated }: ClientDetailProps) {
   const [tab, setTab] = useState<Tab>('resumen')
   const [isEditOpen, setIsEditOpen] = useState(false)
   const navigate = useNavigate()
+  const { user: authUser } = useAuth()
+  const token = (authUser as any)?.access_token || sessionStorage.getItem("access_token") || localStorage.getItem("access_token") || ""
 
   // const handleLlamar = useCallback(() => {
   //   if (client.telefono && client.telefono !== 'No disponible') {
@@ -576,7 +582,7 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
 
       <div style={S.tabsBar}>
         {tabs.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)} style={S.tab(tab === t.key)}>
+          <button key={t.key} onClick={() => setTab(t.key)} style={tabStyle(tab === t.key)}>
             {t.label}
           </button>
         ))}
@@ -592,7 +598,8 @@ export function ClientDetail({ client, onBack, onClientUpdated }: ClientDetailPr
 
       {isEditOpen && (
         <EditClientModal
-          client={client}
+          cliente={client}
+          token={token}
           isOpen={isEditOpen}
           onClose={() => setIsEditOpen(false)}
           onSuccess={() => { setIsEditOpen(false); onClientUpdated?.() }}

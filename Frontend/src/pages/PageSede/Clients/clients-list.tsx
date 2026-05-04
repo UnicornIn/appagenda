@@ -31,6 +31,24 @@ const fmt = (n: number) => "$" + Math.round(n).toLocaleString("es-CO")
 const ini = (n: string) =>
   n.split(" ").map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase()
 
+const rowStyle = (selected: boolean): CSSProperties => ({
+  display: 'flex', alignItems: 'center', padding: '10px 20px',
+  cursor: 'pointer', gap: '10px', transition: 'background .1s',
+  borderLeft: selected ? '3px solid #1E293B' : '3px solid transparent',
+  background: selected ? '#F1F5F9' : 'transparent',
+})
+
+const pgBtnStyle = (enabled: boolean): CSSProperties => ({
+  background: 'none', border: '1px solid #E2E8F0', borderRadius: '6px',
+  padding: '4px 8px', cursor: enabled ? 'pointer' : 'default',
+  color: enabled ? '#64748B' : '#CBD5E1', fontFamily: 'inherit',
+  display: 'flex', alignItems: 'center',
+})
+
+const skeletonLineStyle = (w: string, h: string, mb?: string): CSSProperties => ({
+  height: h, background: '#E2E8F0', borderRadius: '4px', width: w, marginBottom: mb,
+})
+
 const S: Record<string, CSSProperties> = {
   shell: {
     width: '420px', borderRight: '1px solid #E2E8F0',
@@ -60,12 +78,6 @@ const S: Record<string, CSSProperties> = {
     display: 'flex', alignItems: 'center', gap: '8px',
   },
   listScroll: { flex: 1, overflowY: 'auto' as const },
-  row: (selected: boolean): CSSProperties => ({
-    display: 'flex', alignItems: 'center', padding: '10px 20px',
-    cursor: 'pointer', gap: '10px', transition: 'background .1s',
-    borderLeft: selected ? '3px solid #1E293B' : '3px solid transparent',
-    background: selected ? '#F1F5F9' : 'transparent',
-  }),
   avatar: {
     width: '36px', height: '36px', borderRadius: '50%', background: '#1E293B',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -82,12 +94,6 @@ const S: Record<string, CSSProperties> = {
     padding: '8px 20px', borderTop: '1px solid #E2E8F0',
     fontSize: '11px', color: '#64748B',
   },
-  pgBtn: (enabled: boolean): CSSProperties => ({
-    background: 'none', border: '1px solid #E2E8F0', borderRadius: '6px',
-    padding: '4px 8px', cursor: enabled ? 'pointer' : 'default',
-    color: enabled ? '#64748B' : '#CBD5E1', fontFamily: 'inherit',
-    display: 'flex', alignItems: 'center',
-  }),
   addBtn: {
     width: '100%', padding: '8px', border: '1px dashed #E2E8F0', borderRadius: '8px',
     fontSize: '12px', color: '#94A3B8', cursor: 'pointer', background: 'none',
@@ -96,9 +102,6 @@ const S: Record<string, CSSProperties> = {
   addWrap: { padding: '12px 20px' },
   skeletonRow: { display: 'flex', alignItems: 'center', padding: '10px 20px', gap: '10px' },
   skeletonCircle: { width: '36px', height: '36px', borderRadius: '50%', background: '#E2E8F0', flexShrink: 0 },
-  skeletonLine: (w: string, h: string, mb?: string): CSSProperties => ({
-    height: h, background: '#E2E8F0', borderRadius: '4px', width: w, marginBottom: mb,
-  }),
 }
 
 interface ClientRowProps {
@@ -116,7 +119,7 @@ const ClientRow = memo(function ClientRow({ cliente, selected, onSelect }: Clien
   return (
     <div
       onClick={handleClick}
-      style={S.row(selected)}
+      style={rowStyle(selected)}
       onMouseEnter={e => { if (!selected) e.currentTarget.style.background = '#F8FAFC' }}
       onMouseLeave={e => { if (!selected) e.currentTarget.style.background = 'transparent' }}
     >
@@ -240,12 +243,12 @@ function ClientsListComponent({
             <div key={i} style={S.skeletonRow}>
               <div style={S.skeletonCircle} />
               <div style={{ flex: 1 }}>
-                <div style={S.skeletonLine('60%', '13px', '6px')} />
-                <div style={{ ...S.skeletonLine('40%', '10px'), background: '#F1F5F9' }} />
+                <div style={skeletonLineStyle('60%', '13px', '6px')} />
+                <div style={{ ...skeletonLineStyle('40%', '10px'), background: '#F1F5F9' }} />
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ ...S.skeletonLine('60px', '12px', '4px') }} />
-                <div style={{ ...S.skeletonLine('40px', '9px'), background: '#F1F5F9' }} />
+                <div style={{ ...skeletonLineStyle('60px', '12px', '4px') }} />
+                <div style={{ ...skeletonLineStyle('40px', '9px'), background: '#F1F5F9' }} />
               </div>
             </div>
           ))
@@ -263,7 +266,7 @@ function ClientsListComponent({
             <button
               onClick={() => handlePageChange(currentPage - 1)}
               disabled={!tieneAnterior}
-              style={S.pgBtn(tieneAnterior)}
+              style={pgBtnStyle(tieneAnterior)}
             >
               <ChevronLeft style={{ width: '12px', height: '12px' }} />
             </button>
@@ -271,7 +274,7 @@ function ClientsListComponent({
             <button
               onClick={() => handlePageChange(currentPage + 1)}
               disabled={!tieneSiguiente}
-              style={S.pgBtn(tieneSiguiente)}
+              style={pgBtnStyle(tieneSiguiente)}
             >
               <ChevronRight style={{ width: '12px', height: '12px' }} />
             </button>

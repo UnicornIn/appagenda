@@ -11,7 +11,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Pencil,
-  Package,
   Loader2,
   Plus,
   Search,
@@ -52,7 +51,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../../components/ui/dialog";
-import { Avatar, AvatarFallback } from "../../../components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -555,10 +553,6 @@ export function ProductsList() {
     [productos],
   );
 
-  const scrollToCrearProducto = () => {
-    const section = document.getElementById("crear-producto-panel");
-    section?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
 
   const renderEstadoBadge = (producto: InventarioProducto) => {
     const actual = Number(producto.stock_actual ?? 0);

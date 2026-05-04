@@ -35,16 +35,6 @@ interface AppointmentSchedulerProps {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const ALL_TIMES: string[] = (() => {
-  const t: string[] = [];
-  for (let h = 5; h <= 19; h++) {
-    const maxM = h === 19 ? 0 : 59;
-    for (let m = 0; m <= maxM; m++) {
-      t.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
-    }
-  }
-  return t;
-})();
 
 const PAYMENT_METHODS = [
   { id: 'efectivo', label: 'Efectivo' },
