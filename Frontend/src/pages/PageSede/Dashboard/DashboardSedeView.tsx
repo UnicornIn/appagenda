@@ -652,7 +652,7 @@ export function DashboardSedeView({
     { name: "Tarjeta de Débito", value: metricas.metodos_pago?.tarjeta_debito || 0 },
     { name: "Efectivo", value: metricas.metodos_pago?.efectivo || 0 },
     { name: "Tarjeta", value: metricas.metodos_pago?.tarjeta || 0 },
-    { name: "Nequi / Addi", value: metricas.metodos_pago?.addi || 0 },
+    { name: "Addi", value: metricas.metodos_pago?.addi || 0 },
     { name: "Sin Pago", value: metricas.metodos_pago?.sin_pago || 0 },
     { name: "Otros", value: metricas.metodos_pago?.otros || 0 },
   ].filter((r) => r.value > 0).sort((a, b) => b.value - a.value);

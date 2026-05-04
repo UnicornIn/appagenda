@@ -39,9 +39,16 @@ interface AppointmentSchedulerProps {
 const PAYMENT_METHODS = [
   { id: 'efectivo', label: 'Efectivo' },
   { id: 'transferencia', label: 'Transferencia' },
-  { id: 'tarjeta_credito', label: 'Tarjeta' },
-  { id: 'nequi', label: 'Nequi' },
-  { id: 'daviplata', label: 'Daviplata' },
+  { id: 'tarjeta', label: 'Tarjeta' },
+  { id: 'tarjeta_credito', label: 'Tarjeta Crédito' },
+  { id: 'tarjeta_debito', label: 'Tarjeta Débito' },
+  { id: 'sin_pago', label: 'Sin pago' },
+  { id: 'otros', label: 'Otros' },
+  { id: 'addi', label: 'Addi' },
+  { id: 'giftcard', label: 'Gift Card' },
+  { id: 'link_de_pago', label: 'Link de pago' },
+  { id: 'descuento_nomina', label: 'Desc. nómina' },
+  { id: 'abono_transferencia', label: 'Abono transf.' },
 ];
 
 const MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
