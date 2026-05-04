@@ -82,7 +82,8 @@ export default function SystemUsersPage() {
     );
 
     if (sedesPermitidas.length === 0) {
-      return "No disponible en este endpoint";
+      const primarySede = getSedeDisplayName(systemUser);
+      return primarySede !== "Sin sede asignada" ? primarySede : "Sin sedes asignadas";
     }
 
     const nombres = Array.from(
