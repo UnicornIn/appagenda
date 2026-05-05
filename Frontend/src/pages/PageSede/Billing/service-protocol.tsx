@@ -588,6 +588,19 @@ export function ServiceProtocol({
         return;
       }
 
+      // Validar pago completo antes de facturar
+      if (tipo === "cita" && appointmentSnapshot) {
+        const saldoPendiente =
+          appointmentSnapshot.saldo_pendiente ??
+          ((appointmentSnapshot.valor_total || 0) - (appointmentSnapshot.abono || 0));
+        if (saldoPendiente > 0) {
+          alert(
+            `❌ No se puede facturar. Saldo pendiente: $${formatMoney(saldoPendiente)}.\n\nRegistra el pago completo antes de facturar.`
+          );
+          return;
+        }
+      }
+
       const clienteLabel =
         appointmentSnapshot?.cliente_nombre ||
         appointmentSnapshot?.cliente ||

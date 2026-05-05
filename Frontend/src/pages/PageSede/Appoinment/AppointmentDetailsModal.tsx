@@ -49,6 +49,7 @@ const RF_STATUSES = {
   pre_reservada: { color: "#F59E0B", bg: "#FFFBEB", label: "Pre-reservada" },
   confirmada:    { color: "#3B82F6", bg: "#EFF6FF", label: "Confirmada" },
   "in-progress": { color: "#8B5CF6", bg: "#F5F3FF", label: "En curso" },
+  finalizado:    { color: "#F97316", bg: "#FFF7ED", label: "Finalizado" },
   completada:    { color: "#10B981", bg: "#ECFDF5", label: "Facturada" },
   cancelada:     { color: "#EF4444", bg: "#FEF2F2", label: "Cancelada" },
   no_asistio:    { color: "#6B7280", bg: "#F3F4F6", label: "No asistió" },
@@ -65,8 +66,9 @@ const resolveRFStatus = (estado: string): RFStatusKey => {
       (s) => v.includes(s),
     )
   ) return "in-progress";
+  if (["finaliz"].some((s) => v.includes(s))) return "finalizado";
   if (
-    ["complet", "finaliz", "terminad", "realizad", "factur"].some((s) => v.includes(s))
+    ["complet", "terminad", "realizad", "factur"].some((s) => v.includes(s))
   ) return "completada";
   // "confirmada" o "confirmed" como estado explícito
   if (v === "confirmada" || v === "confirmed") return "confirmada";
@@ -2491,6 +2493,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           "pre_reservada",
           "confirmada",
           "in-progress",
+          "finalizado",
           "completada",
         ] as const;
         const currentStepIdx = STATUS_STEPS.findIndex((s) => s === rfStatus);
@@ -2512,12 +2515,14 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
           pre_reservada: "Pre-reservada",
           confirmada: "Confirmada",
           "in-progress": "En curso",
+          finalizado: "Finalizado",
           completada: "Facturada",
         };
         const stepIcon: Record<string, string> = {
           pre_reservada: "⏳",
           confirmada: "✓",
           "in-progress": "▶",
+          finalizado: "◉",
           completada: "✔",
         };
         const isPreReservada = rfStatus === "pre_reservada";
@@ -3635,17 +3640,7 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                         <><CheckCircle className="w-4 h-4" /> Confirmar cita</>
                       )}
                     </button>
-                  ) : !shouldDisableActions() ? (
-                    /* Advance to completed when no pending changes */
-                    <button
-                      onClick={() => handleUpdateStatus("completada")}
-                      className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white"
-                      style={{ background: "#1E293B" }}
-                    >
-                      Completar cita
-                    </button>
                   ) : (
-                    /* Fallback close when actions are disabled */
                     <button
                       onClick={onClose}
                       className="flex-[2] flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold"

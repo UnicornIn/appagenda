@@ -60,6 +60,8 @@ interface Appointment {
   estado_pago?: string
   abono?: number
   saldo_pendiente?: number
+  date?: string
+  appointment_date?: string
 }
 
 interface DateRange {
@@ -123,8 +125,11 @@ const getGlobalRange = (period: string, dr: DateRange): DateRange => {
   return { start_date: todayYmd, end_date: todayYmd }
 }
 
-const getAppointmentDate = (a: Appointment) =>
-  String(a.fecha || "").split("T")[0]
+const getAppointmentDate = (a: Appointment): string => {
+  const raw = String(a.fecha || a.date || a.appointment_date || "")
+  if (!raw) return new Date().toISOString().split("T")[0]
+  return raw.split("T")[0]
+}
 
 const getTimestamp = (a: Appointment): number => {
   const d = `${getAppointmentDate(a)}T${a.hora_inicio || "00:00"}:00`
@@ -274,10 +279,15 @@ export default function Billing() {
         )
       }
 
+      const isFinalizado = (estado: string) =>
+        String(estado || "").toLowerCase().includes("finaliz")
+
       const filtered = citas
         .filter((a) => {
           if (!isBillingVisible(a.estado)) return false
-          if (a.estado_pago?.toLowerCase() === "pagado") return false
+          // Citas "finalizado" siempre son visibles aunque el backend haya
+          // marcado estado_pago — todavía no han pasado por Facturación
+          if (!isFinalizado(a.estado) && a.estado_pago?.toLowerCase() === "pagado") return false
           const fecha = getAppointmentDate(a)
           return (
             fecha >= appliedRange.start_date && fecha <= appliedRange.end_date

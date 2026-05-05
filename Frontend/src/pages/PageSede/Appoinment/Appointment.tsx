@@ -92,6 +92,7 @@ const RF_STATUSES = {
   "pre-cita": { color: "#9CA3AF", bg: "#F3F4F6", label: "Pre-cita" },
   confirmed: { color: "#3B82F6", bg: "#EFF6FF", label: "Confirmada" },
   "in-progress": { color: "#8B5CF6", bg: "#F5F3FF", label: "En curso" },
+  finalizado: { color: "#F97316", bg: "#FFF7ED", label: "Finalizado" },
   completed: { color: "#10B981", bg: "#ECFDF5", label: "Facturada" },
   cancelled: { color: "#EF4444", bg: "#FEF2F2", label: "Cancelada" },
   "no-asistio": { color: "#CA8A04", bg: "#FEFCE8", label: "No asistió" },
@@ -117,8 +118,9 @@ const resolveRFStatus = (estado: string): RFStatusKey => {
     ].some((s) => v.includes(s))
   )
     return "in-progress";
+  if (["finaliz"].some((s) => v.includes(s))) return "finalizado";
   if (
-    ["complet", "finaliz", "terminad", "realizad", "factur"].some((s) =>
+    ["complet", "terminad", "realizad", "factur"].some((s) =>
       v.includes(s),
     )
   )
@@ -1038,6 +1040,9 @@ const CalendarScheduler: React.FC = () => {
       inProgress: rfActiveApts.filter(
         (a) => resolveRFStatus(a.estado) === "in-progress",
       ).length,
+      finalizado: rfActiveApts.filter(
+        (a) => resolveRFStatus(a.estado) === "finalizado",
+      ).length,
       total: appointments.reduce(
         (s, a) => s + (parseFloat(a.rawData?.valor_total || "0") || 0),
         0,
@@ -1873,6 +1878,12 @@ const CalendarScheduler: React.FC = () => {
             </b>{" "}
             en curso
           </span>
+          <span>
+            <b className="font-semibold" style={{ color: "#F97316" }}>
+              {rfSummary.finalizado}
+            </b>{" "}
+            finalizadas
+          </span>
           <span className="ml-auto">
             <b className="font-semibold" style={{ color: "#1E293B" }}>
               {formatCOP(rfSummary.total)}
@@ -2088,6 +2099,18 @@ const CalendarScheduler: React.FC = () => {
               }}
             />
             En curso
+          </span>
+          <span className="flex items-center gap-1">
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 2,
+                background: "#F97316",
+                display: "inline-block",
+              }}
+            />
+            Finalizado
           </span>
           <span className="flex items-center gap-1">
             <span
