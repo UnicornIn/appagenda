@@ -60,6 +60,8 @@ interface Appointment {
   estado_pago?: string
   abono?: number
   saldo_pendiente?: number
+  date?: string
+  appointment_date?: string
 }
 
 interface DateRange {
@@ -123,14 +125,23 @@ const getGlobalRange = (period: string, dr: DateRange): DateRange => {
   return { start_date: todayYmd, end_date: todayYmd }
 }
 
-const getAppointmentDate = (a: Appointment) =>
-  String(a.fecha || "").split("T")[0]
+const getAppointmentDate = (a: Appointment): string => {
+  const raw = String(a.fecha || a.date || a.appointment_date || "")
+  if (!raw) return new Date().toISOString().split("T")[0]
+  return raw.split("T")[0]
+}
 
 const getTimestamp = (a: Appointment): number => {
   const d = `${getAppointmentDate(a)}T${a.hora_inicio || "00:00"}:00`
   const t = new Date(d).getTime()
   return isNaN(t) ? 0 : t
 }
+
+const isFinalizado = (estado: string): boolean =>
+  String(estado || "").toLowerCase().includes("finaliz")
+
+const isFacturada = (a: Pick<Appointment, "estado" | "estado_pago">): boolean =>
+  !isFinalizado(a.estado) && a.estado_pago?.toLowerCase() === "pagado"
 
 const getInitials = (name: string): string =>
   name
@@ -277,7 +288,8 @@ export default function Billing() {
       const filtered = citas
         .filter((a) => {
           if (!isBillingVisible(a.estado)) return false
-          if (a.estado_pago?.toLowerCase() === "pagado") return false
+          // Include all billing-visible appointments: facturadas appear in the
+          // Facturadas tab; non-facturadas appear in Pendientes/Pagadas tabs.
           const fecha = getAppointmentDate(a)
           return (
             fecha >= appliedRange.start_date && fecha <= appliedRange.end_date
@@ -359,12 +371,15 @@ export default function Billing() {
   // ── Filtered + searched list ──────────────────────────────────────────────
   const filteredAppointments = useMemo(() => {
     let result = allAppointments
-    if (filterStatus === "paid")
+    if (filterStatus === "all")
+      // Facturadas: ya procesadas por billing (no finalizado + pagado)
+      result = result.filter((a) => isFacturada(a))
+    else if (filterStatus === "paid")
       // Pagadas: tienen abono registrado pero aún no están completamente facturadas
-      result = result.filter((a) => (a.abono ?? 0) > 0)
+      result = result.filter((a) => !isFacturada(a) && (a.abono ?? 0) > 0)
     else if (filterStatus === "pending")
-      // Pendientes: sin ningún pago registrado
-      result = result.filter((a) => !((a.abono ?? 0) > 0))
+      // Pendientes: sin ningún pago registrado y sin facturar
+      result = result.filter((a) => !isFacturada(a) && !((a.abono ?? 0) > 0))
     // "no-ficha" requires per-appointment ficha status — TODO: endpoint needed
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
@@ -380,16 +395,17 @@ export default function Billing() {
 
   // ── Bottom bar stats ──────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    // allAppointments ya excluye las completamente facturadas (estado_pago === "pagado")
-    const withPayment = allAppointments.filter((a) => (a.abono ?? 0) > 0)
-    const noPayment = allAppointments.filter((a) => !((a.abono ?? 0) > 0))
+    const facturadas = allAppointments.filter((a) => isFacturada(a))
+    const porFacturar = allAppointments.filter((a) => !isFacturada(a))
+    const withPayment = porFacturar.filter((a) => (a.abono ?? 0) > 0)
+    const noPayment = porFacturar.filter((a) => !((a.abono ?? 0) > 0))
     const cobrado = withPayment.reduce((s, a) => s + (a.abono ?? 0), 0)
     const pendienteAmt = noPayment.reduce(
       (s, a) => s + (a.saldo_pendiente ?? a.valor_total ?? 0),
       0,
     )
     return {
-      total: allAppointments.length,
+      total: facturadas.length,
       paid: withPayment.length,
       pending: noPayment.length,
       noFicha: 0, // TODO: requires ficha_status per appointment from scheduling/quotes/
@@ -401,7 +417,7 @@ export default function Billing() {
   const fmt = (n: number) => formatCurrencyMetric(n, currency)
 
   const filterChips: { id: FilterStatus; label: string; count: number }[] = [
-    { id: "all", label: "Todas", count: stats.total },
+    { id: "all", label: "Facturadas", count: stats.total },
     { id: "pending", label: "Pendientes", count: stats.pending },
     { id: "paid", label: "Pagadas", count: stats.paid },
     { id: "no-ficha", label: "Sin ficha", count: stats.noFicha },
@@ -543,14 +559,14 @@ export default function Billing() {
         </div>
       )}
 
-      <div className="flex flex-col h-screen bg-white overflow-hidden">
+      <div className="flex flex-col h-screen bg-white">
         <Sidebar />
 
         {/* ── Body (nav-bar-height accounted for by flex-col above) ─────────── */}
-        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex flex-1 min-h-0">
 
         {/* ── Main ─────────────────────────────────────────────────────────── */}
-        <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+        <div className="flex flex-1 flex-col min-w-0 overflow-y-auto">
 
           {/* Header */}
           <div className="px-8 pt-6 pb-0 flex justify-between items-start flex-shrink-0">
@@ -723,7 +739,7 @@ export default function Billing() {
           </div>
 
           {/* Appointment list */}
-          <div className="flex-1 overflow-y-auto px-8 pb-2 min-h-0">
+          <div className="px-8 pb-2">
             {/* Column headers */}
             <div className="flex items-center px-3.5 mb-1">
               <span className="flex-1 text-[9px] font-bold uppercase tracking-[0.5px] text-gray-400 pl-11">
@@ -854,7 +870,7 @@ export default function Billing() {
           {/* Bottom bar */}
           <div className="px-8 py-2.5 border-t border-gray-200 bg-gray-50 flex justify-between items-center text-xs text-gray-500 flex-shrink-0">
             <div>
-              <b className="text-gray-700">{stats.total}</b> citas ·{" "}
+              <b className="text-gray-700">{stats.total}</b> facturadas ·{" "}
               <b className="text-gray-700">{stats.paid}</b> pagadas ·{" "}
               <b className="text-gray-700">{stats.pending}</b> pendientes ·{" "}
               <b className="text-gray-700">{stats.noFicha}</b> sin ficha
@@ -881,9 +897,11 @@ export default function Billing() {
                 onClose={() => setSelectedAppointment(null)}
                 onAppointmentUpdated={(updated) => {
                   if (updated.estado_pago?.toLowerCase() === "pagado") {
-                    // Cita completamente facturada: quitar de la lista y cerrar panel
+                    // Cita completamente facturada: actualizar en lista (aparecerá en tab Facturadas)
                     setAllAppointments((prev) =>
-                      prev.filter((a) => a._id !== updated._id),
+                      prev.map((a) =>
+                        a._id === updated._id ? { ...a, ...updated } : a,
+                      ),
                     )
                     setSelectedAppointment(null)
                   } else {
