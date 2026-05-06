@@ -30,7 +30,7 @@ async def crear_salida(
     current_user: dict = Depends(get_current_user),
 ):
     rol = current_user["rol"]
-    if rol not in ["admin_sede", "admin_franquicia", "super_admin"]:
+    if rol not in ["admin_sede", "admin_franquicia", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado para registrar salidas")
 
     data = salida.dict()
@@ -122,7 +122,7 @@ async def listar_salidas(
     current_user: dict = Depends(get_current_user),
 ):
     rol = current_user["rol"]
-    if rol not in ["admin_sede", "admin_franquicia", "super_admin"]:
+    if rol not in ["admin_sede", "admin_franquicia", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado para listar salidas")
 
     inicio, fin = resolver_rango(dias, fecha_desde, fecha_hasta)

@@ -103,7 +103,7 @@ async def listar_movimientos(
     current_user: dict = Depends(get_current_user),
 ):
     rol = current_user.get("rol")
-    if rol not in ["admin_sede", "super_admin", "recepcionista"]:
+    if rol not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     effective_sede = current_user.get("sede_id") if rol in ["admin_sede", "recepcionista"] else sede_id
@@ -140,6 +140,9 @@ async def listar_movimientos(
     if tipo:
         rows = [r for r in rows if r["tipo"].lower() == tipo.lower()]
 
+    if producto_id:
+        rows = [r for r in rows if r["producto_id"] == producto_id]
+
     # Ordenar por fecha desc
     rows.sort(key=lambda r: r["fecha"], reverse=True)
 
@@ -175,10 +178,10 @@ async def top_productos(
     Considera ventas automáticas (venta_cita + venta_venta).
     """
     rol = current_user.get("rol")
-    if rol not in ["admin_sede", "super_admin", "recepcionista"]:
+    if rol not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
-    if rol in ["admin_sede", "recepcionista"]:
+    if rol in ["admin_sede", "recepcionista", "call_center"]:
         effective_sede = current_user.get("sede_id")
     else:
         effective_sede = sede_id
@@ -238,10 +241,10 @@ async def productos_sin_movimiento(
     Productos que tienen stock pero no han tenido ventas en los últimos N días.
     """
     rol = current_user.get("rol")
-    if rol not in ["admin_sede", "super_admin", "recepcionista"]:
+    if rol not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
-    if rol in ["admin_sede", "recepcionista"]:
+    if rol in ["admin_sede", "recepcionista", "call_center"]:
         effective_sede = current_user.get("sede_id")
     else:
         effective_sede = sede_id

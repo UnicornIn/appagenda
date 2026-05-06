@@ -117,7 +117,7 @@ async def facturar_cita_o_venta(
     print(f"🔍 Facturar invocada por {current_user.get('email')} (rol={current_user.get('rol')})")
     print(f"📋 ID: {id}, Tipo: {tipo}")
 
-    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado para facturar")
 
     # ====================================
@@ -1080,7 +1080,7 @@ async def obtener_ventas_sede(
     sort_order: str = Query("desc", regex=r"^(asc|desc)$"),
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin","recepcionista", "estilista"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin","recepcionista", "estilista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     try:
@@ -1177,7 +1177,7 @@ async def obtener_ventas_sede(
 # ============================================================
 @router.get("/sales/{sede_id}/{venta_id}")
 async def obtener_detalle_venta(sede_id: str, venta_id: str, current_user: dict = Depends(get_current_user)):
-    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "estilista"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "estilista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     try:
