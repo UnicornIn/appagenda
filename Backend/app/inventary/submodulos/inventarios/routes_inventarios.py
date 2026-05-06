@@ -180,7 +180,7 @@ async def ajustar_inventario(
 ):
 
     rol = current_user.get("rol")
-    if rol not in ["admin_sede", "super_admin", "recepcionista"]:
+    if rol not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado para ajustar inventario")
 
     inventario = await collection_inventarios.find_one({"_id": ObjectId(inventario_id)})

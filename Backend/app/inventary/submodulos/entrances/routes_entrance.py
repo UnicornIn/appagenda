@@ -33,7 +33,7 @@ async def crear_entrada(
     Suma al inventario de la sede y guarda en inventory_reports.
     """
     rol = current_user["rol"]
-    if rol not in ["admin_sede", "super_admin"]:
+    if rol not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado para registrar entradas")
 
     data = entrada.dict()
@@ -124,7 +124,7 @@ async def listar_entradas(
     current_user: dict = Depends(get_current_user),
 ):
     rol = current_user["rol"]
-    if rol not in ["admin_sede", "super_admin"]:
+    if rol not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     inicio, fin = resolver_rango(dias, fecha_desde, fecha_hasta)
