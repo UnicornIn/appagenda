@@ -914,4 +914,31 @@ ${datos.observaciones_generales || 'Ninguna'}`;
     }
   },
 
+  async generarPDFCita(token: string, clienteId: string, citaId: string): Promise<Blob> {
+    const response = await fetch(
+      `${API_BASE_URL}api/pdf/generar-pdf/${clienteId}/${citaId}`,
+      { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/pdf' } }
+    );
+    if (!response.ok) throw new Error(`Error ${response.status}`);
+    const blob = await response.blob();
+    if (blob.size === 0 || !blob.type.includes('pdf')) throw new Error('PDF inválido');
+    return blob;
+  },
+
+  async generarPDFDesdeFicha(token: string, clienteId: string, ficha: any): Promise<void> {
+    const citaId = ficha.datos_especificos?.cita_id;
+    if (!citaId) throw new Error('La ficha no tiene un cita_id asociado');
+    const blob = await this.generarPDFCita(token, clienteId, citaId);
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const timestamp = new Date().toISOString().split('T')[0];
+    const nombre = (ficha.nombre || 'cliente').replace(/\s+/g, '_').toLowerCase();
+    const servicio = (ficha.servicio_nombre || ficha.servicio || 'servicio').replace(/\s+/g, '_').toLowerCase().substring(0, 30);
+    link.download = `comprobante_${nombre}_${servicio}_${timestamp}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => { document.body.removeChild(link); window.URL.revokeObjectURL(url); }, 100);
+  },
+
 };

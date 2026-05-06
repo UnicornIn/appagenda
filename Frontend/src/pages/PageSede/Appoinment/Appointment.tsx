@@ -5,7 +5,7 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { Plus, User, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, User, X, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { Sidebar } from "../../../components/Layout/Sidebar";
 import Bloqueos from "../../../components/Quotes/Bloqueos";
 import AppointmentScheduler from "../../../components/Quotes/AppointmentForm";
@@ -21,6 +21,7 @@ import { AgendaDatePicker } from "./AgendaDatePicker";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import {
   getBloqueosEstilista,
+  deleteBloqueo,
   type Bloqueo,
 } from "../../../components/Quotes/bloqueosApi";
 import { extractAgendaAdditionalNotes } from "../../../lib/agenda";
@@ -304,6 +305,9 @@ const CalendarScheduler: React.FC = () => {
   const [loadingBloqueos, setLoadingBloqueos] = useState(false);
   const [selectedBloqueo, setSelectedBloqueo] =
     useState<BloqueoCalendario | null>(null);
+  const [bloqueoAEliminar, setBloqueoAEliminar] =
+    useState<BloqueoCalendario | null>(null);
+  const [eliminandoBloqueo, setEliminandoBloqueo] = useState(false);
   const [calendarViewportWidth, setCalendarViewportWidth] = useState(0);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
@@ -1142,6 +1146,20 @@ const CalendarScheduler: React.FC = () => {
     handleClose();
   }, [cargarCitas, cargarEstilistas, cargarBloqueos, handleClose]);
 
+  const handleConfirmarEliminarBloqueo = useCallback(async () => {
+    if (!bloqueoAEliminar || !user?.access_token) return;
+    setEliminandoBloqueo(true);
+    try {
+      await deleteBloqueo(bloqueoAEliminar._id, user.access_token);
+      setBloqueoAEliminar(null);
+      cargarBloqueos();
+    } catch (error) {
+      console.error("Error eliminando bloqueo:", error);
+    } finally {
+      setEliminandoBloqueo(false);
+    }
+  }, [bloqueoAEliminar, user, cargarBloqueos]);
+
   const overlapsSlot = useCallback(
     (startMinutes: number, endMinutes: number, slotStartMinutes: number) => {
       const slotEndMinutes = slotStartMinutes + SLOT_INTERVAL_MINUTES;
@@ -1665,13 +1683,23 @@ const CalendarScheduler: React.FC = () => {
       return (
         <div
           data-hover-source="bloqueo"
-          className="absolute z-10 rounded-md border border-gray-300/70 bg-gradient-to-b from-gray-100 to-gray-50 shadow-sm overflow-hidden pointer-events-auto cursor-pointer"
+          className="absolute z-10 rounded-md border border-gray-300/70 bg-gradient-to-b from-gray-100 to-gray-50 shadow-sm overflow-hidden pointer-events-auto cursor-pointer group"
           style={{ ...position, minHeight: 40 }}
           onClick={handleBloqueoClick}
           onMouseEnter={handleBloqueoMouseEnter}
           onMouseMove={handleBloqueoMouseMove}
           onMouseLeave={handleBloqueoMouseLeave}
         >
+          <button
+            className="absolute top-1 right-1 z-20 p-1 rounded bg-white/80 hover:bg-red-50 text-gray-400 hover:text-red-500"
+            onClick={(e) => {
+              e.stopPropagation();
+              setBloqueoAEliminar(bloqueo);
+            }}
+            title="Eliminar bloqueo"
+          >
+            <Trash2 size={14} />
+          </button>
           <div className="h-full w-full px-2 py-1 flex flex-col overflow-hidden">
             <div className="text-[10px] font-bold uppercase tracking-wide text-gray-800 truncate">
               Bloq
@@ -2337,6 +2365,38 @@ const CalendarScheduler: React.FC = () => {
             estilistas={estilistas}
             onClose={handleCitaCreada}
           />
+        </Modal>
+      )}
+
+      {bloqueoAEliminar && (
+        <Modal
+          open={!!bloqueoAEliminar}
+          onClose={() => setBloqueoAEliminar(null)}
+          title="Eliminar bloqueo"
+          size="sm"
+        >
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-gray-700">
+              ¿Eliminar el bloqueo <strong>{bloqueoAEliminar.motivo || "sin motivo"}</strong> de{" "}
+              {bloqueoAEliminar.hora_inicio}–{bloqueoAEliminar.hora_fin}?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                className="px-4 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50"
+                onClick={() => setBloqueoAEliminar(null)}
+                disabled={eliminandoBloqueo}
+              >
+                Cancelar
+              </button>
+              <button
+                className="px-4 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
+                onClick={handleConfirmarEliminarBloqueo}
+                disabled={eliminandoBloqueo}
+              >
+                {eliminandoBloqueo ? "Eliminando..." : "Eliminar"}
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

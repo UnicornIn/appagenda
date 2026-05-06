@@ -5,6 +5,7 @@ import type { Cliente } from "../../../types/cliente"
 import { EditClientModal } from "./EditClientModal"
 import { clientesService } from "./clientesService"
 import { useAuth } from "../../../components/Auth/AuthContext"
+import { API_BASE_URL } from "../../../types/config"
 
 interface ClientDetailProps {
   client: Cliente
@@ -46,9 +47,9 @@ const tabStyle = (active: boolean): CSSProperties => ({
   padding: '10px 16px', fontSize: '12px',
   fontWeight: active ? 600 : 500,
   color: active ? '#1E293B' : '#64748B',
+  borderTop: 'none', borderLeft: 'none', borderRight: 'none',
   borderBottom: `2px solid ${active ? '#1E293B' : 'transparent'}`,
-  cursor: 'pointer', background: 'none', border: 'none',
-  borderBottomStyle: 'solid', fontFamily: 'inherit',
+  cursor: 'pointer', background: 'none', fontFamily: 'inherit',
 })
 
 const recFillStyle = (pct: number): CSSProperties => ({
@@ -276,6 +277,44 @@ function ResumenTab({ client }: { client: Cliente }) {
 function CapilarTab({ client }: { client: Cliente }) {
   const lastFicha = client.fichas?.[0]
   const datos = lastFicha?.datos_especificos
+  const { user } = useAuth()
+  const [verTodas, setVerTodas] = useState(false)
+  const [descargando, setDescargando] = useState<string | null>(null)
+
+  const fichas = client.fichas ?? []
+  const fichasMostradas = verTodas ? fichas : fichas.slice(0, 5)
+
+  const getCitaId = (ficha: any): string | undefined =>
+    ficha.contenido?.cita_id ||
+    ficha.datos_especificos?.cita_id ||
+    ficha.cita_id
+
+  const handleDescargar = async (ficha: any) => {
+    const token = user?.access_token || localStorage.getItem('access_token') || sessionStorage.getItem('access_token')
+    const citaId = getCitaId(ficha)
+    if (!citaId || !token) return
+    const fichaKey = ficha._id || ficha.id
+    setDescargando(fichaKey)
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}api/pdf/generar-pdf/${client.id}/${citaId}`,
+        { headers: { Authorization: `Bearer ${token}`, Accept: 'application/pdf' } },
+      )
+      if (!res.ok) throw new Error(`Error ${res.status}`)
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `ficha_${(ficha.nombre || 'cliente').replace(/\s+/g, '_').toLowerCase()}_${(ficha.fecha_ficha || '').split('T')[0]}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      setTimeout(() => { document.body.removeChild(link); window.URL.revokeObjectURL(url) }, 100)
+    } catch {
+      // silent
+    } finally {
+      setDescargando(null)
+    }
+  }
 
   return (
     <>
@@ -312,8 +351,81 @@ function CapilarTab({ client }: { client: Cliente }) {
         <div style={S.sTitle}>Estado actual del cabello</div>
         <div style={{ ...S.infoItem, gridColumn: '1/-1', padding: '16px', borderRadius: '8px' }}>
           <div style={{ ...S.infoValue, fontSize: '14px', lineHeight: '1.6' }}>
-            {datos?.observaciones_generales || lastFicha?.notas_cliente || client.nota || '—'}
+            {datos?.observaciones_generales || lastFicha?.notas_cliente || client.nota || 'Sin notas'}
           </div>
+        </div>
+
+        <div style={{ marginTop: '16px', borderTop: '1px solid #F1F5F9', paddingTop: '14px' }}>
+          <div style={S.sTitle}>Fichas del cliente</div>
+          {fichas.length === 0 ? (
+            <div style={{ fontSize: '12px', color: '#94A3B8' }}>Sin fichas registradas</div>
+          ) : (
+            <>
+              <table style={S.hTable}>
+                <thead>
+                  <tr>
+                    <th style={S.hTh}>Fecha</th>
+                    <th style={S.hTh}>Servicio</th>
+                    <th style={S.hTh}>Profesional</th>
+                    <th style={S.hTh}>Sede</th>
+                    <th style={{ ...S.hTh, textAlign: 'right' as const }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fichasMostradas.map((ficha: any) => {
+                    const fichaKey = ficha._id || ficha.id
+                    const tieneCitaId = !!getCitaId(ficha)
+                    return (
+                      <tr key={fichaKey}>
+                        <td style={{ ...S.hTd, fontSize: '11px', color: '#64748B', whiteSpace: 'nowrap' as const }}>
+                          {fmtDate(ficha.fecha_ficha)}
+                        </td>
+                        <td style={{ ...S.hTd, fontWeight: 600 }}>
+                          {ficha.servicio_nombre || ficha.servicio || '—'}
+                        </td>
+                        <td style={{ ...S.hTd, color: '#64748B' }}>
+                          {ficha.profesional_nombre || '—'}
+                        </td>
+                        <td style={{ ...S.hTd, color: '#64748B' }}>
+                          {ficha.sede_nombre || ficha.sede || '—'}
+                        </td>
+                        <td style={{ ...S.hTd, textAlign: 'right' as const }}>
+                          {tieneCitaId ? (
+                            <button
+                              onClick={() => handleDescargar(ficha)}
+                              disabled={descargando === fichaKey}
+                              style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                fontSize: '11px',
+                                color: descargando === fichaKey ? '#CBD5E1' : '#64748B',
+                                fontFamily: 'inherit', padding: '2px 0',
+                                display: 'inline-flex', alignItems: 'center', gap: '3px',
+                              }}
+                            >
+                              {descargando === fichaKey ? 'Descargando...' : '↓ Descargar'}
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: '10px', color: '#CBD5E1' }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              {fichas.length > 5 && (
+                <button
+                  onClick={() => setVerTodas(v => !v)}
+                  style={{
+                    marginTop: '8px', background: 'none', border: 'none', cursor: 'pointer',
+                    fontSize: '11px', color: '#64748B', fontFamily: 'inherit', padding: 0,
+                  }}
+                >
+                  {verTodas ? 'Ver menos' : `Ver todas (${fichas.length})`}
+                </button>
+              )}
+            </>
+          )}
         </div>
       </div>
 
