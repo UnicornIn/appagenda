@@ -78,7 +78,41 @@ export const updateQuote = async (citaId: string, cambios: any, token: string) =
 };
 
 export const updateCita = updateQuote;
-// En tu archivo citasApi.ts
+
+export const confirmarCita = async (citaId: string, token?: string) => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const response = await fetch(
+    `${API_BASE_URL}scheduling/quotes/${citaId}/confirmar`,
+    { method: 'POST', headers }
+  );
+  if (!response.ok) {
+    throw await buildApiRequestError(response, 'Error al confirmar cita');
+  }
+  return await response.json();
+};
+
+export const reenviarCorreoCita = async (
+  citaId: string,
+  tipo: 'confirmacion' | 'recordatorio' | 'cancelacion',
+  token: string
+) => {
+  const response = await fetch(
+    `${API_BASE_URL}scheduling/quotes/citas/${citaId}/reenviar-correo?tipo=${tipo}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    }
+  );
+  if (!response.ok) {
+    throw await buildApiRequestError(response, 'Error al reenviar correo');
+  }
+  return await response.json();
+};
+
 export const registrarPagoCita = async (
   citaId: string,
   pagoData: {

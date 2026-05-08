@@ -419,6 +419,21 @@ export function DashboardSedeView({
           metricas_por_moneda: aggregateMetricasByCurrency(valid),
         });
         await loadChurnData(baseRange?.start, baseRange?.end);
+
+        try {
+          const invoiceRange = buildInvoiceRange();
+          const facturasArrays = await Promise.all(
+            sedesIds.map(async (sid) => {
+              try { return await facturaService.getVentasBySedeAllPages(sid, invoiceRange.start_date, invoiceRange.end_date); }
+              catch { return []; }
+            })
+          );
+          const todasFacturas = facturasArrays.flat();
+          if (todasFacturas.length > 0) {
+            setRealMetricasByCurrency(buildRealMetricasFromFacturas(todasFacturas));
+            setExtendedMetrics(buildExtendedMetrics(todasFacturas));
+          }
+        } catch { /* silent */ }
       } else {
         const params = { ...baseParams, sede_id: sedeId, sede_header_id: sedeId };
         const [ventasData] = await Promise.all([
@@ -665,8 +680,9 @@ export function DashboardSedeView({
       : 0;
   const recurrentes = Math.max(0, clientesUnicos - nuevosClientes);
   const pctRecurrentes = clientesUnicos > 0 ? Math.round((recurrentes / clientesUnicos) * 100) : 0;
-  const churnEnRiesgo = churnData.filter((c) => c.dias_inactivo >= 61 && c.dias_inactivo <= 90).length;
-  const churnPerdidos = churnData.filter((c) => c.dias_inactivo > 90).length;
+  const churnActivos = churnData.filter((c) => c.dias_inactivo >= 0 && c.dias_inactivo <= 120).length;
+  const churnEnRiesgo = churnData.filter((c) => c.dias_inactivo >= 121 && c.dias_inactivo <= 180).length;
+  const churnPerdidos = churnData.filter((c) => c.dias_inactivo > 180).length;
 
   const isSpecificSede = sedeId !== "global";
 
@@ -818,17 +834,15 @@ export function DashboardSedeView({
         <Card title="Estado de la base">
           {churnData.length > 0 ? (
             <>
-              <RowItem name="Activos (0–30 días)" value="–" sub="datos no disponibles" />
-              <RowItem name="Tibios (31–60 días)" value="–" sub="datos no disponibles" />
-              <RowItem name="En riesgo (61–90 días)" value={String(churnEnRiesgo)} sub="detectados" />
-              <RowItem name="Perdidos (90+ días)" value={String(churnPerdidos)} sub="detectados" />
+              <RowItem name="Activos (0–120 días)" value={String(churnActivos)} sub="detectados" />
+              <RowItem name="En riesgo (121–180 días)" value={String(churnEnRiesgo)} sub="detectados" />
+              <RowItem name="Perdidos (181+ días)" value={String(churnPerdidos)} sub="detectados" />
             </>
           ) : (
             <>
-              <RowItem name="Activos (0–30 días)" value="–" />
-              <RowItem name="Tibios (31–60 días)" value="–" />
-              <RowItem name="En riesgo (61–90 días)" value="–" />
-              <RowItem name="Perdidos (90+ días)" value="–" />
+              <RowItem name="Activos (0–120 días)" value="–" />
+              <RowItem name="En riesgo (121–180 días)" value="–" />
+              <RowItem name="Perdidos (181+ días)" value="–" />
             </>
           )}
           <div className="mt-1.5 text-[10px] text-slate-400">
