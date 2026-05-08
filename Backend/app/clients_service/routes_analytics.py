@@ -53,17 +53,6 @@ async def clientes_analytics(
     sede_id: Optional[str] = Query(None, description="Filtrar por sede"),
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Métricas agregadas de clientes que el frontend necesita y antes no existían.
-
-    Devuelve:
-    - **ltv_promedio**: LTV promedio entre todos los clientes con ventas.
-    - **recurrencia_promedio_dias**: Promedio de días entre visitas consecutivas.
-    - **nuevos_por_mes**: Historial mensual de clientes nuevos (últimos 12 meses).
-    - **estado_base**: Conteo de clientes activos / tibios / fríos / churn.
-
-    🔒 Requiere autenticación. admin_sede solo ve su sede.
-    """
     allowed = {"admin_sede", "admin_franquicia", "super_admin", "recepcionista", "call_center"}
     if current_user.get("rol") not in allowed:
         raise HTTPException(status_code=403, detail="No autorizado.")
@@ -73,70 +62,85 @@ async def clientes_analytics(
     tz = ZoneInfo(zona)
     ahora = datetime.now(tz)
 
-    # ── 1. LTV promedio ────────────────────────────────────────────────────────
-    ltv_pipeline = [
-        *([ {"$match": {"sede_id": sede_efectiva}} ] if sede_efectiva else []),
-        {"$match": {"total_gastado": {"$exists": True, "$gt": 0}}},
+    # Filtro base de sede/franquicia
+    match_base = {}
+    if sede_efectiva:
+        match_base["sede_id"] = sede_efectiva
+
+    # ── Pipeline único que calcula todo de una vez ─────────────────────────
+    pipeline = [
+        *([ {"$match": match_base} ] if match_base else []),
         {"$group": {
             "_id": None,
-            "ltv_promedio": {"$avg": "$total_gastado"},
-            "total_clientes_con_ltv": {"$sum": 1}
+            # LTV promedio — usa ltv_proyectado (ticket × frecuencia_anual × retención)
+            "ltv_promedio": {
+                "$avg": {
+                    "$cond": [
+                        {"$and": [
+                            {"$gt": ["$ltv_proyectado", 0]},
+                            {"$ifNull": ["$ltv_proyectado", False]}
+                        ]},
+                        "$ltv_proyectado", "$$REMOVE"
+                    ]
+                }
+            },
+            # Ticket promedio del negocio
+            "ticket_promedio_negocio": {
+                "$avg": {
+                    "$cond": [{"$gt": ["$ticket_promedio", 0]}, "$ticket_promedio", "$$REMOVE"]
+                }
+            },
+            # Recurrencia promedio — usa frecuencia_dias ya calculada en cada cliente
+            "recurrencia_promedio": {
+                "$avg": {
+                    "$cond": [
+                        {"$and": [
+                            {"$gt": ["$frecuencia_dias", 0]},
+                            {"$ifNull": ["$frecuencia_dias", False]}
+                        ]},
+                        "$frecuencia_dias", "$$REMOVE"
+                    ]
+                }
+            },
+            # Segmentos — alineados con las definiciones oficiales
+            "activos":    {"$sum": {"$cond": [{"$eq": ["$segmento", "Activo"]},    1, 0]}},
+            "en_riesgo":  {"$sum": {"$cond": [{"$eq": ["$segmento", "En riesgo"]}, 1, 0]}},
+            "perdidos":   {"$sum": {"$cond": [{"$eq": ["$segmento", "Perdido"]},   1, 0]}},
+            "nuevos":     {"$sum": {"$cond": [{"$eq": ["$segmento", "Nuevo"]},     1, 0]}},
+            "sin_visita": {"$sum": {"$cond": [
+                {"$or": [
+                    {"$not": {"$ifNull": ["$ultima_visita", False]}},
+                    {"$eq": ["$dias_sin_visitar", 0]}
+                ]}, 1, 0
+            ]}},
+            # Clientes recurrentes: frecuencia_dias <= 120 días
+            "recurrentes": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$ifNull": ["$frecuencia_dias", False]},
+                    {"$lte": ["$frecuencia_dias", 120]}
+                ]}, 1, 0
+            ]}},
+            "con_frecuencia": {"$sum": {"$cond": [
+                {"$ifNull": ["$frecuencia_dias", False]}, 1, 0
+            ]}},
+            "total": {"$sum": 1}
         }}
     ]
-    ltv_result = await collection_clients.aggregate(ltv_pipeline).to_list(1)
-    ltv_promedio = round((ltv_result[0]["ltv_promedio"] if ltv_result else 0), 2)
-    total_clientes_con_ltv = ltv_result[0]["total_clientes_con_ltv"] if ltv_result else 0
 
-    # ── 2. Recurrencia promedio (días entre visitas) ───────────────────────────
-    # Agrupamos collection_sales por cliente, ordenamos fechas y promediamos gaps.
-    # Para no matar la DB con millones de docs, limitamos a los últimos 12 meses.
-    fecha_hace_12m = ahora - timedelta(days=365)
-    recurrencia_pipeline = [
-        {"$match": {
-            "fecha_pago": {"$gte": fecha_hace_12m},
-            **({"sede_id": sede_efectiva} if sede_efectiva else {})
-        }},
-        {"$group": {
-            "_id": "$cliente_id",
-            "fechas": {"$push": "$fecha_pago"}
-        }},
-        # Solo clientes con ≥ 2 visitas tienen recurrencia calculable
-        {"$match": {"fechas.1": {"$exists": True}}},
-        {"$project": {
-            "fechas_sorted": {
-                "$sortArray": {"input": "$fechas", "sortBy": 1}
-            }
-        }}
-    ]
-    ventas_por_cliente = await collection_sales.aggregate(recurrencia_pipeline).to_list(None)
+    resultado = await collection_clients.aggregate(pipeline).to_list(1)
+    r = resultado[0] if resultado else {}
+    r.pop("_id", None)
 
-    gaps_dias: List[float] = []
-    for doc in ventas_por_cliente:
-        fechas = doc["fechas_sorted"]
-        for i in range(1, len(fechas)):
-            f_prev = fechas[i - 1]
-            f_curr = fechas[i]
-            # Normalizar a datetime naive si vienen con tz
-            if hasattr(f_prev, "tzinfo") and f_prev.tzinfo:
-                f_prev = f_prev.replace(tzinfo=None)
-            if hasattr(f_curr, "tzinfo") and f_curr.tzinfo:
-                f_curr = f_curr.replace(tzinfo=None)
-            delta = (f_curr - f_prev).days
-            if 0 < delta <= 365:  # filtramos outliers (mismo día o > 1 año)
-                gaps_dias.append(delta)
-
-    recurrencia_promedio = round(sum(gaps_dias) / len(gaps_dias), 1) if gaps_dias else None
-    clientes_con_recurrencia = len(ventas_por_cliente)
-
-    # ── 3. Nuevos clientes por mes (últimos 12 meses) ─────────────────────────
+    # Nuevos clientes por mes (últimos 12 meses)
+    fecha_hace_12m = ahora.replace(tzinfo=None) - timedelta(days=365)
     nuevos_pipeline = [
         {"$match": {
             "fecha_creacion": {"$gte": fecha_hace_12m},
-            **({"sede_id": sede_efectiva} if sede_efectiva else {})
+            **(match_base if match_base else {})
         }},
         {"$group": {
             "_id": {
-                "year": {"$year": "$fecha_creacion"},
+                "year":  {"$year":  "$fecha_creacion"},
                 "month": {"$month": "$fecha_creacion"}
             },
             "cantidad": {"$sum": 1}
@@ -146,68 +150,46 @@ async def clientes_analytics(
     nuevos_raw = await collection_clients.aggregate(nuevos_pipeline).to_list(None)
     nuevos_por_mes = [
         {
-            "periodo": f"{r['_id']['year']}-{r['_id']['month']:02d}",
-            "cantidad": r["cantidad"]
+            "periodo":  f"{row['_id']['year']}-{row['_id']['month']:02d}",
+            "cantidad": row["cantidad"]
         }
-        for r in nuevos_raw
+        for row in nuevos_raw
     ]
 
-    # ── 4. Estado base completo ───────────────────────────────────────────────
-    # Activo  → última visita ≤ 30 días
-    # Tibio   → 31–60 días
-    # Frío    → 61–90 días
-    # Churn   → > 90 días o sin visita registrada
-    estado_pipeline = [
-        *([ {"$match": {"sede_id": sede_efectiva}} ] if sede_efectiva else []),
-        {"$group": {
-            "_id": None,
-            "activo":  {"$sum": {"$cond": [{"$and": [
-                {"$gt": ["$dias_sin_visitar", 0]},
-                {"$lte": ["$dias_sin_visitar", 30]}
-            ]}, 1, 0]}},
-            "tibio":   {"$sum": {"$cond": [{"$and": [
-                {"$gt": ["$dias_sin_visitar", 30]},
-                {"$lte": ["$dias_sin_visitar", 60]}
-            ]}, 1, 0]}},
-            "frio":    {"$sum": {"$cond": [{"$and": [
-                {"$gt": ["$dias_sin_visitar", 60]},
-                {"$lte": ["$dias_sin_visitar", 90]}
-            ]}, 1, 0]}},
-            "churn":   {"$sum": {"$cond": [
-                {"$gt": ["$dias_sin_visitar", 90]}, 1, 0
-            ]}},
-            "sin_visita": {"$sum": {"$cond": [
-                {"$or": [
-                    {"$eq": ["$dias_sin_visitar", None]},
-                    {"$eq": ["$dias_sin_visitar", 0]}
-                ]}, 1, 0
-            ]}},
-            "total": {"$sum": 1}
-        }}
-    ]
-    estado_raw = await collection_clients.aggregate(estado_pipeline).to_list(1)
-    estado_base = estado_raw[0] if estado_raw else {
-        "activo": 0, "tibio": 0, "frio": 0, "churn": 0, "sin_visita": 0, "total": 0
-    }
-    estado_base.pop("_id", None)
+    recurrencia_dias = r.get("recurrencia_promedio")
+    ltv_prom = r.get("ltv_promedio", 0) or 0
+    ticket_prom = r.get("ticket_promedio_negocio", 0) or 0
+    total = r.get("total", 0)
+    con_frecuencia = r.get("con_frecuencia", 0)
 
-    # ── Respuesta ──────────────────────────────────────────────────────────────
     return {
         "success": True,
         "sede_id": sede_efectiva,
         "zona_horaria": zona,
         "generado_en": ahora.isoformat(),
         "ltv": {
-            "ltv_promedio": ltv_promedio,
-            "clientes_con_datos": total_clientes_con_ltv,
-            "nota": "Promedio de total_gastado entre clientes con al menos una venta"
+            # LTV = ticket_promedio × frecuencia_anual × tiempo_retención (3 años)
+            "ltv_promedio":        round(ltv_prom),
+            "ticket_promedio":     round(ticket_prom),
+            "clientes_con_datos":  con_frecuencia,
+            "formula": "ticket_promedio × (365 / frecuencia_dias) × 3 años"
         },
         "recurrencia": {
-            "promedio_dias": recurrencia_promedio,
-            "clientes_analizados": clientes_con_recurrencia,
-            "ventana_analisis": "últimos 12 meses",
-            "nota": "Promedio de días entre visitas consecutivas del mismo cliente"
+            # Cada cuántos días vuelve un cliente en promedio
+            "promedio_dias":    round(recurrencia_dias) if recurrencia_dias else None,
+            "texto":            f"Cada {round(recurrencia_dias)} días" if recurrencia_dias else "Sin datos",
+            "clientes_recurrentes":  r.get("recurrentes", 0),     # frecuencia <= 120 días
+            "total_con_frecuencia":  con_frecuencia,
+            "pct_recurrentes": round(r.get("recurrentes", 0) / con_frecuencia * 100) if con_frecuencia else 0,
+            "nota": "Recurrente = vuelve mínimo cada 120 días"
+        },
+        "estado_base": {
+            "activos":   r.get("activos", 0),     # 0-120 días
+            "en_riesgo": r.get("en_riesgo", 0),   # 121-180 días
+            "perdidos":  r.get("perdidos", 0),    # +181 días
+            "nuevos":    r.get("nuevos", 0),       # sin citas aún
+            "sin_visita": r.get("sin_visita", 0),
+            "total":     total,
         },
         "nuevos_por_mes": nuevos_por_mes,
-        "estado_base": estado_base
     }

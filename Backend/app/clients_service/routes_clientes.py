@@ -1230,18 +1230,12 @@ async def calcular_analytics_cliente(cliente_id: str, hoy: datetime) -> dict | N
 
     # ── Segmento ──────────────────────────────────────────────────────────
     # Primero detectar si el cliente está perdido
-    if dias_sin_venir > 365:
-        segmento = "Inactivo"
-    elif dias_sin_venir > 180 or (en_riesgo and tendencia_pct <= -80):
+    if dias_sin_venir > 180:
+        segmento = "Perdido"
+    elif dias_sin_venir > 120:
         segmento = "En riesgo"
-    elif count < 2:
-        segmento = "Nuevo"       # solo 1 visita, sin data suficiente
-    elif ltv_proyectado >= 3_000_000 and count >= 3:
-        segmento = "VIP"
-    elif ltv_proyectado >= 1_000_000 and count >= 3:
-        segmento = "Premium"
     else:
-        segmento = "Regular"
+        segmento = "Activo"
     return {
         # Valores guardados en DB
         "total_gastado":    round(s["total_gastado"], 2),
@@ -1354,18 +1348,12 @@ async def backfill_client_analytics(
             )
 
             # Segmento
-            if dias_sin_venir > 365:
-                segmento = "Inactivo"
-            elif dias_sin_venir > 180 or (en_riesgo and tendencia_pct <= -80):
+            if dias_sin_venir > 180:
+                segmento = "Perdido"
+            elif dias_sin_venir > 120:
                 segmento = "En riesgo"
-            elif count < 2:
-                segmento = "Nuevo"
-            elif ltv_proyectado >= 3_000_000 and count >= 3:
-                segmento = "VIP"
-            elif ltv_proyectado >= 1_000_000 and count >= 3:
-                segmento = "Premium"
             else:
-                segmento = "Regular"
+                segmento = "Activo"
 
             operaciones.append(UpdateOne(
                 {"cliente_id": cliente_id},

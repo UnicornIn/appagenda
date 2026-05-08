@@ -235,7 +235,7 @@ async def crear_giftcard(
     - Genera venta en collection_sales e invoice en collection_invoices
       usando el método de pago real con el que se compró.
     """
-    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado para crear giftcards")
 
     sede = await collection_locales.find_one({"sede_id": data.sede_id})
@@ -364,7 +364,7 @@ async def recargar_giftcard(
     - Actualiza saldo_disponible y registra movimiento en historial.
     - Si estaba "usada" o "parcialmente_usada", vuelve a "activa".
     """
-    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado para recargar giftcards")
 
     codigo = codigo.upper().strip()
@@ -471,7 +471,7 @@ async def listar_giftcards(
     limit: int = Query(50, ge=1, le=200),
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     filtro = {"sede_id": sede_id}
@@ -543,7 +543,7 @@ async def editar_giftcard(
     cambios: GiftcardUpdate,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     codigo = codigo.upper().strip()
@@ -601,7 +601,7 @@ async def cancelar_giftcard(
     codigo: str,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     codigo = codigo.upper().strip()
@@ -648,7 +648,7 @@ async def reservar_saldo_giftcard(
     Reserva saldo de una giftcard al crear/abonar una cita.
     El dinero NO se descuenta aún — se bloquea temporalmente.
     """
-    if current_user["rol"] not in ["usuario", "admin_sede", "super_admin"]:
+    if current_user["rol"] not in ["usuario", "admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     codigo = codigo.upper().strip()
@@ -724,7 +724,7 @@ async def liberar_reserva_giftcard(
     current_user: dict = Depends(get_current_user)
 ):
     """Libera la reserva de saldo cuando una cita se cancela."""
-    if current_user["rol"] not in ["admin_sede", "super_admin", "usuario"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "usuario", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     codigo = codigo.upper().strip()
@@ -794,7 +794,7 @@ async def redimir_giftcard(
     Llamado automáticamente desde el endpoint de facturación.
     Convierte la reserva en redención definitiva.
     """
-    if current_user["rol"] not in ["admin_sede", "super_admin"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado para redimir giftcards")
 
     codigo = codigo.upper().strip()

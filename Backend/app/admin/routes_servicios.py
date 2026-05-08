@@ -143,7 +143,7 @@ async def listar_servicios(
     admin_sede sin franquicia_id → globales + su sede
     super_admin                  → todos
     """
-    if current_user["rol"] in ["admin_sede", "call_center", "recepcionista"]:
+    if current_user["rol"] in ["super_admin", "admin_sede", "call_center", "recepcionista"]:
         sede_id = current_user.get("sede_id")
         sede_activa = sede_id or current_user.get("sede_id")
         # ⭐ Intentar obtener franquicia_id (primero del token, luego de la sede)

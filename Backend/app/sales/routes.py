@@ -594,7 +594,7 @@ async def registrar_pago_venta(
     data: PagoVentaRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     venta = await collection_sales.find_one({"_id": ObjectId(venta_id)})
@@ -737,7 +737,7 @@ async def eliminar_producto_de_venta(
     producto_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No tienes permisos para eliminar productos")
 
     venta = await collection_sales.find_one({"_id": ObjectId(venta_id)})
@@ -810,7 +810,7 @@ async def eliminar_todos_productos_de_venta(
     venta_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista"]:
+    if current_user["rol"] not in ["admin_sede", "super_admin", "recepcionista", "call_center"]:
         raise HTTPException(status_code=403, detail="No tienes permisos para cancelar ventas")
 
     venta = await collection_sales.find_one({"_id": ObjectId(venta_id)})

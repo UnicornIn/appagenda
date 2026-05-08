@@ -1691,7 +1691,7 @@ const CalendarScheduler: React.FC = () => {
           onMouseLeave={handleBloqueoMouseLeave}
         >
           <button
-            className="absolute top-1 right-1 z-20 p-1 rounded bg-white/80 hover:bg-red-50 text-gray-400 hover:text-red-500"
+            className="absolute top-1 right-1 z-20 p-1 rounded bg-white/80 hover:bg-gray-100 text-gray-400 hover:text-gray-900"
             onClick={(e) => {
               e.stopPropagation();
               setBloqueoAEliminar(bloqueo);
@@ -2389,7 +2389,7 @@ const CalendarScheduler: React.FC = () => {
                 Cancelar
               </button>
               <button
-                className="px-4 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
+                className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
                 onClick={handleConfirmarEliminarBloqueo}
                 disabled={eliminandoBloqueo}
               >
