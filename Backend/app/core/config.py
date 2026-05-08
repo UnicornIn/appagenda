@@ -30,6 +30,7 @@ from app.giftcards.routes_giftcards import router as giftcards_router
 from app.scheduling.submodules.fichas.routes_fichas import router as routes_fichas_router
 from app.admin.routes_franquicias import router as admin_franquicias_router
 from app.commissions.routes_comision_config import router as routes_comision_config_router
+from app.analytics.finanzas_movimientos import router as finanzas_movimientos_router
 # from app.database.indexes import create_indexes
 from app.database.mongo import db  
 # from app.database.indexes import create_indexes  
@@ -95,6 +96,7 @@ app.include_router(billing_router, prefix="/api/billing", tags=["Facturación"])
 app.include_router(analytics_projection, prefix="/analytics", tags=["Analytics"])
 app.include_router(analytics_router)
 app.include_router(gastos_router)
+app.include_router(finanzas_movimientos_router)
 app.include_router(commissions_router, prefix="/api/commissions", tags=["Comisiones"])
 app.include_router(sales_dashboard_router, prefix="/api/sales-dashboard")
 app.include_router(generate_pdf_router, prefix="/api/pdf", tags=["Generación de PDF"])
