@@ -30,6 +30,7 @@ class Comision(BaseModel):
     total_servicios: int
     total_comisiones: float
     servicios_detalle: List[ServicioDetalle]
+    productos_detalle: List[dict] = Field(default_factory=list)
     creado_en: datetime
     periodo_inicio: str
     periodo_fin: str
@@ -81,6 +82,7 @@ class ComisionDetalleResponse(BaseModel):
     total_comisiones_servicios: float = 0  # ⭐ NUEVO: Total solo de servicios
     total_comisiones_productos: float = 0  # ⭐ NUEVO: Total solo de productos
     servicios_detalle: List[ServicioDetalle]
+    productos_detalle: List[dict] = Field(default_factory=list)
     periodo_inicio: str
     periodo_fin: str
     estado: str
