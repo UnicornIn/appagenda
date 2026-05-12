@@ -639,15 +639,15 @@ export function DashboardSedeView({
   const Card = ({ title, titleSub, children, scrollable, action }: {
     title: string; titleSub?: string; children: React.ReactNode; scrollable?: boolean; action?: React.ReactNode;
   }) => (
-    <div className="bg-white border border-slate-200 rounded-[10px] p-[18px]">
-      <div className="text-[13px] font-bold mb-3 flex justify-between items-center text-slate-800">
+    <div className="bg-white border border-slate-200 rounded-[10px] p-[18px] h-full flex flex-col">
+      <div className="text-[13px] font-bold mb-3 flex justify-between items-center text-slate-800 flex-shrink-0">
         <span>{title}</span>
         <div className="flex items-center gap-2">
           {titleSub && <span className="text-[10px] text-slate-400 font-medium">{titleSub}</span>}
           {action}
         </div>
       </div>
-      {scrollable ? <div className="max-h-[260px] overflow-y-auto">{children}</div> : children}
+      {scrollable ? <div className="flex-1 overflow-y-auto min-h-0">{children}</div> : children}
     </div>
   );
 

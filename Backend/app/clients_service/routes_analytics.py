@@ -13,7 +13,7 @@ from collections import defaultdict
 from zoneinfo import ZoneInfo
 import logging
 
-from app.database.mongo import collection_clients, collection_sales, collection_locales
+from app.database.mongo import collection_clients, collection_sales, collection_locales, collection_auth
 from app.auth.routes import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -50,79 +50,55 @@ async def _zona_horaria(sede_id: Optional[str]) -> str:
 
 @router.get("/analytics")
 async def clientes_analytics(
-    sede_id: Optional[str] = Query(None, description="Filtrar por sede"),
+    sede_id: Optional[str] = Query(None),
     current_user: dict = Depends(get_current_user)
 ):
     allowed = {"admin_sede", "admin_franquicia", "super_admin", "recepcionista", "call_center"}
     if current_user.get("rol") not in allowed:
-        raise HTTPException(status_code=403, detail="No autorizado.")
+        raise HTTPException(403, "No autorizado.")
 
     sede_efectiva = _build_sede_filter(current_user, sede_id)
     zona = await _zona_horaria(sede_efectiva)
     tz = ZoneInfo(zona)
     ahora = datetime.now(tz)
 
-    # Filtro base de sede/franquicia
     match_base = {}
     if sede_efectiva:
         match_base["sede_id"] = sede_efectiva
 
-    # ── Pipeline único que calcula todo de una vez ─────────────────────────
     pipeline = [
         *([ {"$match": match_base} ] if match_base else []),
         {"$group": {
             "_id": None,
-            # LTV promedio — usa ltv_proyectado (ticket × frecuencia_anual × retención)
             "ltv_promedio": {
-                "$avg": {
-                    "$cond": [
-                        {"$and": [
-                            {"$gt": ["$ltv_proyectado", 0]},
-                            {"$ifNull": ["$ltv_proyectado", False]}
-                        ]},
-                        "$ltv_proyectado", "$$REMOVE"
-                    ]
-                }
+                "$avg": {"$cond": [
+                    {"$and": [{"$gt": ["$ltv_proyectado", 0]}, {"$ifNull": ["$ltv_proyectado", False]}]},
+                    "$ltv_proyectado", "$$REMOVE"
+                ]}
             },
-            # Ticket promedio del negocio
             "ticket_promedio_negocio": {
-                "$avg": {
-                    "$cond": [{"$gt": ["$ticket_promedio", 0]}, "$ticket_promedio", "$$REMOVE"]
-                }
+                "$avg": {"$cond": [{"$gt": ["$ticket_promedio", 0]}, "$ticket_promedio", "$$REMOVE"]}
             },
-            # Recurrencia promedio — usa frecuencia_dias ya calculada en cada cliente
             "recurrencia_promedio": {
-                "$avg": {
-                    "$cond": [
-                        {"$and": [
-                            {"$gt": ["$frecuencia_dias", 0]},
-                            {"$ifNull": ["$frecuencia_dias", False]}
-                        ]},
-                        "$frecuencia_dias", "$$REMOVE"
-                    ]
-                }
+                "$avg": {"$cond": [
+                    {"$and": [{"$gt": ["$frecuencia_dias", 0]}, {"$ifNull": ["$frecuencia_dias", False]}]},
+                    "$frecuencia_dias", "$$REMOVE"
+                ]}
             },
-            # Segmentos — alineados con las definiciones oficiales
-            "activos":    {"$sum": {"$cond": [{"$eq": ["$segmento", "Activo"]},    1, 0]}},
-            "en_riesgo":  {"$sum": {"$cond": [{"$eq": ["$segmento", "En riesgo"]}, 1, 0]}},
-            "perdidos":   {"$sum": {"$cond": [{"$eq": ["$segmento", "Perdido"]},   1, 0]}},
-            "nuevos":     {"$sum": {"$cond": [{"$eq": ["$segmento", "Nuevo"]},     1, 0]}},
+            "activos":   {"$sum": {"$cond": [{"$eq": ["$segmento", "Activo"]},    1, 0]}},
+            "en_riesgo": {"$sum": {"$cond": [{"$eq": ["$segmento", "En riesgo"]}, 1, 0]}},
+            "perdidos":  {"$sum": {"$cond": [{"$eq": ["$segmento", "Perdido"]},   1, 0]}},
             "sin_visita": {"$sum": {"$cond": [
                 {"$or": [
                     {"$not": {"$ifNull": ["$ultima_visita", False]}},
                     {"$eq": ["$dias_sin_visitar", 0]}
                 ]}, 1, 0
             ]}},
-            # Clientes recurrentes: frecuencia_dias <= 120 días
             "recurrentes": {"$sum": {"$cond": [
-                {"$and": [
-                    {"$ifNull": ["$frecuencia_dias", False]},
-                    {"$lte": ["$frecuencia_dias", 120]}
-                ]}, 1, 0
+                {"$and": [{"$ifNull": ["$frecuencia_dias", False]}, {"$lte": ["$frecuencia_dias", 120]}]},
+                1, 0
             ]}},
-            "con_frecuencia": {"$sum": {"$cond": [
-                {"$ifNull": ["$frecuencia_dias", False]}, 1, 0
-            ]}},
+            "con_frecuencia": {"$sum": {"$cond": [{"$ifNull": ["$frecuencia_dias", False]}, 1, 0]}},
             "total": {"$sum": 1}
         }}
     ]
@@ -131,35 +107,10 @@ async def clientes_analytics(
     r = resultado[0] if resultado else {}
     r.pop("_id", None)
 
-    # Nuevos clientes por mes (últimos 12 meses)
-    fecha_hace_12m = ahora.replace(tzinfo=None) - timedelta(days=365)
-    nuevos_pipeline = [
-        {"$match": {
-            "fecha_creacion": {"$gte": fecha_hace_12m},
-            **(match_base if match_base else {})
-        }},
-        {"$group": {
-            "_id": {
-                "year":  {"$year":  "$fecha_creacion"},
-                "month": {"$month": "$fecha_creacion"}
-            },
-            "cantidad": {"$sum": 1}
-        }},
-        {"$sort": {"_id.year": 1, "_id.month": 1}}
-    ]
-    nuevos_raw = await collection_clients.aggregate(nuevos_pipeline).to_list(None)
-    nuevos_por_mes = [
-        {
-            "periodo":  f"{row['_id']['year']}-{row['_id']['month']:02d}",
-            "cantidad": row["cantidad"]
-        }
-        for row in nuevos_raw
-    ]
-
     recurrencia_dias = r.get("recurrencia_promedio")
-    ltv_prom = r.get("ltv_promedio", 0) or 0
+    ltv_prom    = r.get("ltv_promedio", 0) or 0
     ticket_prom = r.get("ticket_promedio_negocio", 0) or 0
-    total = r.get("total", 0)
+    total       = r.get("total", 0)
     con_frecuencia = r.get("con_frecuencia", 0)
 
     return {
@@ -168,28 +119,165 @@ async def clientes_analytics(
         "zona_horaria": zona,
         "generado_en": ahora.isoformat(),
         "ltv": {
-            # LTV = ticket_promedio × frecuencia_anual × tiempo_retención (3 años)
-            "ltv_promedio":        round(ltv_prom),
-            "ticket_promedio":     round(ticket_prom),
-            "clientes_con_datos":  con_frecuencia,
+            "ltv_promedio":       round(ltv_prom),
+            "ticket_promedio":    round(ticket_prom),
+            "clientes_con_datos": con_frecuencia,
             "formula": "ticket_promedio × (365 / frecuencia_dias) × 3 años"
         },
         "recurrencia": {
-            # Cada cuántos días vuelve un cliente en promedio
-            "promedio_dias":    round(recurrencia_dias) if recurrencia_dias else None,
-            "texto":            f"Cada {round(recurrencia_dias)} días" if recurrencia_dias else "Sin datos",
-            "clientes_recurrentes":  r.get("recurrentes", 0),     # frecuencia <= 120 días
+            "promedio_dias":         round(recurrencia_dias) if recurrencia_dias else None,
+            "texto":                 f"Cada {round(recurrencia_dias)} días" if recurrencia_dias else "Sin datos",
+            "clientes_recurrentes":  r.get("recurrentes", 0),
             "total_con_frecuencia":  con_frecuencia,
-            "pct_recurrentes": round(r.get("recurrentes", 0) / con_frecuencia * 100) if con_frecuencia else 0,
-            "nota": "Recurrente = vuelve mínimo cada 120 días"
+            "pct_recurrentes":       round(r.get("recurrentes", 0) / con_frecuencia * 100) if con_frecuencia else 0,
+            "nota":                  "Recurrente = vuelve mínimo cada 120 días"
         },
         "estado_base": {
-            "activos":   r.get("activos", 0),     # 0-120 días
-            "en_riesgo": r.get("en_riesgo", 0),   # 121-180 días
-            "perdidos":  r.get("perdidos", 0),    # +181 días
-            "nuevos":    r.get("nuevos", 0),       # sin citas aún
+            "activos":    r.get("activos", 0),
+            "en_riesgo":  r.get("en_riesgo", 0),
+            "perdidos":   r.get("perdidos", 0),
             "sin_visita": r.get("sin_visita", 0),
-            "total":     total,
+            "total":      total,
+            # nuevos_por_mes y nuevos eliminados — ver /analytics/nuevos
         },
-        "nuevos_por_mes": nuevos_por_mes,
+    }
+
+
+@router.get("/analytics/nuevos")
+async def clientes_nuevos_detalle(
+    mes: Optional[str] = Query(None, description="YYYY-MM, ej: 2026-04"),
+    fecha_inicio: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    fecha_fin: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    sede_id: Optional[str] = Query(None),
+    descargar: bool = Query(False, description="True para descargar Excel"),
+    current_user: dict = Depends(get_current_user)
+):
+    allowed = {"admin_sede", "admin_franquicia", "super_admin", "recepcionista", "call_center"}
+    if current_user.get("rol") not in allowed:
+        raise HTTPException(403, "No autorizado.")
+
+    sede_efectiva = _build_sede_filter(current_user, sede_id)
+    rol = current_user.get("rol")
+    hoy = datetime.now()
+
+    # ── Rango de fechas ───────────────────────────────────────────────
+    if mes:
+        try:
+            año, m = mes.split("-")
+            fecha_inicio_dt = datetime(int(año), int(m), 1)
+            fecha_fin_dt = (
+                datetime(int(año) + 1, 1, 1) if int(m) == 12
+                else datetime(int(año), int(m) + 1, 1)
+            ) - timedelta(seconds=1)
+        except Exception:
+            raise HTTPException(400, "Formato inválido. Use YYYY-MM")
+    elif fecha_inicio and fecha_fin:
+        try:
+            fecha_inicio_dt = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            fecha_fin_dt    = datetime.strptime(fecha_fin, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        except Exception:
+            raise HTTPException(400, "Formato inválido. Use YYYY-MM-DD")
+    else:
+        fecha_inicio_dt = hoy.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        fecha_fin_dt    = hoy
+
+    # ── Emails de la sede ─────────────────────────────────────────────
+    emails_sede: Optional[list] = None
+    if rol != "super_admin" and sede_efectiva:
+        sedes_a_buscar = [sede_efectiva] + current_user.get("sedes_permitidas", [])
+        usuarios = await collection_auth.find(
+            {"sede_id": {"$in": sedes_a_buscar}},
+            {"correo_electronico": 1}
+        ).to_list(None)
+        emails_sede = [u["correo_electronico"] for u in usuarios if u.get("correo_electronico")]
+
+    # ── Query ─────────────────────────────────────────────────────────
+    query: dict = {"fecha_creacion": {"$gte": fecha_inicio_dt, "$lte": fecha_fin_dt}}
+
+    if emails_sede:
+        query["creado_por"] = {"$in": emails_sede}
+    elif rol != "super_admin" and sede_efectiva:
+        franquicia_id = current_user.get("franquicia_id")
+        if franquicia_id:
+            query["franquicia_id"] = franquicia_id
+
+    # ── Obtener TODOS para el total y el Excel ────────────────────────
+    projection = {
+        "_id": 0, "cliente_id": 1, "nombre": 1,
+        "telefono": 1, "fecha_creacion": 1, "creado_por": 1,
+    }
+
+    todos = await (
+        collection_clients
+        .find(query, projection)
+        .sort("fecha_creacion", -1)
+        .to_list(None)
+    )
+
+    total = len(todos)
+
+    # ── Serializar ────────────────────────────────────────────────────
+    def serializar(c):
+        fecha = c.get("fecha_creacion")
+        if isinstance(fecha, datetime):
+            fecha = fecha.strftime("%Y-%m-%d")
+        return {
+            "cliente_id":     c.get("cliente_id", ""),
+            "nombre":         c.get("nombre", ""),
+            "telefono":       c.get("telefono", ""),
+            "fecha_creacion": fecha,
+            "creado_por":     c.get("creado_por", ""),
+        }
+
+    # ── Descarga Excel ────────────────────────────────────────────────
+    if descargar:
+        try:
+            import openpyxl
+            from fastapi.responses import StreamingResponse
+            import io
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Clientes nuevos"
+            ws.append(["ID", "Nombre", "Teléfono", "Fecha registro", "Registrado por"])
+
+            for c in todos:
+                s = serializar(c)
+                ws.append([
+                    s["cliente_id"],
+                    s["nombre"],
+                    s["telefono"],
+                    s["fecha_creacion"],
+                    s["creado_por"],
+                ])
+
+            buffer = io.BytesIO()
+            wb.save(buffer)
+            buffer.seek(0)
+
+            periodo_str = mes or fecha_inicio_dt.strftime("%Y-%m")
+            return StreamingResponse(
+                buffer,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f'attachment; filename="nuevos_{periodo_str}.xlsx"'}
+            )
+        except ImportError:
+            raise HTTPException(500, "openpyxl no está instalado. Ejecuta: pip install openpyxl")
+
+    # ── Respuesta JSON — máximo 20 en la lista ────────────────────────
+    LIMITE_LISTA = 20
+    clientes_lista = [serializar(c) for c in todos[:LIMITE_LISTA]]
+
+    return {
+        "success": True,
+        "sede_id": sede_efectiva,
+        "periodo": {
+            "inicio": fecha_inicio_dt.strftime("%Y-%m-%d"),
+            "fin":    fecha_fin_dt.strftime("%Y-%m-%d"),
+        },
+        "total": total,
+        "mostrando": len(clientes_lista),
+        "hay_mas": total > LIMITE_LISTA,
+        "descarga_url": f"/clientes/analytics/nuevos?mes={mes or fecha_inicio_dt.strftime('%Y-%m')}&descargar=true" if total > LIMITE_LISTA else None,
+        "clientes": clientes_lista,
     }

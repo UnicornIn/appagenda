@@ -135,6 +135,7 @@ def _assert_delete_permissions(current_user: dict, bloqueo: dict) -> None:
     if rol == "estilista":
         if bloqueo.get("profesional_id") != current_user.get("profesional_id"):
             raise HTTPException(status_code=403, detail="No autorizado para eliminar este bloqueo")
+        # ✅ No validar sede aquí — si es su propio bloqueo, puede gestionarlo
         return
 
     raise HTTPException(status_code=403, detail="No autorizado para eliminar bloqueos")
@@ -159,15 +160,26 @@ async def crear_bloqueo(
     if rol == "estilista":
         user_profesional = str(current_user.get("profesional_id", "")).strip()
         user_sede = str(current_user.get("sede_id", "")).strip()
+        sedes_permitidas = current_user.get("sedes_permitidas") or []
+
         if not user_profesional or user_profesional != profesional_id:
             raise HTTPException(status_code=403, detail="No autorizado para crear bloqueos de otro profesional")
-        if user_sede and user_sede != sede_id:
+
+        # Sede válida si es la sede activa O está en sedes_permitidas
+        sedes_validas = set(sedes_permitidas)
+        if user_sede:
+            sedes_validas.add(user_sede)
+
+        if sede_id not in sedes_validas:
             raise HTTPException(status_code=403, detail="No autorizado para crear bloqueos fuera de tu sede")
 
     if rol == "admin_sede":
         user_sede = str(current_user.get("sede_id", "")).strip()
-        if user_sede and user_sede != sede_id:
-            raise HTTPException(status_code=403, detail="No autorizado para crear bloqueos fuera de tu sede")
+        if not user_sede:
+            raise HTTPException(status_code=400, detail="No se pudo determinar tu sede")
+        # Sobreescribir siempre con la sede del admin — el frontend puede mandar
+        # la sede principal del profesional pero el bloqueo debe crearse en la sede activa
+        sede_id = user_sede
 
     hora_inicio = _parse_time(payload.hora_inicio, "hora_inicio")
     hora_fin = _parse_time(payload.hora_fin, "hora_fin")
@@ -299,19 +311,27 @@ async def crear_bloqueo(
 @router.get("/{profesional_id}", response_model=List[dict])
 async def listar_bloqueos_profesional(
     profesional_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    sede_id: Optional[str] = None,  # query param explícito como fallback
 ):
     from app.utils.scope import get_profesional_ids, expand_profesional_filter
     rol = str(current_user.get("rol", "")).strip().lower()
     todos_ids = get_profesional_ids(current_user)
 
-    # Estilista solo puede ver bloqueos de sus propios IDs (canónico + asociados)
     if rol == "estilista" and profesional_id not in todos_ids:
         raise HTTPException(status_code=403, detail="No autorizado")
 
-    bloqueos = await collection_block.find(
-        {"profesional_id": expand_profesional_filter(profesional_id, current_user)}
-    ).sort(
+    filtro = {
+        "profesional_id": expand_profesional_filter(profesional_id, current_user)
+    }
+
+    # Prioridad: query param > sede_activa del token > sin filtro (super_admin)
+    sede_filtro = sede_id or current_user.get("sede_id")
+
+    if sede_filtro and rol not in SUPERADMIN_ROLES:
+        filtro["sede_id"] = sede_filtro.strip()
+
+    bloqueos = await collection_block.find(filtro).sort(
         [("fecha", 1), ("hora_inicio", 1)]
     ).to_list(None)
 

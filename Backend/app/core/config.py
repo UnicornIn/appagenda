@@ -19,6 +19,7 @@ from app.inventary.routes import app_router as inventary_router
 from app.bills.routes import router as billing_router
 from app.analytics.projection_analytics import router as analytics_projection
 from app.bills.routes_reporte import router as reporte_router
+from app.bills.routes_transacciones import router as transacciones_router
 from app.commissions.routes import router as commissions_router
 from app.analytics.sales_dashboard import router as sales_dashboard_router
 from app.clients_service.routes_analytics import router as analytics_router
@@ -79,6 +80,7 @@ async def lifespan(app: FastAPI):
 # Incluir todos los routers
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(reporte_router, prefix="/api/reporte", tags=["Reporte"])
+app.include_router(transacciones_router, tags=["Transacciones"])
 app.include_router(scheduling_router, prefix="/scheduling")
 app.include_router(admin_franquicias_router, prefix="/admin/franquicias", tags=["Franquicias"])
 app.include_router(routes_fichas_router, prefix="/scheduling/quotes", tags=["Fichas"])
@@ -88,13 +90,13 @@ app.include_router(admin_profesionales_router)
 app.include_router(admin_system_users_router)
 app.include_router(inventary_router, prefix="/inventary")
 app.include_router(routes_comision_config_router)
-app.include_router(routes_clientes.router, prefix="/clientes", tags=["Clientes"])
 #app.include_router(churn_router)
 #app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
 #app.include_router(dashboard_router)
 app.include_router(billing_router, prefix="/api/billing", tags=["Facturación"])
 app.include_router(analytics_projection, prefix="/analytics", tags=["Analytics"])
 app.include_router(analytics_router)
+app.include_router(routes_clientes.router, prefix="/clientes", tags=["Clientes"])
 app.include_router(gastos_router)
 app.include_router(finanzas_movimientos_router)
 app.include_router(commissions_router, prefix="/api/commissions", tags=["Comisiones"])
