@@ -816,13 +816,18 @@ ${datos.observaciones_generales || 'Ninguna'}`;
         console.log(`📅 Fecha original del servidor para cita ${cita._id}: ${fechaOriginal}`);
 
         // Obtener servicio
-        const servicio = cita.servicio_nombre || 'Servicio no especificado';
+        const servicio = cita.servicio_nombre
+          || cita.servicios?.[0]?.nombre
+          || 'Servicio no especificado';
 
         // Obtener notas (si existen)
         const notas = cita.notas || '';
 
         // Obtener método de pago
-        const metodoPago = cita.metodo_pago || 'No especificado';
+        const metodoPago = cita.metodo_pago
+          || cita.metodo_pago_actual
+          || cita.metodo_pago_inicial
+          || 'No especificado';
 
         // Obtener estado de pago
         const estadoPago = cita.estado_pago || 'pendiente';

@@ -956,9 +956,14 @@ export const clientesService = {
 
       return citas.map((cita: any) => {
         const profesional = cita.profesional_nombre || 'Profesional no especificado';
-        const servicio = cita.servicio_nombre || 'Servicio no especificado';
+        const servicio = cita.servicio_nombre
+          || cita.servicios?.[0]?.nombre
+          || 'Servicio no especificado';
         const notas = cita.notas || '';
-        const metodoPago = cita.metodo_pago || 'No especificado';
+        const metodoPago = cita.metodo_pago
+          || cita.metodo_pago_actual
+          || cita.metodo_pago_inicial
+          || 'No especificado';
         const estadoPago = cita.estado_pago || 'pendiente';
         const valorTotal = cita.valor_total || 0;
         const moneda = cita.moneda || 'USD';

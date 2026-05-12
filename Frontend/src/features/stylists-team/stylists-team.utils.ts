@@ -456,12 +456,15 @@ export function buildVendorRows(
   }
 
   for (const invoice of invoices) {
-    const billedBy = normalizeText(invoice.vendido_por || invoice.facturado_por);
-    if (!billedBy) {
+    // Solo usar vendido_por — el vendedor explícito de la factura.
+    // facturado_por es quien cerró la caja/registró la factura,
+    // usarlo como fallback infla los totales incorrectamente.
+    const soldBy = normalizeText(invoice.vendido_por);
+    if (!soldBy) {
       continue;
     }
 
-    const row = rowsByIdentity.get(billedBy);
+    const row = rowsByIdentity.get(soldBy);
     if (!row) {
       continue;
     }

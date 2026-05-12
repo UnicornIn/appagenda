@@ -61,7 +61,7 @@ import { useAuth } from "../../../components/Auth/AuthContext";
 import { inventarioService, type InventarioProducto } from "./inventario";
 import { API_BASE_URL } from "../../../types/config";
 import { cn } from "../../../lib/utils";
-import { APP_ROLES, resolveAppRole } from "../../../lib/access-control";
+import { APP_MODULES, canAccess } from "../../../lib/access-control";
 import {
   InventoryDashboardTab,
   InventoryMovimientosTab,
@@ -167,11 +167,7 @@ export function ProductsList() {
   const [paraVentaCheck, setParaVentaCheck] = useState(true);
   const [usoInternoCheck, setUsoInternoCheck] = useState(false);
 
-  const userRole = resolveAppRole(user?.role);
-  const canAdjustStock =
-    userRole === APP_ROLES.ADMIN_SEDE ||
-    userRole === APP_ROLES.SUPER_ADMIN ||
-    userRole === APP_ROLES.SUPERADMIN;
+  const canAdjustStock = canAccess(APP_MODULES.SEDE_PRODUCTS, user?.role);
   const canCreateInventory = canAdjustStock;
 
   const sedeId =
