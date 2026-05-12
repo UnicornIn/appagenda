@@ -14,6 +14,7 @@ from PIL import Image as PILImage
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib import colors
 from reportlab.lib.units import cm
+from email.utils import formataddr
 import smtplib
 import ssl
 from io import BytesIO
@@ -599,7 +600,7 @@ body{{font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;
     <p><strong>Fecha:</strong> {fecha}</p>
     <p><strong>Estado:</strong>COMPLETADO</p>
   </div>
-  <p>Se adjunta el <strong>Comprobante de Servicio</strong> en PDF.</p>
+  <p>Se adjunta la <strong>Ficha de Diagnostico</strong> en PDF.</p>
   <p>¡Gracias por confiar en nosotros!<br><strong>El equipo de Rizos Felices</strong></p>
 </div>
 <div class="footer">
@@ -618,7 +619,7 @@ async def enviar_correo_con_pdf(
     try:
         msg = MIMEMultipart()
         msg["Subject"] = asunto
-        msg["From"]    = EMAIL_SENDER
+        msg["From"] = formataddr(("Rizos Felices", EMAIL_SENDER))
         msg["To"]      = destinatario
         msg.attach(MIMEText(mensaje_html, "html", "utf-8"))
         part = MIMEBase("application", "pdf")

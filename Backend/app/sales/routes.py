@@ -4,12 +4,12 @@ from datetime import datetime
 from pydantic import BaseModel
 from bson import ObjectId
 import random
+import re
 
 from app.auth.routes import get_current_user
 from app.utils.timezone import today_str, today
 from app.commissions.comision_engine import resolver_config_comision, calcular_comision
-from app.commissions.comision_context import construir_contexto
-from app.bills.routes import obtener_porcentaje_comision_producto
+from app.commissions.comision_context import construir_contexto, recalcular_comisiones_periodo
 from app.database.mongo import (
     collection_products,
     collection_clients,
@@ -50,102 +50,85 @@ async def registrar_comision_venta_directa(
     moneda: str,
     tipo_comision_sede: str,
     registrado_por: str,
+    inicio_periodo: today,    # ← nuevo
+    fin_periodo: today,       # ← nuevo
 ):
-    """
-    Busca una comisión pendiente del estilista en esta sede para el día de hoy.
-    Si existe, agrega el detalle. Si no, crea una nueva.
+    from datetime import date as _date
+    from app.commissions.comision_context import _ahora_sede
 
-    Estructura de cada item en servicios_detalle para ventas directas:
-    {
-        "tipo": "venta_directa",
-        "venta_id": "...",
-        "fecha": "YYYY-MM-DD",
-        "descripcion": "Producto X (x2)",
-        "valor_servicio": 0,             # Sin valor de servicio en ventas directas
-        "valor_comision_servicio": 0,    # Sin comisión de servicio
-        "valor_productos": <subtotal>,
-        "valor_comision_productos": <comision>,
-        "registrado_por": "email"
-    }
-    """
-    profesional_id  = estilista.get("profesional_id")
-    profesional_nombre = (
-        estilista.get("nombre", "") + " " + estilista.get("apellido", "")
-    ).strip()
-    sede_id   = sede.get("sede_id")
-    sede_nombre = sede.get("nombre", "")
-    hoy = datetime.now().strftime("%Y-%m-%d")
+    profesional_id     = estilista.get("profesional_id")
+    profesional_nombre = (estilista.get("nombre", "") + " " + estilista.get("apellido", "")).strip()
+    sede_id            = sede.get("sede_id")
+    sede_nombre        = sede.get("nombre", "")
 
-    # Construir detalle de cada producto con comisión
+    inicio_str = inicio_periodo.strftime("%Y-%m-%d")
+    fin_str    = fin_periodo.strftime("%Y-%m-%d")
+    hoy_str    = _ahora_sede(sede).strftime("%Y-%m-%d")  # zona horaria correcta
+
     detalle_items = []
     for item in items_con_comision:
         detalle_items.append({
             "tipo": "venta_directa",
             "venta_id": venta_id,
-            "fecha": hoy,
+            "fecha": hoy_str,
             "descripcion": f"{item['nombre']} (x{item['cantidad']})",
+            "producto_id": item.get("producto_id"),
+            "producto_nombre": item.get("nombre"),
+            "cantidad": item["cantidad"],
             "valor_servicio": 0,
             "valor_comision_servicio": 0,
+            "valor_producto": num(item["subtotal"]),
             "valor_productos": num(item["subtotal"]),
             "valor_comision_productos": num(item["comision_valor"]),
+            "valor_comision": num(item["comision_valor"]),
+            "comision_tipo": item.get("comision_tipo"),
+            "comision_valor_aplicado": item.get("comision_porcentaje"),
             "registrado_por": registrado_por,
         })
 
-    # Buscar comisión pendiente del mismo estilista/sede del día de hoy
-    # (se acumula en la misma hasta que se liquide, como en citas)
+    # ── Buscar doc del período activo del profesional ──────────────
+    # Filtra por periodo_inicio exacto para no mezclar meses
     comision_existente = await collection_commissions.find_one({
         "profesional_id": profesional_id,
         "sede_id": sede_id,
-        "$or": [
-            {"estado": "pendiente"},
-            {"estado": {"$exists": False}},
-        ],
+        "estado": "pendiente",
+        "periodo_inicio": inicio_str,   # ← clave: mismo período
     })
 
     if comision_existente:
-        # ─── ACTUALIZAR la comisión existente ───────────────────────
-        servicios_actuales = comision_existente.get("productos_detalle", [])
-        nuevo_total_comision = round(
-            float(comision_existente.get("total_comisiones", 0)) + total_comision, 2
-        )
-        nuevo_total_servicios = round(
-            float(comision_existente.get("total_servicios", 0)) + sum(i["subtotal"] for i in items_con_comision), 2
-        )
+        nuevo_total_comision  = round(float(comision_existente.get("total_comisiones", 0)) + total_comision, 2)
+        nuevo_total_servicios = round(float(comision_existente.get("total_servicios", 0)) + sum(i["subtotal"] for i in items_con_comision), 2)
 
-        # Actualizar periodo_fin al día más reciente
         await collection_commissions.update_one(
             {"_id": comision_existente["_id"]},
             {
                 "$set": {
                     "total_comisiones": num(nuevo_total_comision),
-                    "total_servicios": num(nuevo_total_servicios),
-                    "periodo_fin": hoy,
-                    "ultima_actualizacion": today(sede).replace(tzinfo=None)
+                    "total_servicios":  num(nuevo_total_servicios),
+                    "periodo_fin":      hoy_str,
+                    "ultima_actualizacion": today(sede).replace(tzinfo=None),
                 },
-                "$push": {
-                    "productos_detalle": {"$each": detalle_items},
-                },
+                "$push": {"productos_detalle": {"$each": detalle_items}},
             }
         )
         print(f"💰 Comisión actualizada para {profesional_nombre}: +{fmt(total_comision, moneda)}")
         return str(comision_existente["_id"])
 
     else:
-        # ─── CREAR nueva comisión ────────────────────────────────────
         nueva_comision = {
-            "profesional_id": profesional_id,
+            "profesional_id":     profesional_id,
             "profesional_nombre": profesional_nombre,
-            "sede_id": sede_id,
-            "sede_nombre": sede_nombre,
-            "moneda": moneda,
-            "tipo_comision": tipo_comision_sede,
-            "total_servicios": num(round(sum(i["subtotal"] for i in items_con_comision), 2)),
-            "total_comisiones": num(round(total_comision, 2)),
-            "productos_detalle": detalle_items,
-            "periodo_inicio": hoy,
-            "periodo_fin": hoy,
-            "estado": "pendiente",
-            "creado_en": today(sede).replace(tzinfo=None),
+            "sede_id":            sede_id,
+            "sede_nombre":        sede_nombre,
+            "moneda":             moneda,
+            "tipo_comision":      tipo_comision_sede,
+            "total_servicios":    num(round(sum(i["subtotal"] for i in items_con_comision), 2)),
+            "total_comisiones":   num(round(total_comision, 2)),
+            "productos_detalle":  detalle_items,
+            "periodo_inicio":     inicio_str,   # ← primer día del mes
+            "periodo_fin":        hoy_str,
+            "estado":             "pendiente",
+            "creado_en":          today(sede).replace(tzinfo=None),
         }
         result = await collection_commissions.insert_one(nueva_comision)
         print(f"💰 Nueva comisión creada para {profesional_nombre}: {fmt(total_comision, moneda)}")
@@ -222,6 +205,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
     #   3. Fallback → nombre del usuario autenticado
     #
     estilista_doc   = None
+    vendedor_auth_por_nombre = None
     profesional_id_guardado = None
     nombre_vendedor = (venta.vendido_por or "").strip()
 
@@ -259,7 +243,21 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
             print(f"⚠️  Nombre '{nombre_vendedor}' no coincide con ningún estilista en sede {venta.sede_id}")
         
     # 3️⃣ Fallback: usuario autenticado
-    else:
+    if not estilista_doc and nombre_vendedor and not vendedor_auth_por_nombre:
+        vendedor_auth_por_nombre = await collection_auth.find_one({
+            "nombre": {"$regex": f"^{re.escape(nombre_vendedor)}$", "$options": "i"},
+            "rol": {"$in": ["recepcionista", "call_center", "admin_sede"]},
+            "$or": [
+                {"sede_id": venta.sede_id},
+                {"sedes_permitidas": venta.sede_id},
+                {"sede_id": {"$exists": False}},
+            ],
+        })
+        if vendedor_auth_por_nombre:
+            nombre_vendedor = vendedor_auth_por_nombre.get("nombre", nombre_vendedor)
+            print(f"Vendedor resuelto por nombre: {nombre_vendedor} -> {vendedor_auth_por_nombre.get('_id')}")
+
+    if not venta.profesional_id and not nombre_vendedor:
         nombre_vendedor = nombre_usuario
 
     # ─── Asignar valores finales ─────────────────────────────────────
@@ -275,11 +273,16 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
     #
     ROLES_CON_COMISION = {"estilista", "recepcionista", "call_center", "admin_sede"}
     auth_vendedor_doc = None
-    if not estilista_doc and rol_usuario in ROLES_CON_COMISION:
+    if vendedor_auth_por_nombre:
+        auth_vendedor_doc = vendedor_auth_por_nombre
+    elif not estilista_doc and rol_usuario in ROLES_CON_COMISION:
         auth_vendedor_doc = await collection_auth.find_one(
             {"correo_electronico": email_usuario}
         )
     vendedor_doc_para_comision = estilista_doc or auth_vendedor_doc
+    profesional_id_comision = profesional_id_guardado
+    if not profesional_id_comision and auth_vendedor_doc:
+        profesional_id_comision = str(auth_vendedor_doc["_id"])
 
     aplica_comision = permite_comision_prod and (
         rol_usuario in ROLES_CON_COMISION or estilista_doc is not None
@@ -291,6 +294,9 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
     items_con_comision = []   # solo los que generan comisión
     total_venta = 0
     total_comision_productos = 0
+    ctx_ultimo = None
+    recalculo_escalonado = None
+    unidades_en_venta_actual = 0
 
     for item in venta.productos:
         producto_db = await collection_products.find_one({"id": item.producto_id})
@@ -337,13 +343,17 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
                 sede,
             )
             ctx = await construir_contexto(
-                profesional_id=profesional_id_guardado,
+                profesional_id=profesional_id_comision,
                 sede_id=venta.sede_id,
                 cantidad_actual=item.cantidad,
                 moneda_sede=moneda,
+                vendedor_nombre=nombre_vendedor,
             )
+            ctx.cantidad_acumulada_periodo += unidades_en_venta_actual
+            ctx_ultimo = ctx 
             resultado = calcular_comision(config, subtotal, ctx)
             comision_valor = resultado.valor
+            comision_tipo_aplicado = config.tipo
 
             # ── Extraer el porcentaje real aplicado según el tipo ──────────
             if config.tipo in ("porcentaje", "fijo", "por_unidad"):
@@ -351,6 +361,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
             elif config.tipo == "escalonado" and resultado.nivel_nuevo:
                 # Subió de nivel en esta venta
                 comision_porcentaje_aplicado = resultado.nivel_nuevo.valor
+                comision_tipo_aplicado = resultado.nivel_nuevo.tipo
             elif config.tipo == "escalonado":
                 # Sin cambio de nivel — buscar el tramo activo directamente
                 total = ctx.cantidad_acumulada_periodo + ctx.cantidad_actual
@@ -360,9 +371,19 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
                     None
                 )
                 comision_porcentaje_aplicado = tramo_activo.valor if tramo_activo else 0
+                comision_tipo_aplicado = tramo_activo.tipo if tramo_activo else "porcentaje"
+            if config.tipo == "escalonado" and comision_porcentaje_aplicado and profesional_id_comision:
+                recalculo_escalonado = {
+                    "profesional_id": profesional_id_comision,
+                    "nuevo_porcentaje": comision_porcentaje_aplicado,
+                    "nuevo_tipo": comision_tipo_aplicado,
+                    "inicio_periodo": ctx.inicio_periodo,
+                    "fin_periodo": ctx.fin_periodo,
+                }
             # ──────────────────────────────────────────────────────────────
 
             total_comision_productos += comision_valor
+            unidades_en_venta_actual += item.cantidad
 
         item_doc = {
             "tipo": "producto",
@@ -373,6 +394,7 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
             "subtotal": num(subtotal),
             "moneda": moneda,
             "comision": num(comision_valor),
+            "comision_tipo": comision_tipo_aplicado if aplica_comision else None,
             "comision_porcentaje": comision_porcentaje_aplicado,  # ← ahora refleja el nivel real
         }
         items.append(item_doc)
@@ -540,7 +562,15 @@ async def crear_venta_directa(venta: VentaDirecta, current_user: dict = Depends(
                 moneda=moneda,
                 tipo_comision_sede=tipo_comision_sede,
                 registrado_por=email_usuario,
+                inicio_periodo=ctx_ultimo.inicio_periodo,   # ← del contexto
+                fin_periodo=ctx_ultimo.fin_periodo,
             )
+
+            if recalculo_escalonado:
+                await recalcular_comisiones_periodo(
+                    sede_id=venta.sede_id,
+                    **recalculo_escalonado,
+                )
 
             # Marcar la venta como comisionada
             await collection_sales.update_one(

@@ -3,6 +3,7 @@ from datetime import datetime, time, timedelta
 import traceback
 from typing import Optional, List
 from email.message import EmailMessage
+from email.utils import formataddr
 import smtplib, ssl, os
 from bson import ObjectId
 import uuid
@@ -13,7 +14,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.scheduling.submodules.fichas.controllers import generar_y_enviar_pdf_ficha
-from app.bills.routes import obtener_porcentaje_comision_producto
+from app.commissions.comision_engine import resolver_config_comision, calcular_comision
+from app.commissions.comision_context import construir_contexto
 from app.scheduling.models import Cita, ProductoItem, PagoRequest, ServicioEnCita, ServicioEnFicha
 from app.clients_service.routes_clientes import calcular_analytics_cliente
 from app.database.mongo import (
@@ -28,6 +30,7 @@ from app.database.mongo import (
     collection_card,
     collection_commissions,
     collection_products,
+    collection_inventarios,
     collection_pre_bookings
 )
 from app.cash.utils_cash import fecha_a_datetime
@@ -53,7 +56,7 @@ def enviar_correo(destinatario: str, asunto: str, mensaje: str):
     try:
         msg = EmailMessage()
         msg["Subject"] = asunto
-        msg["From"] = EMAIL_SENDER
+        msg["From"] = formataddr(("Rizos Felices", EMAIL_SENDER))
         msg["To"] = destinatario
         msg.set_content(mensaje, subtype="html")
 
@@ -2746,6 +2749,7 @@ async def agregar_productos_a_cita(
     aplica_comision = permite_comision_productos and rol_usuario in ROLES_CON_COMISION_PRODUCTOS
 
     vendedor_doc = None
+    profesional_id_comision = profesional_id
     if aplica_comision:
         if rol_usuario == "estilista":
             vendedor_doc = await collection_estilista.find_one(
@@ -2755,6 +2759,8 @@ async def agregar_productos_a_cita(
             vendedor_doc = await collection_auth.find_one(
                 {"correo_electronico": email_usuario}
             )
+            if vendedor_doc:
+                profesional_id_comision = str(vendedor_doc["_id"])
 
     # Productos actuales
     productos_actuales = cita.get("productos", [])
@@ -2763,6 +2769,7 @@ async def agregar_productos_a_cita(
     nuevos_productos = []
     total_productos = 0
     total_comision_productos = 0
+    unidades_en_agregado_actual = 0
 
     for p in productos:
         # Buscar producto en BD
@@ -2791,11 +2798,39 @@ async def agregar_productos_a_cita(
         comision_producto = 0
         
         if aplica_comision:
-            comision_porcentaje = obtener_porcentaje_comision_producto(
-                producto_db, vendedor_doc
+            inventario_db = await collection_inventarios.find_one(
+                {"producto_id": p.producto_id, "sede_id": cita["sede_id"]}
             )
-            comision_producto = round((subtotal * comision_porcentaje) / 100, 2)
+            config = resolver_config_comision(
+                producto_db,
+                vendedor_doc,
+                inventario_db,
+                sede,
+            )
+            ctx = await construir_contexto(
+                profesional_id=profesional_id_comision,
+                sede_id=cita["sede_id"],
+                cantidad_actual=p.cantidad,
+                moneda_sede=moneda_cita,
+                vendedor_nombre=(vendedor_doc or {}).get("nombre"),
+            )
+            ctx.cantidad_acumulada_periodo += unidades_en_agregado_actual
+            resultado = calcular_comision(config, subtotal, ctx)
+            comision_producto = resultado.valor
+            if config.tipo in ("porcentaje", "fijo", "por_unidad"):
+                comision_porcentaje = config.valor
+            elif config.tipo == "escalonado" and resultado.nivel_nuevo:
+                comision_porcentaje = resultado.nivel_nuevo.valor
+            elif config.tipo == "escalonado":
+                total = ctx.cantidad_acumulada_periodo + ctx.cantidad_actual
+                tramo_activo = next(
+                    (t for t in sorted(config.tramos, key=lambda t: t.desde)
+                    if total >= t.desde and (t.hasta is None or total <= t.hasta)),
+                    None
+                )
+                comision_porcentaje = tramo_activo.valor if tramo_activo else 0
             total_comision_productos += comision_producto
+            unidades_en_agregado_actual += p.cantidad
         
         # Construir objeto producto
         nuevo_producto = {

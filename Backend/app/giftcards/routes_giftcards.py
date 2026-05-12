@@ -149,6 +149,7 @@ async def _registrar_venta_y_factura(
     identificador: str,
     fecha_actual: datetime,
     registrado_por: str,
+    vendedor_nombre: str = "",
     tipo_movimiento: str = "Compra",       # "Compra" | "Recarga"
     notas: Optional[str] = None,
 ) -> None:
@@ -201,6 +202,8 @@ async def _registrar_venta_y_factura(
         },
         "numero_comprobante": numero_comprobante,
         "facturado_por": registrado_por,
+        "vendido_por": vendedor_nombre,           # ← NUEVO
+        "profesional_nombre": vendedor_nombre,    # ← NUEVO
         "estado_factura": "facturado",
         "estado_pago": "pagado",
         "saldo_pendiente": 0,
@@ -333,6 +336,7 @@ async def crear_giftcard(
         identificador=_generar_numero(),
         fecha_actual=fecha_actual,
         registrado_por=current_user.get("email"),
+        vendedor_nombre=current_user.get("nombre", ""),
         tipo_movimiento="Compra",
         notas=data.notas,
     )
@@ -443,6 +447,7 @@ async def recargar_giftcard(
         identificador=_generar_numero(),
         fecha_actual=fecha_actual,
         registrado_por=current_user.get("email"),
+        vendedor_nombre=current_user.get("nombre", ""), 
         tipo_movimiento="Recarga",
         notas=data.notas,
     )
@@ -1095,6 +1100,7 @@ async def migrar_giftcard(
             identificador=_generar_numero(),
             fecha_actual=fecha_emision,         # ← fecha histórica
             registrado_por=current_user.get("email"),
+            vendedor_nombre=current_user.get("nombre", ""),
             tipo_movimiento="Compra",
             notas=nota_migracion,
         )

@@ -91,12 +91,6 @@ class Cliente(BaseModel):
             raise ValueError("Formato de fecha inválido. Use YYYY-MM-DD")"""
         return v
 
-
-class NotaCliente(BaseModel):
-    nota: str
-    fecha: datetime
-    autor: str
-
 # ─── MODELO ─────────────────────────────────────────────────────
 CalificacionValor = Literal["excelente", "bueno", "regular", "malo", "no_se_atiende"]
 

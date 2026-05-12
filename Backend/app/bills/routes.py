@@ -265,6 +265,10 @@ async def facturar_cita_o_venta(
     # 4️⃣ PREPARAR ITEMS - PRODUCTOS
     # ====================================
     total_comision_productos = 0
+    unidades_producto_factura = 0
+    recalculo_escalonado_productos = None
+    periodo_productos_inicio_str = None
+    periodo_productos_fin_str = None
 
     if tipo == "cita":
         productos_lista = documento.get("productos", [])
@@ -279,6 +283,8 @@ async def facturar_cita_o_venta(
                     "precio_unitario": item["precio_unitario"],
                     "subtotal": item["subtotal"],
                     "comision_ya_calculada": item.get("comision", None),  # ← preservar
+                    "comision_tipo": item.get("comision_tipo"),
+                    "comision_porcentaje": item.get("comision_porcentaje"),
                     "agregado_por_rol": item.get("agregado_por_rol", ""),
                     "agregado_por_email": item.get("agregado_por_email", ""),
                 })
@@ -290,6 +296,8 @@ async def facturar_cita_o_venta(
         subtotal_producto = producto.get("subtotal", precio_producto * cantidad)
 
         comision_producto = 0
+        comision_tipo_aplicado = producto.get("comision_tipo")
+        comision_valor_aplicado = producto.get("comision_porcentaje", 0)
         agregado_por_rol = producto.get("agregado_por_rol", "")
         agregado_por_email = producto.get("agregado_por_email", "")
         comision_ya_calculada = producto.get("comision_ya_calculada")
@@ -314,36 +322,68 @@ async def facturar_cita_o_venta(
                     vendedor_doc = await collection_auth.find_one(
                         {"correo_electronico": agregado_por_email}
                     )
+                    vendedor_profesional_id = str(vendedor_doc["_id"]) if vendedor_doc else None
                 elif profesional_id:
                     vendedor_doc = profesional_db
+                    vendedor_profesional_id = profesional_id
                 else:
                     vendedor_doc = None
+                    vendedor_profesional_id = None
 
                 # ── Nuevo engine ──────────────────────────────────────
                 config = resolver_config_comision(producto_db_item, vendedor_doc, inventario_db, sede)
 
                 ctx = await construir_contexto(
-                    profesional_id=profesional_id,
+                    profesional_id=vendedor_profesional_id,
                     sede_id=sede_id,
                     cantidad_actual=cantidad,
                     moneda_sede=moneda_sede,
+                    vendedor_nombre=(vendedor_doc or {}).get("nombre") or profesional_nombre,
                 )
+                ctx.cantidad_acumulada_periodo += unidades_producto_factura
+                periodo_productos_inicio_str = ctx.inicio_periodo.strftime("%Y-%m-%d")
+                periodo_productos_fin_str = ctx.fin_periodo.strftime("%Y-%m-%d")
 
                 resultado = calcular_comision(config, subtotal_producto, ctx)
                 comision_producto = resultado.valor
+                comision_tipo_aplicado = config.tipo
 
-                if resultado.hubo_cambio_nivel and resultado.nivel_nuevo:
+                if config.tipo in ("porcentaje", "fijo", "por_unidad"):
+                    comision_valor_aplicado = config.valor
+                elif config.tipo == "escalonado" and resultado.nivel_nuevo:
+                    comision_valor_aplicado = resultado.nivel_nuevo.valor
+                    comision_tipo_aplicado = resultado.nivel_nuevo.tipo
+                elif config.tipo == "escalonado":
+                    total_escalonado = ctx.cantidad_acumulada_periodo + ctx.cantidad_actual
+                    tramo_activo = next(
+                        (t for t in sorted(config.tramos, key=lambda t: t.desde)
+                        if total_escalonado >= t.desde and (t.hasta is None or total_escalonado <= t.hasta)),
+                        None
+                    )
+                    if tramo_activo:
+                        comision_valor_aplicado = tramo_activo.valor
+                        comision_tipo_aplicado = tramo_activo.tipo
+
+                if config.tipo == "escalonado" and comision_valor_aplicado and vendedor_profesional_id:
+                    recalculo_escalonado_productos = {
+                        "profesional_id": vendedor_profesional_id,
+                        "nuevo_porcentaje": comision_valor_aplicado,
+                        "nuevo_tipo": comision_tipo_aplicado,
+                        "inicio_periodo": ctx.inicio_periodo,
+                        "fin_periodo": ctx.fin_periodo,
+                    }
                     await recalcular_comisiones_periodo(
-                        profesional_id=profesional_id,
+                        profesional_id=vendedor_profesional_id,
                         sede_id=sede_id,
-                        nuevo_porcentaje=resultado.nivel_nuevo.valor,
-                        nuevo_tipo=resultado.nivel_nuevo.tipo,
+                        nuevo_porcentaje=comision_valor_aplicado,
+                        nuevo_tipo=comision_tipo_aplicado,
                         inicio_periodo=ctx.inicio_periodo,
                         fin_periodo=ctx.fin_periodo,
                     )
                 # ─────────────────────────────────────────────────────
 
                 total_comision_productos += comision_producto
+                unidades_producto_factura += cantidad
 
         items.append({
             "tipo": "producto",
@@ -353,7 +393,9 @@ async def facturar_cita_o_venta(
             "precio_unitario": precio_producto,
             "subtotal": subtotal_producto,
             "moneda": moneda_sede,
-            "comision": comision_producto
+            "comision": comision_producto,
+            "comision_tipo": comision_tipo_aplicado,
+            "comision_porcentaje": comision_valor_aplicado,
         })
         print(f"  🛍️ {producto.get('nombre')}: ${subtotal_producto} (comisión: ${comision_producto})")
 
@@ -609,6 +651,9 @@ async def facturar_cita_o_venta(
                 "cantidad": item["cantidad"],
                 "valor_producto": item["subtotal"],
                 "valor_comision": round(item["comision"], 2),
+                "valor_comision_productos": round(item["comision"], 2),
+                "comision_tipo": item.get("comision_tipo"),
+                "comision_valor_aplicado": item.get("comision_porcentaje", 0),
                 "fecha": fecha_actual.strftime("%Y-%m-%d"),
                 "numero_comprobante": numero_comprobante,
                 "origen_tipo": tipo,
@@ -750,7 +795,8 @@ async def facturar_cita_o_venta(
             comision_doc_prod = await collection_commissions.find_one({
                 "profesional_id": receptor_productos_id,
                 "sede_id": sede_id,
-                "estado": "pendiente"
+                "estado": "pendiente",
+                "periodo_inicio": periodo_productos_inicio_str or fecha_actual_str,
             })
 
             crear_nuevo_prod = False
@@ -779,7 +825,7 @@ async def facturar_cita_o_venta(
             if comision_doc_prod and not crear_nuevo_prod:
                 ops = {
                     "$inc": {"total_comisiones": total_comision_productos_reg},
-                    "$set": {"estado": "pendiente", "periodo_fin": fecha_actual_str}
+                    "$set": {"estado": "pendiente", "periodo_fin": periodo_productos_fin_str or fecha_actual_str}
                 }
                 if "productos_detalle" not in comision_doc_prod:
                     ops["$set"]["productos_detalle"] = productos_comision
@@ -788,7 +834,7 @@ async def facturar_cita_o_venta(
                         ops["$push"] = {}
                     ops["$push"]["productos_detalle"] = {"$each": productos_comision}
                 if "periodo_inicio" not in comision_doc_prod:
-                    ops["$set"]["periodo_inicio"] = fecha_actual_str
+                    ops["$set"]["periodo_inicio"] = periodo_productos_inicio_str or fecha_actual_str
                 await collection_commissions.update_one({"_id": comision_doc_prod["_id"]}, ops)
                 doc_act = await collection_commissions.find_one({"_id": comision_doc_prod["_id"]})
                 if doc_act:
@@ -810,12 +856,18 @@ async def facturar_cita_o_venta(
                     "total_comisiones": total_comision_productos_reg,
                     "servicios_detalle": [],
                     "productos_detalle": productos_comision,
-                    "periodo_inicio": fecha_actual_str,
-                    "periodo_fin": fecha_actual_str,
+                    "periodo_inicio": periodo_productos_inicio_str or fecha_actual_str,
+                    "periodo_fin": periodo_productos_fin_str or fecha_actual_str,
                     "estado": "pendiente",
                     "creado_en": fecha_actual
                 })
                 comision_msg += f" | Comisión productos creada ({total_comision_productos_reg} {moneda_sede})"
+
+            if recalculo_escalonado_productos:
+                await recalcular_comisiones_periodo(
+                    sede_id=sede_id,
+                    **recalculo_escalonado_productos,
+                )
 
         if comision_msg == "No aplica comisión para esta sede" and (servicios_comision or productos_comision):
             comision_msg = "Sin receptor válido para registrar comisión"
