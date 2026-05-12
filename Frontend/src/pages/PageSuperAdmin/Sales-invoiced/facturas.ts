@@ -408,8 +408,11 @@ export class FacturaService {
       profesional_id: factura.profesional_id,
       profesional_nombre: factura.profesional_nombre,
       metodo_pago: metodoPago,
-      facturado_por: factura.facturado_por || factura.vendido_por || "Sistema",
-      vendido_por: factura.vendido_por || factura.facturado_por || "Sistema",
+      facturado_por: factura.facturado_por || "Sistema",
+      // Mantener vendido_por fiel al dato real de backend.
+      // No usar fallback a facturado_por: distorsiona reportes de vendedores
+      // porque caja/admin termina apareciendo como si hubiera vendido todo.
+      vendido_por: factura.vendido_por,
       estado: estado,
       items: items,
       historial_pagos: historial,
