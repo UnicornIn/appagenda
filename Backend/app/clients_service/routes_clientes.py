@@ -576,6 +576,7 @@ async def buscar_clientes_ligero(
 @router.get("/todos", response_model=ClientesPaginados)
 async def listar_todos(
     filtro: Optional[str] = Query(None, description="Búsqueda por nombre, teléfono, correo, cédula o ID"),
+    segmento: Optional[str] = Query(None, description="inactivos | nuevos"),  # ← NUEVO
     limite: int = Query(30, ge=1, le=100),
     pagina: int = Query(1, ge=1),
     current_user: dict = Depends(get_current_user)
@@ -594,6 +595,22 @@ async def listar_todos(
             raise HTTPException(403, "No tienes permisos para ver clientes")
  
         query_base = await _get_query_base(rol, current_user)
+        # ── Filtro de segmento ───────────────────────────────────────────
+        # Se aplica sobre campos ya calculados y guardados en BD por el backfill.
+        FILTROS_SEGMENTO = {
+            "inactivos": {"$or": [
+                {"dias_sin_visitar": {"$gte": 180}},
+                {"segmento": "Perdido"},
+            ]},
+            "nuevos": {"$or": [
+                {"total_visitas": {"$lte": 1}},
+                {"segmento": "Nuevo"},
+                {"total_visitas": {"$exists": False}},   # nunca tuvo backfill
+            ]},
+        }
+        if segmento and segmento in FILTROS_SEGMENTO:
+            query_base = {**query_base, **FILTROS_SEGMENTO[segmento]}
+        # ────────────────────────────────────────────────────────────────
         filtro_limpio = filtro.strip() if filtro else None
  
         projection = {
@@ -616,7 +633,7 @@ async def listar_todos(
         }
         # ── SIN FILTRO: comportamiento original con paginación ──────────────
         if not filtro_limpio:
-            if rol == "super_admin" and not query_base:
+            if rol == "super_admin" and not segmento and not query_base:
                 total_clientes = await collection_clients.estimated_document_count()
             else:
                 total_clientes = await collection_clients.count_documents(query_base)

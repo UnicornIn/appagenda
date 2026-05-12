@@ -316,12 +316,12 @@ async def reenviar_pdf_correo(
         )
         
         # Crear nombre del archivo
-        nombre_archivo = f"comprobante_servicio_{cliente_id[-6:]}_{cita_id[-6:]}.pdf"
+        nombre_archivo = f"ficha_diagnostico_{cliente_id[-6:]}_{cita_id[-6:]}.pdf"
         
         # Enviar correo
         enviado = await enviar_correo_con_pdf(
             destinatario=email_a_usar,
-            asunto=f"📄 Comprobante de Servicio - {ficha.get('servicio_nombre', 'Servicio')}",
+            asunto=f"📄 Ficha Diagnostico - {ficha.get('servicio_nombre', 'Servicio')}",
             mensaje_html=html_correo,
             pdf_bytes=pdf_bytes,
             nombre_archivo=nombre_archivo

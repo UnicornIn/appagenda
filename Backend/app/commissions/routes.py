@@ -152,7 +152,17 @@ def formatear_comision_response(comision: dict) -> ComisionResponse:
 
 
 # ⭐ NUEVA FUNCIÓN: Calcular totales desglosados por tipo
-def calcular_totales_por_tipo(servicios_detalle: list) -> dict:
+def _valor_comision_producto_detalle(item: dict) -> float:
+    for campo in ("valor_comision_productos", "valor_comision", "comision", "comision_valor"):
+        if item.get(campo) is not None:
+            try:
+                return float(item.get(campo) or 0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def calcular_totales_por_tipo(servicios_detalle: list, productos_detalle: list | None = None) -> dict:
     """
     Calcula totales de comisiones desglosados por tipo
     """
@@ -162,6 +172,9 @@ def calcular_totales_por_tipo(servicios_detalle: list) -> dict:
     for servicio in servicios_detalle:
         total_servicios += servicio.get("valor_comision_servicio", 0)
         total_productos += servicio.get("valor_comision_productos", 0)
+
+    for producto in productos_detalle or []:
+        total_productos += _valor_comision_producto_detalle(producto)
     
     total_general = total_servicios + total_productos
     
@@ -225,7 +238,10 @@ async def obtener_comision_detalle(
         verificar_acceso_sede(user, comision)
         
         # ⭐ CALCULAR TOTALES DESGLOSADOS
-        totales = calcular_totales_por_tipo(comision.get("servicios_detalle", []))
+        totales = calcular_totales_por_tipo(
+            comision.get("servicios_detalle", []),
+            comision.get("productos_detalle", []),
+        )
         
         return ComisionDetalleResponse(
             id=str(comision["_id"]),
@@ -239,6 +255,7 @@ async def obtener_comision_detalle(
             total_comisiones_servicios=totales["total_comisiones_servicios"],  # ⭐ NUEVO
             total_comisiones_productos=totales["total_comisiones_productos"],  # ⭐ NUEVO
             servicios_detalle=comision["servicios_detalle"],
+            productos_detalle=comision.get("productos_detalle", []),
             periodo_inicio=comision.get("periodo_inicio", ""),
             periodo_fin=comision.get("periodo_fin", ""),
             estado=comision.get("estado", "pendiente"),
@@ -362,6 +379,8 @@ async def obtener_resumen_pendientes(
             for servicio in servicios:
                 total_comisiones_servicios += servicio.get("valor_comision_servicio", 0)
                 total_comisiones_productos += servicio.get("valor_comision_productos", 0)
+            for producto in comision.get("productos_detalle", []):
+                total_comisiones_productos += _valor_comision_producto_detalle(producto)
         
         # Obtener moneda (puede ser null para comisiones viejas)
         moneda = comisiones_pendientes[0].get("moneda") if comisiones_pendientes else None
@@ -390,6 +409,8 @@ async def obtener_resumen_pendientes(
             for servicio in servicios:
                 por_profesional[prof_id]["total_comisiones_servicios"] += servicio.get("valor_comision_servicio", 0)
                 por_profesional[prof_id]["total_comisiones_productos"] += servicio.get("valor_comision_productos", 0)
+            for producto in comision.get("productos_detalle", []):
+                por_profesional[prof_id]["total_comisiones_productos"] += _valor_comision_producto_detalle(producto)
         
         return {
             "total_comisiones_pendientes": total_comisiones,
@@ -473,6 +494,8 @@ async def obtener_resumen_por_tipo(
             for servicio in servicios:
                 resumen_por_profesional[key]["comisiones_por_servicios"] += servicio.get("valor_comision_servicio", 0)
                 resumen_por_profesional[key]["comisiones_por_productos"] += servicio.get("valor_comision_productos", 0)
+            for producto in comision.get("productos_detalle", []):
+                resumen_por_profesional[key]["comisiones_por_productos"] += _valor_comision_producto_detalle(producto)
         
         # Calcular porcentajes
         resultado = []

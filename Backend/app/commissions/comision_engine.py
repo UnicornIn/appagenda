@@ -186,6 +186,32 @@ class ResultadoComision:
     hubo_cambio_nivel: bool = False
     nivel_nuevo: Tramo | None = None
 
+
+def obtener_tramo_escalonado(config: ComisionEscalonado, cantidad_total: int) -> Tramo | None:
+    tramos = sorted(config.tramos, key=lambda t: t.desde)
+    return next(
+        (
+            t for t in tramos
+            if cantidad_total >= t.desde and (t.hasta is None or cantidad_total <= t.hasta)
+        ),
+        None
+    )
+
+
+def calcular_valor_comision_item(
+    *,
+    tipo: str,
+    valor: float,
+    subtotal: float,
+    cantidad: int = 1,
+) -> float:
+    if tipo == "porcentaje":
+        return round((float(subtotal) * float(valor)) / 100, 2)
+    if tipo in ("por_unidad", "fijo"):
+        return round(float(valor) * max(int(cantidad or 1), 1), 2)
+    return 0.0
+
+
 def calcular_comision(
     config: ComisionPorcentaje | ComisionFijo | ComisionEscalonado | ComisionPorUnidad,
     subtotal: float,
@@ -202,7 +228,12 @@ def calcular_comision(
 
     elif config.tipo == "fijo":
         return ResultadoComision(
-            valor=round(float(config.valor), 2)
+            valor=calcular_valor_comision_item(
+                tipo=config.tipo,
+                valor=config.valor,
+                subtotal=subtotal,
+                cantidad=ctx.cantidad_actual,
+            )
         )
 
     elif config.tipo == "por_unidad":
@@ -213,26 +244,17 @@ def calcular_comision(
     elif config.tipo == "escalonado":
         total_antes   = ctx.cantidad_acumulada_periodo
         total_despues = ctx.cantidad_acumulada_periodo + ctx.cantidad_actual
-        tramos = sorted(config.tramos, key=lambda t: t.desde)
-
-        nivel_antes = next(
-            (t for t in tramos
-             if total_antes >= t.desde and (t.hasta is None or total_antes <= t.hasta)),
-            None
-        )
-        nivel_despues = next(
-            (t for t in tramos
-             if total_despues >= t.desde and (t.hasta is None or total_despues <= t.hasta)),
-            None
-        )
+        nivel_antes = obtener_tramo_escalonado(config, total_antes)
+        nivel_despues = obtener_tramo_escalonado(config, total_despues)
 
         if nivel_despues is None:
             return ResultadoComision(valor=0.0)
 
-        valor = (
-            round((subtotal * nivel_despues.valor) / 100, 2)
-            if nivel_despues.tipo == "porcentaje"
-            else round(float(nivel_despues.valor), 2)
+        valor = calcular_valor_comision_item(
+            tipo=nivel_despues.tipo,
+            valor=nivel_despues.valor,
+            subtotal=subtotal,
+            cantidad=ctx.cantidad_actual,
         )
 
         hubo_cambio = (
