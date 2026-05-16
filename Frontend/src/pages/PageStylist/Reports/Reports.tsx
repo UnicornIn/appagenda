@@ -19,6 +19,7 @@ import {
 } from "recharts";
 import { useNavigate } from "react-router-dom";
 import StylistBottomNav from "../../../components/Layout/StylistBottomNav";
+import { DatePicker } from "../../../components/ui/DatePicker";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import {
   formatDateDMY,
@@ -539,32 +540,28 @@ export default function StylistReportsPage() {
                   <div className="space-y-2 text-sm text-gray-700">
                     <label className="flex items-center justify-between gap-2">
                       <span className="text-xs text-gray-600">Desde</span>
-                      <input
-                        type="date"
+                      <DatePicker
                         value={pendingRange.start}
                         max={pendingRange.end || undefined}
-                        onChange={(e) =>
+                        onChange={(v) =>
                           setPendingRange((current) => ({
                             ...current,
-                            start: e.target.value,
+                            start: v,
                           }))
                         }
-                        className="h-10 w-40 rounded-lg border border-gray-200 px-2 text-sm"
                       />
                     </label>
                     <label className="flex items-center justify-between gap-2">
                       <span className="text-xs text-gray-600">Hasta</span>
-                      <input
-                        type="date"
+                      <DatePicker
                         value={pendingRange.end}
                         min={pendingRange.start || undefined}
-                        onChange={(e) =>
+                        onChange={(v) =>
                           setPendingRange((current) => ({
                             ...current,
-                            end: e.target.value,
+                            end: v,
                           }))
                         }
-                        className="h-10 w-40 rounded-lg border border-gray-200 px-2 text-sm"
                       />
                     </label>
                     <div className="mt-2 flex gap-2">

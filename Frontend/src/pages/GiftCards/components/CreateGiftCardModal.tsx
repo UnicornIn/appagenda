@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "../../../components/ui/dialog";
 import { Input } from "../../../components/ui/input";
+import { DatePicker } from "../../../components/ui/DatePicker";
 import { giftcardsService } from "../giftcardsService";
 import type { GiftCardClientOption, GiftCardCreatePayload } from "../types";
 import { formatMoney, toPositiveNumber } from "./utils";
@@ -616,12 +617,10 @@ export function CreateGiftCardModal({
               {validityMode === "custom" ? (
                 <div className="space-y-1">
                   <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">Fecha de vencimiento</label>
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={customExpiryDate}
                     min={getTodayDateInput()}
-                    onChange={(event) => setCustomExpiryDate(event.target.value)}
-                    className={MODAL_INPUT_CLASS}
+                    onChange={(v) => setCustomExpiryDate(v)}
                   />
                 </div>
               ) : validityMode === "annual" ? (

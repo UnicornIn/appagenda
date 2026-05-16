@@ -96,6 +96,8 @@ export interface Movimiento {
   referencia_tipo: string;
   referencia_id: string;
   origen: "sistema" | "manual";
+  cliente_nombre?: string;
+  cliente_id?: string;
 }
 
 export interface MovimientosResponse {

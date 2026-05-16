@@ -3,7 +3,6 @@
 import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
-  ChevronDown,
   Loader2,
   Plus,
   Save,
@@ -18,7 +17,7 @@ import { Button } from "../../components/ui/button";
 import { Avatar, AvatarFallback } from "../../components/ui/avatar";
 import { Badge } from "../../components/ui/badge";
 import { Input } from "../../components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
+import { PeriodoSelector, type PeriodoId } from "../../components/ui/PeriodoSelector";
 import { useAuth } from "../../components/Auth/AuthContext";
 import { facturaService, type FacturaConverted } from "../../pages/PageSuperAdmin/Sales-invoiced/facturas";
 import { sedeService, type Sede } from "../../pages/PageSuperAdmin/Sedes/sedeService";
@@ -40,6 +39,11 @@ import {
   type PerformancePeriod,
   type PerformanceProfessional,
 } from "./performanceApi";
+import {
+  getTransacciones,
+  type TransaccionItem,
+  type TransaccionesResponse,
+} from "./transaccionesApi";
 import {
   buildStylistDashboardRows,
   buildVendorRows,
@@ -454,7 +458,8 @@ export function StylistsTeamWorkspace({
   const [isLegacyCreateOpen, setIsLegacyCreateOpen] = useState(false);
   const [isLegacyCreateSaving, setIsLegacyCreateSaving] = useState(false);
   const [legacyEditStylist, setLegacyEditStylist] = useState<Estilista | null>(null);
-  const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
+  const [periodoActivo, setPeriodoActivo] = useState<PeriodoId>("30dias");
+  const [rangoAplicado, setRangoAplicado] = useState<{ from: Date; to: Date } | undefined>(undefined);
   const [invoices, setInvoices] = useState<FacturaConverted[]>([]);
   const [appointments, setAppointments] = useState<TeamAppointmentRecord[]>([]);
   const [schedulesByStylist, setSchedulesByStylist] = useState<Record<string, TeamScheduleRecord[]>>({});
@@ -462,6 +467,13 @@ export function StylistsTeamWorkspace({
   const [performanceError, setPerformanceError] = useState<string | null>(null);
   const [performancePeriod, setPerformancePeriod] = useState<PerformancePeriod | null>(null);
   const commissionsSectionRef = useRef<HTMLDivElement | null>(null);
+
+  // ── Transacciones ──────────────────────────────────────────────────────────
+  const [transacciones, setTransacciones] = useState<TransaccionesResponse | null>(null);
+  const [transaccionesLoading, setTransaccionesLoading] = useState(false);
+  const [, setTransaccionesPage] = useState(1);
+  const [transaccionesTipoItem, setTransaccionesTipoItem] = useState("todos");
+  const [transaccionesProfesional, setTransaccionesProfesional] = useState("");
 
   const invoicesCacheRef = useRef<Map<string, FacturaConverted[]>>(new Map());
   const appointmentsCacheRef = useRef<Map<string, TeamAppointmentRecord[]>>(new Map());
@@ -1190,6 +1202,29 @@ export function StylistsTeamWorkspace({
     };
   }, [dateRange, filteredStylists, loadAppointmentsForRange, loadSchedulesForStylists, selectedSedeIds, token]);
 
+  const handlePeriodoChange = useCallback((periodo: PeriodoId, fechas?: { from: Date; to: Date }) => {
+    setPeriodoActivo(periodo);
+    const hoy = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const todayStr = fmt(hoy);
+    if (periodo === "hoy") {
+      setDateRange({ start: todayStr, end: todayStr });
+    } else if (periodo === "7dias") {
+      const s = new Date(hoy); s.setDate(s.getDate() - 6);
+      setDateRange({ start: fmt(s), end: todayStr });
+    } else if (periodo === "mes") {
+      const s = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+      setDateRange({ start: fmt(s), end: todayStr });
+    } else if (periodo === "30dias") {
+      const s = new Date(hoy); s.setDate(s.getDate() - 29);
+      setDateRange({ start: fmt(s), end: todayStr });
+    } else if (periodo === "rango" && fechas) {
+      setRangoAplicado(fechas);
+      setDateRange({ start: fmt(fechas.from), end: fmt(fechas.to) });
+    }
+  }, []);
+
   const updateEditor = <K extends keyof EditorState>(key: K, value: EditorState[K]) => {
     setEditorState((current) => (current ? { ...current, [key]: value } : current));
   };
@@ -1571,6 +1606,32 @@ export function StylistsTeamWorkspace({
     void loadPerformance();
   }, [loadPerformance, performanceCacheKey]);
 
+  const loadTransacciones = useCallback(async (page = 1) => {
+    if (!token || !primarySelectedSedeId) return;
+    setTransaccionesLoading(true);
+    try {
+      const data = await getTransacciones(token, {
+        sede_id: primarySelectedSedeId,
+        fecha_desde: dateRange.start,
+        fecha_hasta: dateRange.end,
+        tipo_item: transaccionesTipoItem !== "todos" ? transaccionesTipoItem : undefined,
+        profesional: transaccionesProfesional || undefined,
+        page,
+        page_size: 20,
+      });
+      setTransacciones(data);
+      setTransaccionesPage(page);
+    } catch {
+      setTransacciones(null);
+    } finally {
+      setTransaccionesLoading(false);
+    }
+  }, [token, primarySelectedSedeId, dateRange.start, dateRange.end, transaccionesTipoItem, transaccionesProfesional]);
+
+  useEffect(() => {
+    if (viewMode === "dashboard") void loadTransacciones(1);
+  }, [viewMode, loadTransacciones]);
+
   const handleOpenCreate = () => {
     if (LegacyCreateModal) {
       setIsLegacyCreateOpen(true);
@@ -1635,96 +1696,36 @@ export function StylistsTeamWorkspace({
             }
           />
 
-          <section className={`${PANEL_CLASS} p-6`}>
-            <div className="grid gap-4 xl:grid-cols-[minmax(240px,300px)_minmax(320px,360px)] xl:items-end xl:justify-between">
-              <div>
-                <label className={FIELD_LABEL_CLASS}>
-                  Sede
-                </label>
-                {shouldShowSedeDropdown ? (
-                  <select
-                    value={selectedSedeId}
-                    onChange={(event) => setSelectedSedeId(event.target.value)}
-                    className={SELECT_CLASS}
-                  >
-                    {canSelectAllSedes ? (
-                      <option value={ALL_SEDES_VALUE}>Todas las sedes</option>
-                    ) : null}
-                    {visibleSedes.map((sede) => (
-                      <option key={sede.sede_id} value={sede.sede_id}>
-                        {formatSedeNombre(sede.nombre, sede.sede_id)}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="flex h-10 w-full items-center rounded-md border border-gray-300 bg-gray-50 px-3 text-sm text-gray-900 shadow-sm">
-                    {selectedSedeLabel}
-                  </div>
-                )}
+          <div className="mt-4">
+            {shouldShowSedeDropdown ? (
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-xs text-slate-500 font-medium">Sede:</span>
+                <select
+                  value={selectedSedeId}
+                  onChange={(event) => setSelectedSedeId(event.target.value)}
+                  className="px-2 py-[5px] border border-slate-200 rounded-lg text-xs bg-white font-semibold text-slate-700 focus:outline-none"
+                >
+                  {canSelectAllSedes ? (
+                    <option value={ALL_SEDES_VALUE}>Todas las sedes</option>
+                  ) : null}
+                  {visibleSedes.map((sede) => (
+                    <option key={sede.sede_id} value={sede.sede_id}>
+                      {formatSedeNombre(sede.nombre, sede.sede_id)}
+                    </option>
+                  ))}
+                </select>
               </div>
-
-              <div>
-                <label className={FIELD_LABEL_CLASS}>
-                  Rango
-                </label>
-                <Popover open={isDateRangeOpen} onOpenChange={setIsDateRangeOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 text-left text-sm text-gray-900 shadow-sm transition hover:bg-gray-50"
-                    >
-                      <span className="truncate">{formatDateRangeSelectLabel(dateRange)}</span>
-                      <ChevronDown
-                        className={`ml-3 h-4 w-4 shrink-0 text-gray-500 transition-transform ${
-                          isDateRangeOpen ? "rotate-180" : ""
-                        }`}
-                      />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    align="start"
-                    className="w-[min(92vw,360px)] rounded-lg border border-gray-300 bg-white p-4 shadow-lg"
-                  >
-                    <div className="space-y-4">
-                      <div>
-                        <label className={FIELD_LABEL_CLASS}>
-                          Fecha inicial
-                        </label>
-                        <Input
-                          type="date"
-                          value={dateRange.start}
-                          max={dateRange.end || undefined}
-                          onChange={(event) =>
-                            setDateRange((current) => ({ ...current, start: event.target.value }))
-                          }
-                          className={INPUT_CLASS}
-                        />
-                      </div>
-
-                      <div>
-                        <label className={FIELD_LABEL_CLASS}>
-                          Fecha final
-                        </label>
-                        <Input
-                          type="date"
-                          value={dateRange.end}
-                          min={dateRange.start || undefined}
-                          onChange={(event) =>
-                            setDateRange((current) => ({ ...current, end: event.target.value }))
-                          }
-                          className={INPUT_CLASS}
-                        />
-                      </div>
-
-                      <div className="rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-600">
-                        {formatDateRangeSelectLabel(dateRange)}
-                      </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-          </section>
+            ) : selectedSedeLabel ? (
+              <p className="mb-2 text-xs text-slate-500">
+                Sede: <span className="font-semibold text-slate-700">{selectedSedeLabel}</span>
+              </p>
+            ) : null}
+            <PeriodoSelector
+              periodoActivo={periodoActivo}
+              onPeriodoChange={handlePeriodoChange}
+              rangoAplicado={rangoAplicado}
+            />
+          </div>
 
           {bootError ? (
             <div className={ERROR_ALERT_CLASS}>
@@ -1882,6 +1883,123 @@ export function StylistsTeamWorkspace({
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                )}
+              </section>
+
+              {/* ── Detalle de Transacciones ─────────────────────────────── */}
+              <section className={`${PANEL_CLASS} p-6`}>
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900">Detalle de Transacciones</h2>
+                    <p className="text-sm text-gray-500">
+                      Registro individual de servicios, productos y otros ítems facturados.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={transaccionesTipoItem}
+                      onChange={(e) => { setTransaccionesTipoItem(e.target.value); void loadTransacciones(1); }}
+                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm focus:outline-none"
+                    >
+                      <option value="todos">Todos los tipos</option>
+                      <option value="servicio">Servicio</option>
+                      <option value="producto">Producto</option>
+                      <option value="membresia">Membresía</option>
+                      <option value="paquete">Paquete</option>
+                    </select>
+                    <select
+                      value={transaccionesProfesional}
+                      onChange={(e) => { setTransaccionesProfesional(e.target.value); void loadTransacciones(1); }}
+                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm focus:outline-none"
+                    >
+                      <option value="">Todos los profesionales</option>
+                      {filteredStylists.map((s) => (
+                        <option key={s.profesional_id} value={s.profesional_id}>
+                          {s.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {transaccionesLoading ? (
+                  <div className="flex items-center justify-center py-10 text-gray-400">
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Cargando transacciones…
+                  </div>
+                ) : transacciones && transacciones.items.length > 0 ? (
+                  <>
+                    <div className={TABLE_WRAPPER_CLASS}>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                          <thead className={TABLE_HEAD_CLASS}>
+                            <tr>
+                              <th className={TABLE_HEAD_CELL_CLASS}>Fecha</th>
+                              <th className={TABLE_HEAD_CELL_CLASS}>Comprobante</th>
+                              <th className={TABLE_HEAD_CELL_CLASS}>Tipo</th>
+                              <th className={TABLE_HEAD_CELL_CLASS}>Responsable</th>
+                              <th className={TABLE_HEAD_CELL_CLASS}>Tipo Ítem</th>
+                              <th className={TABLE_HEAD_CELL_CLASS}>Nombre</th>
+                              <th className={TABLE_HEAD_CELL_CLASS}>Cant.</th>
+                              <th className={TABLE_HEAD_CELL_CLASS}>P. Unitario</th>
+                              <th className={TABLE_HEAD_CELL_CLASS}>Subtotal</th>
+                              <th className={TABLE_HEAD_CELL_CLASS}>Comisión</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white">
+                            {transacciones.items.map((item: TransaccionItem, idx: number) => (
+                              <tr key={`${item.comprobante}-${idx}`} className={TABLE_ROW_CLASS}>
+                                <td className={TABLE_CELL_CLASS}>{item.fecha?.slice(0, 10) ?? "–"}</td>
+                                <td className={TABLE_CELL_CLASS}>{item.comprobante || "–"}</td>
+                                <td className={TABLE_CELL_CLASS}>{item.tipo || "–"}</td>
+                                <td className={TABLE_CELL_CLASS}>{item.responsable || "–"}</td>
+                                <td className={TABLE_CELL_CLASS}>{item.tipo_item || "–"}</td>
+                                <td className={TABLE_CELL_CLASS}>{item.nombre_item || "–"}</td>
+                                <td className={TABLE_CELL_CLASS}>{item.cantidad}</td>
+                                <td className={TABLE_CELL_CLASS}>{formatCurrencyNoDecimals(item.precio_unitario, currency)}</td>
+                                <td className={TABLE_CELL_CLASS}>{formatCurrencyNoDecimals(item.subtotal, currency)}</td>
+                                <td className={TABLE_CELL_CLASS}>
+                                  {formatCurrencyNoDecimals(item.comision, currency)}
+                                  {item.porcentaje_comision > 0 && (
+                                    <span className="ml-1 text-[10px] text-gray-400">({item.porcentaje_comision}%)</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                    {/* Paginación */}
+                    {transacciones.pages > 1 && (
+                      <div className="mt-3 flex items-center justify-between text-sm text-gray-500">
+                        <span>
+                          Página {transacciones.page} de {transacciones.pages} · {transacciones.total} registros
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={transacciones.page <= 1}
+                            onClick={() => void loadTransacciones(transacciones.page - 1)}
+                            className="rounded border border-gray-300 px-3 py-1 text-xs disabled:opacity-40 hover:bg-gray-50"
+                          >
+                            ← Anterior
+                          </button>
+                          <button
+                            type="button"
+                            disabled={transacciones.page >= transacciones.pages}
+                            onClick={() => void loadTransacciones(transacciones.page + 1)}
+                            className="rounded border border-gray-300 px-3 py-1 text-xs disabled:opacity-40 hover:bg-gray-50"
+                          >
+                            Siguiente →
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-5 py-8 text-sm text-gray-500 text-center">
+                    No hay transacciones para el período y filtros seleccionados.
                   </div>
                 )}
               </section>

@@ -1,0 +1,103 @@
+/* react-day-picker v9 – paleta blanco/negro */
+
+.rdp-root {
+  --rdp-accent-color: #000000;
+  --rdp-accent-background-color: #e5e5e5;
+  --rdp-today-color: #000000;
+  --rdp-selected-border: 2px solid #000000;
+
+  --rdp-range_middle-background-color: #e5e5e5;
+  --rdp-range_middle-color: #000000;
+  --rdp-range_start-date-background-color: #000000;
+  --rdp-range_start-color: #ffffff;
+  --rdp-range_end-date-background-color: #000000;
+  --rdp-range_end-color: #ffffff;
+
+  --rdp-day-height: 36px;
+  --rdp-day-width: 36px;
+  --rdp-day_button-height: 34px;
+  --rdp-day_button-width: 34px;
+  --rdp-day_button-border-radius: 6px;
+  --rdp-nav_button-height: 2rem;
+  --rdp-nav_button-width: 2rem;
+}
+
+/* Popover de rango flotante (Dashboard) */
+.rdp-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 100;
+  background: #ffffff;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.10);
+  padding: 16px;
+  white-space: nowrap;
+}
+
+/* Popover container (DatePicker individual) */
+.datepicker-popover {
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10);
+  padding: 12px;
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 290px;
+}
+
+/* Caption */
+.rdp-caption_label {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+/* Navigation buttons */
+.rdp-button_previous,
+.rdp-button_next {
+  border: 1px solid #d4d4d4 !important;
+  border-radius: 6px;
+  background: #fff;
+}
+.rdp-button_previous:hover,
+.rdp-button_next:hover {
+  background: #f0f0f0 !important;
+}
+
+/* Hover on unselected days */
+.rdp-day_button:hover:not([disabled]) {
+  background: #f0f0f0;
+}
+
+/* Today: bold + black border */
+.rdp-today:not(.rdp-selected) .rdp-day_button {
+  font-weight: 700;
+  border: 1.5px solid #000 !important;
+}
+
+/* Selected day */
+.rdp-selected .rdp-day_button {
+  background: #000 !important;
+  color: #fff !important;
+}
+.rdp-selected .rdp-day_button:hover {
+  background: #222 !important;
+}
+
+/* Range middle */
+.rdp-range_middle .rdp-day_button {
+  background: #e5e5e5 !important;
+  color: #000 !important;
+  border-radius: 0 !important;
+}
+
+/* Range start / end */
+.rdp-range_start .rdp-day_button,
+.rdp-range_end .rdp-day_button {
+  background: #000 !important;
+  color: #fff !important;
+}

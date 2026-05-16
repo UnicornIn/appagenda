@@ -1,7 +1,7 @@
 import { PageHeader } from "../../components/Layout/PageHeader";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
-import { Input } from "../../components/ui/input";
+import { DatePicker } from "../../components/ui/DatePicker";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Badge } from "../../components/ui/badge";
@@ -135,17 +135,13 @@ export function ProductsHeaderFilters({
 
           {showCustomDates && (
             <div className="flex flex-wrap gap-2">
-              <Input
-                type="date"
+              <DatePicker
                 value={dateRange.start_date}
-                onChange={(e) => onDateRangeChange({ ...dateRange, start_date: e.target.value })}
-                className="border-gray-300"
+                onChange={(v) => onDateRangeChange({ ...dateRange, start_date: v })}
               />
-              <Input
-                type="date"
+              <DatePicker
                 value={dateRange.end_date}
-                onChange={(e) => onDateRangeChange({ ...dateRange, end_date: e.target.value })}
-                className="border-gray-300"
+                onChange={(v) => onDateRangeChange({ ...dateRange, end_date: v })}
               />
             </div>
           )}

@@ -16,6 +16,7 @@ import {
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { PageHeader } from "../../../components/Layout/PageHeader";
+import { PeriodoSelector, type PeriodoId } from "../../../components/ui/PeriodoSelector";
 import { FacturaDetailModal } from "./factura-detail-modal";
 import type { Factura } from "../../../types/factura";
 import { facturaService } from "./facturas";
@@ -218,6 +219,16 @@ export function VentasFacturadasList() {
   const [dateRange, setDateRange] = useState<DateRange>(() =>
     getDefaultCustomDateRange(),
   );
+  const [periodoActivo, setPeriodoActivo] = useState<PeriodoId>("7dias");
+  const [rangoAplicado, setRangoAplicado] = useState<{ from: Date; to: Date } | undefined>(undefined);
+
+  const PERIODO_TO_BILLING: Record<PeriodoId, BillingPeriod> = {
+    hoy: "today",
+    "7dias": "last_7_days",
+    mes: "month",
+    "30dias": "last_30_days",
+    rango: "custom",
+  };
   const [selectedFactura, setSelectedFactura] = useState<Factura | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [facturas, setFacturas] = useState<Factura[]>([]);
@@ -576,6 +587,19 @@ export function VentasFacturadasList() {
     setPeriod(newPeriod);
   };
 
+  const handlePeriodoChange = (periodo: PeriodoId, fechas?: { from: Date; to: Date }) => {
+    setPeriodoActivo(periodo);
+    const billing = PERIODO_TO_BILLING[periodo];
+    setPeriod(billing);
+    if (periodo === "rango" && fechas) {
+      setRangoAplicado(fechas);
+      setDateRange({
+        start_date: toIsoLocalDate(fechas.from),
+        end_date: toIsoLocalDate(fechas.to),
+      });
+    }
+  };
+
   const irAPagina = (pagina: number) => {
     if (pagina >= 1 && pagina <= (pagination?.total_pages || 1)) {
       setCurrentPage(pagina);
@@ -845,99 +869,32 @@ export function VentasFacturadasList() {
       <div className="space-y-6">
         <PageHeader title="Ventas Facturadas" />
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <div className="grid grid-cols-1 gap-3">
-            <div className="max-w-full lg:max-w-xl">
-              <label className="mb-1 block text-xs font-medium text-gray-700">
-                Buscar cliente/comprobante
-              </label>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-                <Input
-                  placeholder="Nombre, cédula, email o número de comprobante..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="h-9 pl-8 text-sm"
-                />
-              </div>
+        <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+          {/* Row: buscador + período en la misma línea */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative min-w-[220px] flex-1">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+              <Input
+                placeholder="Buscar cliente, cédula, email o comprobante..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="h-9 pl-8 text-sm"
+              />
             </div>
+            <PeriodoSelector
+              periodoActivo={periodoActivo}
+              onPeriodoChange={handlePeriodoChange}
+              rangoAplicado={rangoAplicado}
+            />
           </div>
 
-          <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-gray-600" />
-                <span className="text-sm text-gray-600">Período:</span>
-              </div>
-
-              <div className="flex flex-wrap gap-1">
-                {PERIOD_OPTIONS.map((option) => (
-                  <Button
-                    key={option.id}
-                    size="sm"
-                    variant={period === option.id ? "default" : "outline"}
-                    className={`border-gray-300 text-xs ${
-                      period === option.id
-                        ? "bg-black text-white hover:bg-gray-800"
-                        : "text-gray-700 hover:bg-gray-100"
-                    }`}
-                    onClick={() => handlePeriodChange(option.id)}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </div>
-
-              {period === "custom" && (
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <input
-                    type="date"
-                    value={dateRange.start_date}
-                    onChange={(e) =>
-                      setDateRange((prev) => ({
-                        ...prev,
-                        start_date: e.target.value,
-                      }))
-                    }
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 sm:w-auto"
-                    max={dateRange.end_date || today}
-                  />
-                  <input
-                    type="date"
-                    value={dateRange.end_date}
-                    onChange={(e) =>
-                      setDateRange((prev) => ({
-                        ...prev,
-                        end_date: e.target.value,
-                      }))
-                    }
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 sm:w-auto"
-                    min={dateRange.start_date}
-                    max={today}
-                  />
-                </div>
-              )}
+          {/* Rango aplicado — solo cuando hay info útil */}
+          {appliedPeriodSummary && (
+            <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
+              <Calendar className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+              <span>{appliedPeriodSummary}</span>
             </div>
-
-            {(appliedPeriodSummary || activeSearchSummary) && (
-              <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600 lg:justify-end">
-                {appliedPeriodSummary && (
-                  <div className="inline-flex max-w-full items-center gap-2 text-sm text-gray-700">
-                    <Calendar className="h-4 w-4 text-gray-500" />
-                    <span className="break-words">{appliedPeriodSummary}</span>
-                  </div>
-                )}
-                {activeSearchSummary && (
-                  <div className="inline-flex max-w-full items-center gap-2 text-sm text-gray-700">
-                    <Search className="h-4 w-4 text-gray-500" />
-                    <span className="break-words">
-                      Búsqueda: {activeSearchSummary}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          )}
         </div>
 
         <PaymentMethodsSummary

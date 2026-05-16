@@ -6,6 +6,7 @@ import { getEstilistas, type Estilista } from "../Professionales/estilistasApi";
 import { formatSedeNombre } from "../../lib/sede";
 import TimeInputWithPicker from "../ui/time-input-with-picker";
 import { formatAgendaTime, normalizeAgendaTimeValue } from "../../lib/agenda";
+import { DatePicker } from "../ui/DatePicker";
 
 interface BloqueosProps {
   onClose: () => void;
@@ -726,13 +727,10 @@ const Bloqueos: React.FC<BloqueosProps> = ({
           <label className={fieldLabelClass}>
             Fecha
           </label>
-          <input
-            type="date"
+          <DatePicker
             value={formData.fecha}
-            onChange={(e) => handleInputChange('fecha', e.target.value)}
-            required
+            onChange={(v) => handleInputChange('fecha', v)}
             min={isEditing ? undefined : new Date().toISOString().split('T')[0]}
-            className={controlClass}
             disabled={isEditing}
           />
           {isEditing && (
@@ -781,12 +779,10 @@ const Bloqueos: React.FC<BloqueosProps> = ({
                 <label className={fieldLabelClass}>
                   Repetir hasta
                 </label>
-                <input
-                  type="date"
+                <DatePicker
                   value={repeatUntil}
-                  onChange={(e) => setRepeatUntil(e.target.value)}
+                  onChange={(v) => setRepeatUntil(v)}
                   min={formData.fecha || new Date().toISOString().split("T")[0]}
-                  className={`${controlClass} bg-white`}
                 />
               </div>
 

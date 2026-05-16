@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Trash2, Plus, TrendingUp, TrendingDown, DollarSign, Loader2 } from "lucide-react";
+import { DatePicker } from "../../../components/ui/DatePicker";
 import { useAuth } from "../../../components/Auth/AuthContext";
 import {
   getCategorias,
@@ -138,11 +139,9 @@ export default function Gastos() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">Gastos & P&amp;L</h1>
         <div className="flex gap-2">
-          <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)}
-            className="border border-gray-300 rounded px-2 py-1 text-xs" />
+          <DatePicker value={desde} onChange={(v) => setDesde(v)} />
           <span className="text-gray-400 self-center text-xs">—</span>
-          <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)}
-            className="border border-gray-300 rounded px-2 py-1 text-xs" />
+          <DatePicker value={hasta} onChange={(v) => setHasta(v)} />
         </div>
       </div>
 
@@ -199,9 +198,7 @@ export default function Gastos() {
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Fecha</label>
-                <input type="date" value={form.fecha}
-                  onChange={(e) => setForm({ ...form, fecha: e.target.value })}
-                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:ring-1 focus:ring-gray-900 outline-none" />
+                <DatePicker value={form.fecha} onChange={(v) => setForm({ ...form, fecha: v })} />
               </div>
 
               <div>

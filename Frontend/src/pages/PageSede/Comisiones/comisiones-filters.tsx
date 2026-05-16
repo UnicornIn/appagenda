@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select"
-import { Calendar } from "lucide-react";
+import { PeriodoSelector, type PeriodoId } from "../../../components/ui/PeriodoSelector";
 import { profesionalesService } from "./Api/profesionalesService";
 import { Professional } from "../../../types/commissions";
 
@@ -25,6 +25,8 @@ export function ComisionesFilters({ onFiltersChange }: ComisionesFiltersProps) {
   const [tipoComisionSeleccionado, setTipoComisionSeleccionado] = useState<string>("placeholder");
   const [fechaInicio, setFechaInicio] = useState<string>("");
   const [fechaFin, setFechaFin] = useState<string>("");
+  const [periodoActivo, setPeriodoActivo] = useState<PeriodoId>("mes");
+  const [rangoAplicado, setRangoAplicado] = useState<{ from: Date; to: Date } | undefined>(undefined);
   const [estilistas, setEstilistas] = useState<Professional[]>([]);
   const [cargandoEstilistas, setCargandoEstilistas] = useState(false);
 
@@ -116,6 +118,28 @@ export function ComisionesFilters({ onFiltersChange }: ComisionesFiltersProps) {
     setFechaFin(defaultDates.fin);
   }, []);
 
+  const handlePeriodoChange = (periodo: PeriodoId, fechas?: { from: Date; to: Date }) => {
+    setPeriodoActivo(periodo);
+    const hoy = new Date();
+    const todayStr = formatDate(hoy);
+    if (periodo === "hoy") {
+      setFechaInicio(todayStr); setFechaFin(todayStr);
+    } else if (periodo === "7dias") {
+      const s = new Date(hoy); s.setDate(s.getDate() - 6);
+      setFechaInicio(formatDate(s)); setFechaFin(todayStr);
+    } else if (periodo === "mes") {
+      const s = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+      const e = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+      setFechaInicio(formatDate(s)); setFechaFin(formatDate(e));
+    } else if (periodo === "30dias") {
+      const s = new Date(hoy); s.setDate(s.getDate() - 29);
+      setFechaInicio(formatDate(s)); setFechaFin(todayStr);
+    } else if (periodo === "rango" && fechas) {
+      setRangoAplicado(fechas);
+      setFechaInicio(formatDate(fechas.from)); setFechaFin(formatDate(fechas.to));
+    }
+  };
+
   return (
     <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:flex-wrap">
       {/* Estado fijo - Pendiente */}
@@ -183,33 +207,12 @@ export function ComisionesFilters({ onFiltersChange }: ComisionesFiltersProps) {
         </Select>
       </div>
 
-      {/* Selector de fecha inicio */}
-      <div className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 min-w-[200px]">
-        <Calendar className="h-4 w-4 text-gray-400" />
-        <div className="flex flex-col">
-          <span className="text-xs text-gray-500">Desde</span>
-          <input
-            type="date"
-            value={fechaInicio}
-            onChange={(e) => setFechaInicio(e.target.value)}
-            className="text-sm bg-white border-none outline-none w-full text-gray-900"
-          />
-        </div>
-      </div>
-
-      {/* Selector de fecha fin */}
-      <div className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 min-w-[200px]">
-        <Calendar className="h-4 w-4 text-gray-400" />
-        <div className="flex flex-col">
-          <span className="text-xs text-gray-500">Hasta</span>
-          <input
-            type="date"
-            value={fechaFin}
-            onChange={(e) => setFechaFin(e.target.value)}
-            className="text-sm bg-white border-none outline-none w-full text-gray-900"
-          />
-        </div>
-      </div>
+      {/* Selector de período */}
+      <PeriodoSelector
+        periodoActivo={periodoActivo}
+        onPeriodoChange={handlePeriodoChange}
+        rangoAplicado={rangoAplicado}
+      />
 
       {/* Botón para limpiar filtros - CORREGIDO */}
       {(estilistaSeleccionado !== "placeholder" || tipoComisionSeleccionado !== "placeholder") && (
