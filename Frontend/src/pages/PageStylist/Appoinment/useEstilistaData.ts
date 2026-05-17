@@ -3,6 +3,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Cita } from '../../../types/fichas';
 import { API_BASE_URL } from '../../../types/config';
+import { facturaService } from '../../PageSede/Sales-invoiced/facturas';
+
+const getStoredSedeId = () =>
+  sessionStorage.getItem("beaux-active-sede_id") ||
+  sessionStorage.getItem("beaux-sede_id") ||
+  localStorage.getItem("beaux-active-sede_id") ||
+  localStorage.getItem("beaux-sede_id") ||
+  "";
 
 export function useEstilistaData() {
   const [citas, setCitas] = useState<Cita[]>([]);
@@ -12,6 +20,7 @@ export function useEstilistaData() {
   const [comisionProductosPct, setComisionProductosPct] = useState<number | null>(null);
   const [comisionesPorCategoria, setComisionesPorCategoria] = useState<Record<string, number> | null>(null);
   const [totalesPorCategoriaHoy, setTotalesPorCategoriaHoy] = useState<Record<string, number>>({});
+  const [comisionesTotalesHoy, setComisionesTotalesHoy] = useState<number | null>(null);
 
   const fetchCitas = useCallback(async () => {
     try {
@@ -145,6 +154,55 @@ export function useEstilistaData() {
           } catch (profError) {
             console.error("❌ Error obteniendo comisiones del estilista:", profError);
           }
+
+          // Fetch today's invoices and sum item.comision for this professional
+          // (mirrors the logic in Reportes to ensure consistent commission display)
+          try {
+            const sedeId = getStoredSedeId();
+            if (sedeId) {
+              const todayStr = new Date().toISOString().slice(0, 10);
+              const facturas = await facturaService.getVentasBySedeAllPages(
+                sedeId,
+                todayStr,
+                todayStr,
+                undefined,
+                { pageSize: 200 },
+              );
+
+              let totalComision = 0;
+              let hasAnyComision = false;
+
+              for (const factura of facturas) {
+                const facturaProId = factura.profesional_id
+                  ? String(factura.profesional_id).trim().toLowerCase()
+                  : "";
+                const belongsToPro =
+                  facturaProId === String(profesionalId).trim().toLowerCase();
+
+                const items = Array.isArray(factura.items) ? factura.items : [];
+                for (const item of items) {
+                  const itemProId = item.profesional_id
+                    ? String(item.profesional_id).trim().toLowerCase()
+                    : "";
+                  const itemBelongs = itemProId
+                    ? itemProId === String(profesionalId).trim().toLowerCase()
+                    : belongsToPro;
+
+                  if (itemBelongs) {
+                    const c = item.comision;
+                    if (typeof c === "number" && Number.isFinite(c)) {
+                      totalComision += c;
+                      hasAnyComision = true;
+                    }
+                  }
+                }
+              }
+
+              setComisionesTotalesHoy(hasAnyComision ? totalComision : null);
+            }
+          } catch {
+            // not critical — widget will fall back to percentage calc
+          }
         }
       }
     } catch (err) {
@@ -258,6 +316,7 @@ export function useEstilistaData() {
     comisionProductosPct,
     comisionesPorCategoria,
     totalesPorCategoriaHoy,
+    comisionesTotalesHoy,
     loading,
     error,
     refetchCitas: fetchCitas,

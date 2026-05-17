@@ -19,6 +19,7 @@ import {
 } from "./salesMetricsApi"
 import { API_BASE_URL } from "../../../types/config"
 import { getStoredCurrency } from "../../../lib/currency"
+import { PeriodoSelector, type PeriodoId } from "../../../components/ui/PeriodoSelector"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,12 +89,6 @@ const BILLING_VISIBLE_STATES = new Set([
   "facturada",
 ])
 
-const PERIOD_CHIPS = [
-  { id: "today", label: "Hoy" },
-  { id: "last_7_days", label: "7 días" },
-  { id: "last_30_days", label: "30 días" },
-  { id: "month", label: "Mes actual" },
-]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -172,11 +167,16 @@ export default function Billing() {
     start_date: "",
     end_date: "",
   })
-  const [showDateModal, setShowDateModal] = useState(false)
-  const [tempDateRange, setTempDateRange] = useState<DateRange>({
-    start_date: "",
-    end_date: "",
-  })
+  const [periodoActivo, setPeriodoActivo] = useState<PeriodoId>("7dias")
+  const [rangoAplicado, setRangoAplicado] = useState<{ from: Date; to: Date } | undefined>(undefined)
+
+  const PERIODO_TO_PERIOD: Record<PeriodoId, string> = {
+    hoy: "today",
+    "7dias": "last_7_days",
+    mes: "month",
+    "30dias": "last_30_days",
+    rango: "custom",
+  }
 
   // ── Appointments ──────────────────────────────────────────────────────────
   const [allAppointments, setAllAppointments] = useState<Appointment[]>([])
@@ -423,22 +423,16 @@ export default function Billing() {
     { id: "no-ficha", label: "Sin ficha", count: stats.noFicha },
   ]
 
-  const handlePeriodChange = (newPeriod: string) => {
-    if (newPeriod === "custom") {
-      setTempDateRange(appliedRange)
-      setShowDateModal(true)
-      return
+  const handlePeriodoChange = (periodo: PeriodoId, fechas?: { from: Date; to: Date }) => {
+    setPeriodoActivo(periodo)
+    setPeriod(PERIODO_TO_PERIOD[periodo])
+    if (periodo === "rango" && fechas) {
+      setRangoAplicado(fechas)
+      setDateRange({
+        start_date: toYmd(fechas.from),
+        end_date: toYmd(fechas.to),
+      })
     }
-    setPeriod(newPeriod)
-  }
-
-  const handleApplyDateRange = () => {
-    if (!tempDateRange.start_date || !tempDateRange.end_date) return
-    if (new Date(tempDateRange.start_date) > new Date(tempDateRange.end_date))
-      return
-    setDateRange(tempDateRange)
-    setPeriod("custom")
-    setShowDateModal(false)
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -450,114 +444,6 @@ export default function Billing() {
         onSaleCompleted={() => setMetricsRefreshKey((k) => k + 1)}
       />
 
-      {/* Custom date range modal */}
-      {showDateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-lg w-full max-w-md mx-4 p-6 shadow-xl">
-            <h3 className="text-xl font-bold text-gray-900 mb-1">
-              Seleccionar rango de fechas
-            </h3>
-            <p className="text-sm text-gray-600 mb-5">
-              Elige las fechas para filtrar las citas de facturación
-            </p>
-
-            {/* Quick ranges */}
-            <div className="mb-4">
-              <p className="text-xs font-medium text-gray-500 mb-2">Rangos rápidos:</p>
-              <div className="flex gap-2">
-                {[
-                  { label: "7 días", days: 6 },
-                  { label: "30 días", days: 29 },
-                  { label: "Mes actual", days: -1 },
-                ].map((r) => {
-                  const today = new Date()
-                  const handleQuick = () => {
-                    let start: Date
-                    if (r.days === -1) {
-                      start = new Date(today.getFullYear(), today.getMonth(), 1)
-                    } else {
-                      start = new Date(today)
-                      start.setDate(start.getDate() - r.days)
-                    }
-                    setTempDateRange({ start_date: toYmd(start), end_date: toYmd(today) })
-                  }
-                  return (
-                    <button
-                      key={r.label}
-                      onClick={handleQuick}
-                      className="px-3 py-1.5 border border-gray-200 rounded-full text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-                    >
-                      {r.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Fecha de inicio
-                </label>
-                <input
-                  type="date"
-                  value={tempDateRange.start_date}
-                  onChange={(e) =>
-                    setTempDateRange((p) => ({
-                      ...p,
-                      start_date: e.target.value,
-                    }))
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  max={tempDateRange.end_date || toYmd(new Date())}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Fecha de fin
-                </label>
-                <input
-                  type="date"
-                  value={tempDateRange.end_date}
-                  onChange={(e) =>
-                    setTempDateRange((p) => ({
-                      ...p,
-                      end_date: e.target.value,
-                    }))
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  min={tempDateRange.start_date}
-                  max={toYmd(new Date())}
-                />
-              </div>
-            </div>
-
-            {/* Selected range preview */}
-            {tempDateRange.start_date && tempDateRange.end_date && (
-              <div className="mt-4 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
-                <span className="font-medium">Rango seleccionado:</span>{" "}
-                {tempDateRange.start_date} - {tempDateRange.end_date}
-              </div>
-            )}
-
-            <div className="mt-5 flex gap-3">
-              <Button
-                className="flex-1 bg-black text-white hover:bg-gray-800"
-                onClick={handleApplyDateRange}
-              >
-                Aplicar rango
-              </Button>
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setShowDateModal(false)}
-              >
-                Cancelar
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="flex flex-col h-screen bg-white">
         <Sidebar />
@@ -591,33 +477,12 @@ export default function Billing() {
           </div>
 
           {/* Period bar */}
-          <div className="px-8 pt-4 pb-0 flex items-center gap-1.5 flex-shrink-0">
-            <span className="text-xs font-medium text-gray-500 mr-1">
-              Período:
-            </span>
-            {PERIOD_CHIPS.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => handlePeriodChange(c.id)}
-                className={`px-3.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
-                  period === c.id
-                    ? "bg-gray-900 text-white border-gray-900"
-                    : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
-                }`}
-              >
-                {c.label}
-              </button>
-            ))}
-            <button
-              onClick={() => handlePeriodChange("custom")}
-              className={`px-3.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
-                period === "custom"
-                  ? "bg-gray-900 text-white border-gray-900"
-                  : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
-              }`}
-            >
-              Rango personalizado
-            </button>
+          <div className="px-8 pt-4 pb-0 flex-shrink-0">
+            <PeriodoSelector
+              periodoActivo={periodoActivo}
+              onPeriodoChange={handlePeriodoChange}
+              rangoAplicado={rangoAplicado}
+            />
           </div>
 
           {/* KPI section — hidden for recepcionista */}

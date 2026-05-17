@@ -931,6 +931,7 @@ export function InventoryKardexTab({ productos, sedeId: sedeIdProp }: KardexTabP
                 <TableHeader className="bg-gray-50">
                   <TableRow>
                     <TableHead className="text-xs font-semibold text-gray-500">Fecha</TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-500">Cliente</TableHead>
                     <TableHead className="text-xs font-semibold text-gray-500">Tipo</TableHead>
                     <TableHead className="text-xs font-semibold text-gray-500">Motivo</TableHead>
                     <TableHead className="text-xs font-semibold text-gray-500 text-center">Entrada</TableHead>
@@ -942,7 +943,7 @@ export function InventoryKardexTab({ productos, sedeId: sedeIdProp }: KardexTabP
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="py-10 text-center text-sm text-gray-400">
+                      <TableCell colSpan={8} className="py-10 text-center text-sm text-gray-400">
                         <div className="flex items-center justify-center gap-2">
                           <Loader2 className="h-4 w-4 animate-spin" />
                           Cargando kardex...
@@ -951,7 +952,7 @@ export function InventoryKardexTab({ productos, sedeId: sedeIdProp }: KardexTabP
                     </TableRow>
                   ) : movimientos.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="py-10 text-center text-sm text-gray-400">
+                      <TableCell colSpan={8} className="py-10 text-center text-sm text-gray-400">
                         Sin movimientos en el período seleccionado
                       </TableCell>
                     </TableRow>
@@ -959,6 +960,11 @@ export function InventoryKardexTab({ productos, sedeId: sedeIdProp }: KardexTabP
                     movimientos.map((m) => (
                       <TableRow key={m.id} className="hover:bg-gray-50">
                         <TableCell className="text-xs text-gray-500 py-3">{formatDate(m.fecha)}</TableCell>
+                        <TableCell className="text-xs py-3">
+                          {m.cliente_nombre
+                            ? <span className="font-medium text-gray-700">{m.cliente_nombre}</span>
+                            : <span className="text-gray-300">—</span>}
+                        </TableCell>
                         <TableCell className="py-3">
                           <Badge
                             variant="outline"

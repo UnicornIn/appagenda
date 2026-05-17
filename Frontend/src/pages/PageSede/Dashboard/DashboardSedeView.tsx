@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { formatDateDMY, toLocalYMD } from "../../../lib/dateFormat";
+import { toLocalYMD } from "../../../lib/dateFormat";
 import {
   getVentasDashboard,
   getDashboard,
@@ -21,9 +21,25 @@ import {
   resolveCurrencyLocale,
 } from "../../../lib/currency";
 import { facturaService } from "../Sales-invoiced/facturas";
-import { cashService } from "../CierreCaja/api/cashService";
-import { CASH_PAYMENT_METHOD_OPTIONS, normalizeCashPaymentMethodForBackend } from "../CierreCaja/constants";
+import { CASH_PAYMENT_METHOD_OPTIONS } from "../CierreCaja/constants";
+import {
+  getResumenFinanciero,
+  crearEgresoMayor,
+  crearIngresoMayor,
+  crearEgresoMenor,
+  crearTraslado,
+  normalizeCategoria,
+  normalizeMetodoPago,
+  type ResumenFinanciero,
+} from "./finanzasMovimientosApi";
+import {
+  getClientesAnalytics,
+  getClientesNuevos,
+  type ClientesAnalyticsResponse,
+  type ClientesNuevosResponse,
+} from "./clientesAnalyticsApi";
 import { RefreshCw } from "lucide-react";
+import { DatePicker } from "../../../components/ui/DatePicker";
 
 interface DateRange {
   start_date: string;
@@ -226,6 +242,10 @@ export function DashboardSedeView({
   const [extendedMetrics, setExtendedMetrics] = useState<ExtendedMetrics | null>(null);
   const [analyticsKPIs, setAnalyticsKPIs] = useState<DashboardResponse | null>(null);
   const [churnData, setChurnData] = useState<ChurnCliente[]>([]);
+  const [resumenFinanciero, setResumenFinanciero] = useState<ResumenFinanciero | null>(null);
+  const [loadingResumen, setLoadingResumen] = useState(false);
+  const [clientAnalytics, setClientAnalytics] = useState<ClientesAnalyticsResponse | null>(null);
+  const [clientesNuevos, setClientesNuevos] = useState<ClientesNuevosResponse | null>(null);
 
   const [financialTab, setFinancialTab] = useState<"pl" | "cajas" | "traslados" | "registrar">("pl");
   const [registrarSubTab, setRegistrarSubTab] = useState<"egreso-mayor" | "ingreso-mayor" | "traslado" | "egreso-menor">("egreso-mayor");
@@ -233,10 +253,57 @@ export function DashboardSedeView({
   const [registrarLoading, setRegistrarLoading] = useState(false);
   const [registrarError, setRegistrarError] = useState<string | null>(null);
   const [registrarSuccess, setRegistrarSuccess] = useState<string | null>(null);
-  const [movimientosManuales, setMovimientosManuales] = useState<Array<{
+  type MovimientoManual = {
     id: string; fecha: string; caja: string; tipo: string;
     concepto: string; categoria: string; monto: number; esEgreso: boolean;
-  }>>([]);
+  };
+
+  const lsMovKey = (sid: string) => `finanzas_movimientos_${sid}`;
+
+  const readMovimientosLS = (sid: string): MovimientoManual[] => {
+    try {
+      const raw = localStorage.getItem(lsMovKey(sid));
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
+  };
+
+  // Sede efectiva para el formulario "Registrar" — cuando sedeId es "global"
+  // el usuario elige la sede dentro del formulario mismo.
+  const [registrarSedeId, setRegistrarSedeId] = useState<string>(
+    sedeId !== "global" ? sedeId : ""
+  );
+
+  const [movimientosManuales, setMovimientosManuales] = useState<MovimientoManual[]>(
+    () => sedeId !== "global" ? readMovimientosLS(sedeId) : []
+  );
+
+  // Sincroniza registrarSedeId cuando cambia la sede del header
+  useEffect(() => {
+    if (sedeId !== "global") {
+      setRegistrarSedeId(sedeId);
+    } else {
+      // En modo global: si aún no hay sede seleccionada, pre-seleccionar la primera disponible
+      setRegistrarSedeId((prev) => prev || (sedes.length > 0 ? sedes[0].sede_id : ""));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sedeId, sedes]);
+
+  // Recarga la lista desde localStorage cuando cambia la sede efectiva del formulario
+  useEffect(() => {
+    if (registrarSedeId) setMovimientosManuales(readMovimientosLS(registrarSedeId));
+    else setMovimientosManuales([]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registrarSedeId]);
+
+  // Persiste la lista en localStorage cada vez que se modifica
+  useEffect(() => {
+    if (!registrarSedeId) return;
+    try {
+      localStorage.setItem(lsMovKey(registrarSedeId), JSON.stringify(movimientosManuales));
+    } catch { /* quota exceeded – ignorar */ }
+  }, [movimientosManuales, registrarSedeId]);
 
   const resolveToday = () => toLocalYMD(new Date());
 
@@ -387,6 +454,49 @@ export function DashboardSedeView({
     }
   }, [token, sedeId]);
 
+  const loadResumenFinanciero = useCallback(async () => {
+    if (!token || !sedeId || sedeId === "global") return;
+    setLoadingResumen(true);
+    try {
+      const range = buildInvoiceRange();
+      const data = await getResumenFinanciero(token, {
+        sede_id: sedeId,
+        fecha_inicio: range.start_date,
+        fecha_fin: range.end_date,
+      });
+      setResumenFinanciero(data);
+    } catch {
+      // Silencioso: el dashboard muestra "–" si no hay datos
+      setResumenFinanciero(null);
+    } finally {
+      setLoadingResumen(false);
+    }
+  }, [token, sedeId, buildInvoiceRange]);
+
+  useEffect(() => {
+    loadResumenFinanciero();
+  }, [loadResumenFinanciero]);
+
+  const loadClientAnalytics = useCallback(async () => {
+    if (!token) return;
+    const effectiveSedeId = sedeId === "global" ? undefined : sedeId;
+    const range = buildInvoiceRange();
+    const [analytics, nuevos] = await Promise.all([
+      getClientesAnalytics(token, effectiveSedeId),
+      getClientesNuevos(token, {
+        fecha_inicio: range.start_date,
+        fecha_fin: range.end_date,
+        sede_id: effectiveSedeId,
+      }),
+    ]);
+    setClientAnalytics(analytics);
+    setClientesNuevos(nuevos);
+  }, [token, sedeId, buildInvoiceRange]);
+
+  useEffect(() => {
+    loadClientAnalytics();
+  }, [loadClientAnalytics]);
+
   const loadData = useCallback(async () => {
     if (!token || !sedeId) return;
     try {
@@ -477,17 +587,19 @@ export function DashboardSedeView({
     const monto = parseFloat(egresoMayorForm.monto.replace(/[̀-ͯ]/g, ""));
     if (!concepto) { setRegistrarError("El concepto es requerido"); return; }
     if (!monto || monto <= 0) { setRegistrarError("El monto debe ser mayor a 0"); return; }
+    if (!egresoMayorForm.categoria) { setRegistrarError("La categoría es requerida"); return; }
     setRegistrarLoading(true); setRegistrarError(null); setRegistrarSuccess(null);
     try {
       const fecha = egresoMayorForm.fecha || resolveToday();
-      await cashService.createEgreso({
-        sede_id: sedeId, monto, valor: monto, efectivo: monto,
-        concepto, motivo: concepto, descripcion: concepto,
-        nota: egresoMayorForm.observaciones || concepto,
-        tipo: egresoMayorForm.categoria || "otro_gasto",
-        metodo_pago: normalizeCashPaymentMethodForBackend(egresoMayorForm.metodo), fecha: formatDateDMY(fecha),
-        referencia: egresoMayorForm.referencia || undefined,
-        moneda: monedaUsuario, caja: "mayor",
+      await crearEgresoMayor(token, {
+        sede_id: registrarSedeId || sedeId,
+        fecha,
+        concepto,
+        monto,
+        categoria: normalizeCategoria("egreso-mayor", egresoMayorForm.categoria),
+        metodo_pago: normalizeMetodoPago(egresoMayorForm.metodo),
+        referencia_factura: egresoMayorForm.referencia || undefined,
+        observaciones: egresoMayorForm.observaciones || undefined,
       });
       setMovimientosManuales((prev) => [{
         id: `em-${Date.now()}`, fecha, caja: "Caja Mayor", tipo: "Egreso",
@@ -496,6 +608,7 @@ export function DashboardSedeView({
       setEgresoMayorForm({ concepto: "", monto: "", categoria: "", metodo: CASH_PAYMENT_METHOD_OPTIONS[0].value, fecha: resolveToday(), referencia: "", observaciones: "" });
       setRegistrarSuccess("Egreso de Caja Mayor registrado correctamente");
       setTimeout(() => setRegistrarSuccess(null), 3000);
+      loadResumenFinanciero();
     } catch (err: any) {
       setRegistrarError(err?.message || "No se pudo registrar el egreso");
     } finally { setRegistrarLoading(false); }
@@ -506,16 +619,19 @@ export function DashboardSedeView({
     const monto = parseFloat(ingresoMayorForm.monto.replace(/[̀-ͯ]/g, ""));
     if (!concepto) { setRegistrarError("El concepto es requerido"); return; }
     if (!monto || monto <= 0) { setRegistrarError("El monto debe ser mayor a 0"); return; }
+    if (!ingresoMayorForm.tipo) { setRegistrarError("El tipo de ingreso es requerido"); return; }
     setRegistrarLoading(true); setRegistrarError(null); setRegistrarSuccess(null);
     try {
       const fecha = ingresoMayorForm.fecha || resolveToday();
-      await cashService.createIngreso({
-        sede_id: sedeId, monto, concepto, motivo: concepto,
-        tipo: ingresoMayorForm.tipo || "ingreso_extraordinario",
-        metodo_pago: normalizeCashPaymentMethodForBackend(ingresoMayorForm.metodo), fecha: formatDateDMY(fecha),
-        referencia: ingresoMayorForm.referencia || undefined,
+      await crearIngresoMayor(token, {
+        sede_id: registrarSedeId || sedeId,
+        fecha,
+        concepto,
+        monto,
+        categoria: normalizeCategoria("ingreso-mayor", ingresoMayorForm.tipo),
+        metodo_pago: normalizeMetodoPago(ingresoMayorForm.metodo),
+        referencia_factura: ingresoMayorForm.referencia || undefined,
         observaciones: ingresoMayorForm.observaciones || undefined,
-        moneda: monedaUsuario, caja: "mayor",
       });
       setMovimientosManuales((prev) => [{
         id: `im-${Date.now()}`, fecha, caja: "Caja Mayor", tipo: "Ingreso",
@@ -524,6 +640,7 @@ export function DashboardSedeView({
       setIngresoMayorForm({ concepto: "", monto: "", tipo: "", metodo: CASH_PAYMENT_METHOD_OPTIONS[0].value, fecha: resolveToday(), referencia: "", observaciones: "" });
       setRegistrarSuccess("Ingreso de Caja Mayor registrado correctamente");
       setTimeout(() => setRegistrarSuccess(null), 3000);
+      loadResumenFinanciero();
     } catch (err: any) {
       setRegistrarError(err?.message || "No se pudo registrar el ingreso");
     } finally { setRegistrarLoading(false); }
@@ -531,30 +648,32 @@ export function DashboardSedeView({
 
   const handleTraslado = async () => {
     const monto = parseFloat(trasladoForm.monto.replace(/[̀-ͯ]/g, ""));
-    const concepto = trasladoForm.concepto.trim() || (transferDir === "menor-mayor" ? "Traslado Caja Menor → Caja Mayor" : "Traslado Caja Mayor → Caja Menor");
+    const concepto = trasladoForm.concepto.trim() || (transferDir === "menor-mayor" ? "Traslado Caja Menor a Caja Mayor" : "Traslado Caja Mayor a Caja Menor");
     if (!monto || monto <= 0) { setRegistrarError("El monto debe ser mayor a 0"); return; }
     setRegistrarLoading(true); setRegistrarError(null); setRegistrarSuccess(null);
     try {
       const fecha = trasladoForm.fecha || resolveToday();
-      const fechaDMY = formatDateDMY(fecha);
-      const [cajaOrigen, cajaDestino] = transferDir === "menor-mayor" ? ["menor", "mayor"] : ["mayor", "menor"];
-      await cashService.createEgreso({
-        sede_id: sedeId, monto, valor: monto, efectivo: monto, concepto, motivo: concepto,
-        descripcion: concepto, nota: trasladoForm.observaciones || concepto,
-        tipo: "traslado", metodo_pago: "efectivo", fecha: fechaDMY, moneda: monedaUsuario, caja: cajaOrigen,
-      });
-      await cashService.createIngreso({
-        sede_id: sedeId, monto, concepto, motivo: concepto,
-        tipo: "traslado", metodo_pago: "efectivo", fecha: fechaDMY, moneda: monedaUsuario, caja: cajaDestino,
+      const [cajaOrigen, cajaDestino] = transferDir === "menor-mayor"
+        ? (["caja_menor", "caja_mayor"] as const)
+        : (["caja_mayor", "caja_menor"] as const);
+      await crearTraslado(token, {
+        sede_id: registrarSedeId || sedeId,
+        fecha,
+        concepto,
+        monto,
+        caja_origen: cajaOrigen,
+        caja_destino: cajaDestino,
+        observaciones: trasladoForm.observaciones || undefined,
       });
       setMovimientosManuales((prev) => [{
         id: `tr-${Date.now()}`, fecha,
-        caja: `${cajaOrigen === "menor" ? "Caja Menor" : "Caja Mayor"} → ${cajaDestino === "mayor" ? "Caja Mayor" : "Caja Menor"}`,
+        caja: `${cajaOrigen === "caja_menor" ? "Caja Menor" : "Caja Mayor"} → ${cajaDestino === "caja_mayor" ? "Caja Mayor" : "Caja Menor"}`,
         tipo: "Traslado", concepto, categoria: "Traslado entre cajas", monto, esEgreso: false,
       }, ...prev].slice(0, 10));
       setTrasladoForm({ monto: "", fecha: resolveToday(), concepto: "", observaciones: "" });
       setRegistrarSuccess("Traslado registrado correctamente");
       setTimeout(() => setRegistrarSuccess(null), 3000);
+      loadResumenFinanciero();
     } catch (err: any) {
       setRegistrarError(err?.message || "No se pudo registrar el traslado");
     } finally { setRegistrarLoading(false); }
@@ -568,11 +687,14 @@ export function DashboardSedeView({
     setRegistrarLoading(true); setRegistrarError(null); setRegistrarSuccess(null);
     try {
       const fecha = egresoMenorForm.fecha || resolveToday();
-      await cashService.createEgreso({
-        sede_id: sedeId, monto, valor: monto, efectivo: monto, concepto, motivo: concepto,
-        descripcion: concepto, nota: egresoMenorForm.observaciones || concepto,
-        tipo: egresoMenorForm.categoria || "gasto_operativo", metodo_pago: "efectivo",
-        fecha: formatDateDMY(fecha), moneda: monedaUsuario, caja: "menor",
+      await crearEgresoMenor(token, {
+        sede_id: registrarSedeId || sedeId,
+        fecha,
+        concepto,
+        monto,
+        categoria: normalizeCategoria("egreso-menor", egresoMenorForm.categoria),
+        metodo_pago: "efectivo",
+        observaciones: egresoMenorForm.observaciones || undefined,
       });
       setMovimientosManuales((prev) => [{
         id: `emen-${Date.now()}`, fecha, caja: "Caja Menor", tipo: "Egreso",
@@ -581,6 +703,7 @@ export function DashboardSedeView({
       setEgresoMenorForm({ concepto: "", monto: "", categoria: "Gasto operativo", fecha: resolveToday(), observaciones: "" });
       setRegistrarSuccess("Egreso de Caja Menor registrado correctamente");
       setTimeout(() => setRegistrarSuccess(null), 3000);
+      loadResumenFinanciero();
     } catch (err: any) {
       setRegistrarError(err?.message || "No se pudo registrar el egreso");
     } finally { setRegistrarLoading(false); }
@@ -679,10 +802,12 @@ export function DashboardSedeView({
       ? analyticsKPIs.kpis.nuevos_clientes.valor
       : 0;
   const recurrentes = Math.max(0, clientesUnicos - nuevosClientes);
-  const pctRecurrentes = clientesUnicos > 0 ? Math.round((recurrentes / clientesUnicos) * 100) : 0;
-  const churnActivos = churnData.filter((c) => c.dias_inactivo >= 0 && c.dias_inactivo <= 120).length;
-  const churnEnRiesgo = churnData.filter((c) => c.dias_inactivo >= 121 && c.dias_inactivo <= 180).length;
-  const churnPerdidos = churnData.filter((c) => c.dias_inactivo > 180).length;
+  const pctRecurrentes = clientAnalytics?.recurrencia?.pct_recurrentes
+    ?? (clientesUnicos > 0 ? Math.round((recurrentes / clientesUnicos) * 100) : 0);
+  const estadoBase = clientAnalytics?.estado_base ?? null;
+  const churnActivos = estadoBase ? estadoBase.activos : churnData.filter((c) => c.dias_inactivo >= 0 && c.dias_inactivo <= 120).length;
+  const churnEnRiesgo = estadoBase ? estadoBase.en_riesgo : churnData.filter((c) => c.dias_inactivo >= 121 && c.dias_inactivo <= 180).length;
+  const churnPerdidos = estadoBase ? estadoBase.perdidos : churnData.filter((c) => c.dias_inactivo > 180).length;
 
   const isSpecificSede = sedeId !== "global";
 
@@ -800,9 +925,17 @@ export function DashboardSedeView({
           value={String(recurrentes)}
           sub={clientesUnicos > 0 ? `${pctRecurrentes}% del total` : "este período"}
         />
-        <ClientMetric label="Recurrencia prom." value="–" sub="datos no disponibles" />
+        <ClientMetric
+          label="Recurrencia prom."
+          value={clientAnalytics?.recurrencia?.texto ?? "–"}
+          sub={clientAnalytics?.recurrencia ? `${clientAnalytics.recurrencia.clientes_recurrentes} clientes` : "datos no disponibles"}
+        />
         <ClientMetric label="Ticket promedio" value={formatCurrency(metricas.ticket_promedio)} sub="por visita" />
-        <ClientMetric label="LTV promedio" value="–" sub="datos no disponibles" />
+        <ClientMetric
+          label="LTV promedio"
+          value={clientAnalytics?.ltv ? formatCurrency(clientAnalytics.ltv.ltv_promedio) : "–"}
+          sub={clientAnalytics?.ltv ? `ticket prom: ${formatCurrency(clientAnalytics.ltv.ticket_promedio)}` : "datos no disponibles"}
+        />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 mb-3.5">
@@ -832,7 +965,19 @@ export function DashboardSedeView({
         </Card>
 
         <Card title="Estado de la base">
-          {churnData.length > 0 ? (
+          {estadoBase ? (
+            <>
+              <RowItem name="Activos" value={String(estadoBase.activos)} sub={estadoBase.total > 0 ? `${Math.round((estadoBase.activos / estadoBase.total) * 100)}% del total` : undefined} />
+              <RowItem name="En riesgo" value={String(estadoBase.en_riesgo)} sub={estadoBase.total > 0 ? `${Math.round((estadoBase.en_riesgo / estadoBase.total) * 100)}% del total` : undefined} />
+              <RowItem name="Perdidos" value={String(estadoBase.perdidos)} sub={estadoBase.total > 0 ? `${Math.round((estadoBase.perdidos / estadoBase.total) * 100)}% del total` : undefined} />
+              {estadoBase.sin_visita > 0 && (
+                <RowItem name="Sin visita registrada" value={String(estadoBase.sin_visita)} />
+              )}
+              <div className="mt-1.5 text-[10px] text-slate-400">
+                Total base: {estadoBase.total} clientes
+              </div>
+            </>
+          ) : churnData.length > 0 ? (
             <>
               <RowItem name="Activos (0–120 días)" value={String(churnActivos)} sub="detectados" />
               <RowItem name="En riesgo (121–180 días)" value={String(churnEnRiesgo)} sub="detectados" />
@@ -840,20 +985,56 @@ export function DashboardSedeView({
             </>
           ) : (
             <>
-              <RowItem name="Activos (0–120 días)" value="–" />
-              <RowItem name="En riesgo (121–180 días)" value="–" />
-              <RowItem name="Perdidos (181+ días)" value="–" />
+              <RowItem name="Activos" value="–" />
+              <RowItem name="En riesgo" value="–" />
+              <RowItem name="Perdidos" value="–" />
             </>
           )}
-          <div className="mt-1.5 text-[10px] text-slate-400">
-            Segmentación completa requiere módulo de analítica avanzada
-          </div>
+          {!estadoBase && (
+            <div className="mt-1.5 text-[10px] text-slate-400">
+              Segmentación completa requiere módulo de analítica avanzada
+            </div>
+          )}
         </Card>
 
-        <Card title="Nuevos por mes">
-          <p className="text-xs text-slate-400 py-4 text-center">
-            Datos históricos mensuales no disponibles en la API actual
-          </p>
+        <Card title="Nuevos clientes">
+          {clientesNuevos && clientesNuevos.clientes.length > 0 ? (
+            <>
+              <div className="text-[10px] text-slate-400 mb-2">
+                {clientesNuevos.total} nuevos en el período
+              </div>
+              <div className="space-y-1">
+                {clientesNuevos.clientes.slice(0, 6).map((c) => (
+                  <div key={c.cliente_id} className="flex items-center justify-between text-xs py-1 border-b border-slate-100 last:border-b-0">
+                    <div>
+                      <div className="font-medium text-slate-800">{c.nombre}</div>
+                      <div className="text-[10px] text-slate-400">{c.fecha_creacion?.slice(0, 10)}</div>
+                    </div>
+                    <div className="text-[10px] text-slate-500 text-right">{c.telefono}</div>
+                  </div>
+                ))}
+              </div>
+              {/* {clientesNuevos.hay_mas && (
+                <div className="mt-2 text-[10px] text-slate-400 text-center">
+                  +{clientesNuevos.total - clientesNuevos.mostrando} más…
+                  {clientesNuevos.descarga_url && (
+                    <a
+                      href={clientesNuevos.descarga_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-1 underline text-slate-600"
+                    >
+                      Descargar lista
+                    </a>
+                  )}
+                </div>
+              )} */}
+            </>
+          ) : (
+            <p className="text-xs text-slate-400 py-4 text-center">
+              Sin nuevos clientes en este período
+            </p>
+          )}
         </Card>
       </div>
 
@@ -962,11 +1143,11 @@ export function DashboardSedeView({
                 <span className="font-semibold text-slate-700">Estado de Resultados (P&L)</span> — Rentabilidad real de la operación. Los traslados entre cajas NO aparecen aquí. Comisiones, arriendo y nómina SÍ aparecen aunque se paguen desde caja mayor.
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 mb-3.5">
-                <KPICard featured label="Ingresos" value={formatCurrency(metricas.ventas_totales)} sub="Servicios + Productos" />
-                <KPICard label="Costos directos" value="–" sub="Comisiones + Insumos" />
-                <KPICard label="Utilidad bruta" value="–" sub="Margen: –" />
-                <KPICard label="Gastos totales" value="–" sub="Fijos + Operativos" />
-                <KPICard label="Utilidad neta" value="–" sub="Margen: –" />
+                <KPICard featured label="Ingresos ventas" value={formatCurrency(metricas.ventas_totales)} sub="Servicios + Productos" />
+                <KPICard label="Ingresos extras" value={loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.pl.ingresos) : "–"} sub="Movimientos manuales" />
+                <KPICard label="Egresos manuales" value={loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.pl.egresos) : "–"} sub="Caja mayor + menor" />
+                <KPICard label="Utilidad mov." value={loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.pl.utilidad) : "–"} sub="Ingresos − Egresos mov." />
+                <KPICard label="Total ventas" value={formatCurrency(metricas.ventas_totales)} sub="Servicios + Productos" />
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
                 <Card title="Estado de Resultados" titleSub={getPeriodDisplay()}>
@@ -995,11 +1176,18 @@ export function DashboardSedeView({
                   <RowItem name={<>Marketing <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Caja Mayor</span></>} value="–" />
                   <RowItem name={<>Impuestos <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Caja Mayor</span></>} value="–" />
                   <div className="flex justify-between pt-2 pb-1 text-[13px] font-bold border-t border-slate-200 mt-1">
-                    <span>Total gastos</span><span>–</span>
+                    <span>Total egresos manuales</span>
+                    <span>{loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.pl.egresos) : "–"}</span>
                   </div>
                   <div className="flex justify-between pt-3 text-[16px] font-bold text-slate-800 border-t-2 border-slate-800 mt-1">
-                    <span>Utilidad neta</span><span>–</span>
+                    <span>Utilidad movimientos</span>
+                    <span className={resumenFinanciero && resumenFinanciero.pl.utilidad < 0 ? "text-red-600" : ""}>
+                      {loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.pl.utilidad) : "–"}
+                    </span>
                   </div>
+                  {resumenFinanciero?.pl.aclaracion && (
+                    <div className="mt-2 text-[10px] text-slate-400 italic">{resumenFinanciero.pl.aclaracion}</div>
+                  )}
                 </Card>
 
                 <div className="flex flex-col gap-3.5">
@@ -1029,7 +1217,11 @@ export function DashboardSedeView({
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 mb-3.5">
                 <Card title="Caja Menor" titleSub="Efectivo en sede · Auto + manual">
                   <div className="grid grid-cols-3 gap-2 mb-3">
-                    {[["Saldo", "–"], ["Entradas", formatCurrency(metricas.metodos_pago?.efectivo ?? 0)], ["Salidas", "–"]].map(([lbl, val]) => (
+                    {[
+                      ["Saldo", loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.cajas.caja_menor) : "–"],
+                      ["Entradas", formatCurrency(metricas.metodos_pago?.efectivo ?? 0)],
+                      ["Traslados →", loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.traslados.menor_a_mayor) : "–"],
+                    ].map(([lbl, val]) => (
                       <div key={lbl} className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-2.5">
                         <div className="text-[9px] text-slate-400 font-semibold uppercase tracking-[0.4px] mb-1">{lbl}</div>
                         <div className="text-[17px] font-bold text-slate-800">{val}</div>
@@ -1038,19 +1230,23 @@ export function DashboardSedeView({
                   </div>
                   <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mb-1">Entradas</div>
                   <RowItem name={<>Cobros efectivo <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto</span></>} value={formatCurrency(metricas.metodos_pago?.efectivo ?? 0)} />
-                  <RowItem name={<>Base de Caja Mayor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual</span></>} value="–" />
+                  <RowItem name={<span className="text-slate-400">⇄ Recibido de Caja Mayor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-400 ml-1.5">Manual</span></span>} value={loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.traslados.mayor_a_menor) : "–"} />
                   <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mt-3 mb-1">Salidas</div>
                   <RowItem name={<>Gastos operativos <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Recepción</span></>} value="–" />
-                  <RowItem name={<>Propinas <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Recepción</span></>} value="–" />
-                  <RowItem name={<span className="text-slate-400">⇄ Entregas a Caja Mayor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-400 ml-1.5">Manual</span></span>} value="–" />
+                  <RowItem name={<span className="text-slate-400">⇄ Entregas a Caja Mayor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-400 ml-1.5">Manual</span></span>} value={loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.traslados.menor_a_mayor) : "–"} />
                   <div className="flex justify-between pt-3 text-[15px] font-bold text-slate-800 border-t-2 border-slate-800 mt-2">
-                    <span>Saldo caja menor</span><span>–</span>
+                    <span>Saldo caja menor</span>
+                    <span>{loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.cajas.caja_menor) : "–"}</span>
                   </div>
                 </Card>
 
                 <Card title="Caja Mayor" titleSub="Cuenta principal · Auto + manual">
                   <div className="grid grid-cols-3 gap-2 mb-3">
-                    {[["Saldo", "–"], ["Entradas", formatCurrency((metricas.metodos_pago?.transferencia ?? 0) + (metricas.metodos_pago?.tarjeta ?? 0) + (metricas.metodos_pago?.tarjeta_credito ?? 0) + (metricas.metodos_pago?.tarjeta_debito ?? 0))], ["Salidas", "–"]].map(([lbl, val]) => (
+                    {[
+                      ["Saldo", loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.cajas.caja_mayor) : "–"],
+                      ["Entradas auto", formatCurrency((metricas.metodos_pago?.transferencia ?? 0) + (metricas.metodos_pago?.tarjeta ?? 0) + (metricas.metodos_pago?.tarjeta_credito ?? 0) + (metricas.metodos_pago?.tarjeta_debito ?? 0))],
+                      ["Traslados →", loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.traslados.mayor_a_menor) : "–"],
+                    ].map(([lbl, val]) => (
                       <div key={lbl} className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-2.5">
                         <div className="text-[9px] text-slate-400 font-semibold uppercase tracking-[0.4px] mb-1">{lbl}</div>
                         <div className="text-[17px] font-bold text-slate-800">{val}</div>
@@ -1061,15 +1257,14 @@ export function DashboardSedeView({
                   <RowItem name={<>Transferencias <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto</span></>} value={formatCurrency(metricas.metodos_pago?.transferencia ?? 0)} />
                   <RowItem name={<>Tarjeta <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto</span></>} value={formatCurrency((metricas.metodos_pago?.tarjeta ?? 0) + (metricas.metodos_pago?.tarjeta_credito ?? 0) + (metricas.metodos_pago?.tarjeta_debito ?? 0))} />
                   <RowItem name={<>Nequi / Daviplata <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-slate-200 text-slate-400 ml-1.5">Auto</span></>} value={formatCurrency(metricas.metodos_pago?.otros ?? 0)} />
-                  <RowItem name={<span className="text-slate-400">⇄ Recibido de Caja Menor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-400 ml-1.5">Manual</span></span>} value="–" />
+                  <RowItem name={<>Ingresos manuales <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Admin</span></>} value={loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.pl.ingresos) : "–"} />
+                  <RowItem name={<span className="text-slate-400">⇄ Recibido de Caja Menor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-400 ml-1.5">Manual</span></span>} value={loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.traslados.menor_a_mayor) : "–"} />
                   <div className="text-[10px] font-bold uppercase tracking-[0.5px] text-slate-400 mt-3 mb-1">Salidas</div>
-                  <RowItem name={<>Comisiones <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Admin</span></>} value="–" />
-                  <RowItem name={<>Arriendo <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Admin</span></>} value="–" />
-                  <RowItem name={<>Nómina <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Admin</span></>} value="–" />
-                  <RowItem name={<>Insumos <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Admin</span></>} value="–" />
-                  <RowItem name={<span className="text-slate-400">⇄ Base a Caja Menor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-400 ml-1.5">Manual</span></span>} value="–" />
+                  <RowItem name={<>Egresos manuales <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-500 ml-1.5">Manual · Admin</span></>} value={loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.pl.egresos) : "–"} />
+                  <RowItem name={<span className="text-slate-400">⇄ Base a Caja Menor <span className="inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-dashed border-slate-300 text-slate-400 ml-1.5">Manual</span></span>} value={loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.traslados.mayor_a_menor) : "–"} />
                   <div className="flex justify-between pt-3 text-[15px] font-bold text-slate-800 border-t-2 border-slate-800 mt-2">
-                    <span>Saldo caja mayor</span><span>–</span>
+                    <span>Saldo caja mayor</span>
+                    <span>{loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.cajas.caja_mayor) : "–"}</span>
                   </div>
                 </Card>
               </div>
@@ -1078,17 +1273,23 @@ export function DashboardSedeView({
                 <div className="grid grid-cols-3 gap-2.5">
                   <div className="bg-white border border-slate-200 rounded-[10px] px-4 py-3.5">
                     <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-[0.4px] mb-1.5">Caja Menor</div>
-                    <div className="text-[22px] font-bold text-slate-800">–</div>
+                    <div className="text-[22px] font-bold text-slate-800">
+                      {loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.cajas.caja_menor) : "–"}
+                    </div>
                     <div className="text-[10px] text-slate-400 mt-0.5">Efectivo en sede</div>
                   </div>
                   <div className="bg-white border border-slate-200 rounded-[10px] px-4 py-3.5">
                     <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-[0.4px] mb-1.5">Caja Mayor</div>
-                    <div className="text-[22px] font-bold text-slate-800">–</div>
+                    <div className="text-[22px] font-bold text-slate-800">
+                      {loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.cajas.caja_mayor) : "–"}
+                    </div>
                     <div className="text-[10px] text-slate-400 mt-0.5">Cuenta principal</div>
                   </div>
                   <div className="bg-white border-2 border-slate-800 rounded-[10px] px-4 py-3.5">
-                    <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-[0.4px] mb-1.5">Total del negocio</div>
-                    <div className="text-[22px] font-bold text-slate-800">{formatCurrency(metricas.ventas_totales)}</div>
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-[0.4px] mb-1.5">Total consolidado</div>
+                    <div className="text-[22px] font-bold text-slate-800">
+                      {loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.cajas.consolidado) : "–"}
+                    </div>
                     <div className="text-[10px] text-slate-400 mt-0.5">Los traslados no cambian este número</div>
                   </div>
                 </div>
@@ -1102,27 +1303,49 @@ export function DashboardSedeView({
                 Traslados entre cajas = movimientos internos. <span className="font-semibold text-slate-700">No son ingresos ni gastos.</span> El total del negocio no cambia.
               </div>
               <div className="grid grid-cols-3 gap-2.5 mb-3.5">
-                <KPICard label="Menor → Mayor" value="–" sub="Entregas" />
-                <KPICard label="Mayor → Menor" value="–" sub="Envíos de base" />
-                <KPICard label="Neto trasladado" value="–" sub="de Menor a Mayor" />
+                <KPICard
+                  label="Menor → Mayor"
+                  value={loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.traslados.menor_a_mayor) : "–"}
+                  sub="Entregas"
+                />
+                <KPICard
+                  label="Mayor → Menor"
+                  value={loadingResumen ? "…" : resumenFinanciero ? formatCurrency(resumenFinanciero.traslados.mayor_a_menor) : "–"}
+                  sub="Envíos de base"
+                />
+                <KPICard
+                  label="Neto trasladado"
+                  value={loadingResumen ? "…" : resumenFinanciero
+                    ? formatCurrency(resumenFinanciero.traslados.menor_a_mayor - resumenFinanciero.traslados.mayor_a_menor)
+                    : "–"}
+                  sub="de Menor a Mayor"
+                />
               </div>
-              <Card title="Detalle de traslados">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr>
-                      {["Fecha", "Dirección", "Concepto", "Registrado por", "Monto"].map((h, i) => (
-                        <th key={h} className={`text-left text-[9px] font-bold uppercase tracking-[0.5px] text-slate-400 pb-2 border-b border-slate-200 ${i === 4 ? "text-right" : ""}`}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td colSpan={5} className="py-8 text-center text-[11px] text-slate-400">
-                        No hay traslados registrados para este período. Regístralos en "Registrar movimientos".
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+              <Card title="Resumen de traslados del período">
+                {loadingResumen ? (
+                  <div className="py-6 text-center text-[11px] text-slate-400">Cargando…</div>
+                ) : resumenFinanciero && resumenFinanciero.traslados.cantidad > 0 ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between py-2.5 border-b border-slate-100">
+                      <span className="text-[12px] text-slate-700">Caja Menor → Caja Mayor</span>
+                      <span className="text-[13px] font-semibold text-slate-800">{formatCurrency(resumenFinanciero.traslados.menor_a_mayor)}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-2.5 border-b border-slate-100">
+                      <span className="text-[12px] text-slate-700">Caja Mayor → Caja Menor</span>
+                      <span className="text-[13px] font-semibold text-slate-800">{formatCurrency(resumenFinanciero.traslados.mayor_a_menor)}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-2.5">
+                      <span className="text-[12px] font-semibold text-slate-700">Total de traslados registrados</span>
+                      <span className="text-[13px] font-bold text-slate-800">{resumenFinanciero.traslados.cantidad}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-8 text-center text-[11px] text-slate-400">
+                    {resumenFinanciero
+                      ? "No hay traslados registrados para este período."
+                      : "No hay traslados registrados para este período."} Regístralos en "Registrar movimientos".
+                  </div>
+                )}
               </Card>
             </>
           )}
@@ -1132,9 +1355,19 @@ export function DashboardSedeView({
               <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-lg text-[11px] text-slate-500 leading-relaxed mb-4">
                 Aquí el administrador registra los movimientos que <span className="font-semibold text-slate-700">no pasan por la caja registradora</span>: arriendo, nómina, comisiones, impuestos, proveedores, ingresos extras.
               </div>
-              {!isSpecificSede && (
-                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-[12px] text-amber-700 mb-4">
-                  Selecciona una sede específica desde el selector para registrar movimientos.
+              {!isSpecificSede && sedes.length > 0 && (
+                <div className="mb-4 flex flex-col gap-1">
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Sede para este movimiento</label>
+                  <select
+                    value={registrarSedeId}
+                    onChange={(e) => setRegistrarSedeId(e.target.value)}
+                    className="px-3 py-2 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:border-slate-800 max-w-xs"
+                  >
+                    <option value="">Seleccionar sede...</option>
+                    {sedes.map((s) => (
+                      <option key={s.sede_id} value={s.sede_id}>{s.nombre || s.sede_id}</option>
+                    ))}
+                  </select>
                 </div>
               )}
               {registrarError && (
@@ -1143,7 +1376,7 @@ export function DashboardSedeView({
               {registrarSuccess && (
                 <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg text-[11px] text-green-700">{registrarSuccess}</div>
               )}
-              {isSpecificSede && <div className="flex gap-1.5 mb-4 flex-wrap">
+              {registrarSedeId && <div className="flex gap-1.5 mb-4 flex-wrap">
                 {([
                   { id: "egreso-mayor" as const, label: "Egreso Caja Mayor" },
                   { id: "ingreso-mayor" as const, label: "Ingreso Caja Mayor" },
@@ -1164,7 +1397,7 @@ export function DashboardSedeView({
                 ))}
               </div>}
 
-              {isSpecificSede && registrarSubTab === "egreso-mayor" && (
+              {registrarSedeId && registrarSubTab === "egreso-mayor" && (
                 <div className="bg-white border border-slate-200 rounded-[10px] p-5 mb-4">
                   <div className="text-[14px] font-bold text-slate-800 mb-1">Registrar egreso — Caja Mayor</div>
                   <div className="text-[11px] text-slate-500 mb-4 leading-relaxed">Para gastos que se pagan desde la cuenta principal: arriendo, nómina, comisiones, impuestos, proveedores, servicios públicos.</div>
@@ -1186,7 +1419,7 @@ export function DashboardSedeView({
                         ))}
                       </select>
                     </div>
-                    <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><input type="date" value={egresoMayorForm.fecha} onChange={(e) => setEgresoMayorForm((f) => ({ ...f, fecha: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" /></div>
+                    <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><DatePicker value={egresoMayorForm.fecha} onChange={(v) => setEgresoMayorForm((f) => ({ ...f, fecha: v }))} /></div>
                     <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Referencia / N° factura</label><input value={egresoMayorForm.referencia} onChange={(e) => setEgresoMayorForm((f) => ({ ...f, referencia: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="Opcional" /></div>
                     <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Observaciones</label><textarea value={egresoMayorForm.observaciones} onChange={(e) => setEgresoMayorForm((f) => ({ ...f, observaciones: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[12px] resize-y min-h-[56px] leading-relaxed focus:outline-none focus:border-slate-800" placeholder="Detalles adicionales..." /></div>
                   </div>
@@ -1197,7 +1430,7 @@ export function DashboardSedeView({
                 </div>
               )}
 
-              {isSpecificSede && registrarSubTab === "ingreso-mayor" && (
+              {registrarSedeId && registrarSubTab === "ingreso-mayor" && (
                 <div className="bg-white border border-slate-200 rounded-[10px] p-5 mb-4">
                   <div className="text-[14px] font-bold text-slate-800 mb-1">Registrar ingreso — Caja Mayor</div>
                   <div className="text-[11px] text-slate-500 mb-4 leading-relaxed">Para ingresos que no vienen de ventas a clientes: devoluciones de proveedores, intereses bancarios, ingresos extraordinarios.</div>
@@ -1218,7 +1451,7 @@ export function DashboardSedeView({
                         ))}
                       </select>
                     </div>
-                    <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><input type="date" value={ingresoMayorForm.fecha} onChange={(e) => setIngresoMayorForm((f) => ({ ...f, fecha: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" /></div>
+                    <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><DatePicker value={ingresoMayorForm.fecha} onChange={(v) => setIngresoMayorForm((f) => ({ ...f, fecha: v }))} /></div>
                     <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Referencia</label><input value={ingresoMayorForm.referencia} onChange={(e) => setIngresoMayorForm((f) => ({ ...f, referencia: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="Opcional" /></div>
                     <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Observaciones</label><textarea value={ingresoMayorForm.observaciones} onChange={(e) => setIngresoMayorForm((f) => ({ ...f, observaciones: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[12px] resize-y min-h-[56px] leading-relaxed focus:outline-none focus:border-slate-800" placeholder="Detalles adicionales..." /></div>
                   </div>
@@ -1229,7 +1462,7 @@ export function DashboardSedeView({
                 </div>
               )}
 
-              {isSpecificSede && registrarSubTab === "traslado" && (
+              {registrarSedeId && registrarSubTab === "traslado" && (
                 <div className="bg-white border border-slate-200 rounded-[10px] p-5 mb-4">
                   <div className="text-[14px] font-bold text-slate-800 mb-1">Registrar traslado entre cajas</div>
                   <div className="text-[11px] text-slate-500 mb-4 leading-relaxed">Para mover dinero entre Caja Menor y Caja Mayor. No es un gasto ni un ingreso — no afecta el P&L.</div>
@@ -1249,7 +1482,7 @@ export function DashboardSedeView({
                   </div>
                   <div className="grid grid-cols-2 gap-2.5">
                     <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Monto a trasladar</label><input value={trasladoForm.monto} onChange={(e) => setTrasladoForm((f) => ({ ...f, monto: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="$0" /></div>
-                    <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><input type="date" value={trasladoForm.fecha} onChange={(e) => setTrasladoForm((f) => ({ ...f, fecha: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" /></div>
+                    <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><DatePicker value={trasladoForm.fecha} onChange={(v) => setTrasladoForm((f) => ({ ...f, fecha: v }))} /></div>
                     <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Concepto</label><input value={trasladoForm.concepto} onChange={(e) => setTrasladoForm((f) => ({ ...f, concepto: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" placeholder="Ej: Entrega excedente diario" /></div>
                     <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Observaciones</label><textarea value={trasladoForm.observaciones} onChange={(e) => setTrasladoForm((f) => ({ ...f, observaciones: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[12px] resize-y min-h-[56px] leading-relaxed focus:outline-none focus:border-slate-800" placeholder="Opcional" /></div>
                   </div>
@@ -1260,7 +1493,7 @@ export function DashboardSedeView({
                 </div>
               )}
 
-              {isSpecificSede && registrarSubTab === "egreso-menor" && (
+              {registrarSedeId && registrarSubTab === "egreso-menor" && (
                 <div className="bg-white border border-slate-200 rounded-[10px] p-5 mb-4">
                   <div className="text-[14px] font-bold text-slate-800 mb-1">Registrar egreso — Caja Menor</div>
                   <div className="text-[11px] text-slate-500 mb-4 leading-relaxed">Para gastos pequeños del día a día: almuerzos, domicilios, propinas, papelería.</div>
@@ -1273,7 +1506,7 @@ export function DashboardSedeView({
                         <option>Gasto operativo</option><option>Propina</option><option>Alimentación</option><option>Domicilio / mensajería</option><option>Papelería / insumos menores</option><option>Otro</option>
                       </select>
                     </div>
-                    <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><input type="date" value={egresoMenorForm.fecha} onChange={(e) => setEgresoMenorForm((f) => ({ ...f, fecha: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[13px] focus:outline-none focus:border-slate-800" /></div>
+                    <div className="flex flex-col gap-1"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Fecha</label><DatePicker value={egresoMenorForm.fecha} onChange={(v) => setEgresoMenorForm((f) => ({ ...f, fecha: v }))} /></div>
                     <div className="flex flex-col gap-1 col-span-2"><label className="text-[10px] font-semibold text-slate-400 uppercase tracking-[0.4px]">Observaciones</label><textarea value={egresoMenorForm.observaciones} onChange={(e) => setEgresoMenorForm((f) => ({ ...f, observaciones: e.target.value }))} className="px-3 py-2 border border-slate-200 rounded-md text-[12px] resize-y min-h-[56px] leading-relaxed focus:outline-none focus:border-slate-800" placeholder="Opcional" /></div>
                   </div>
                   <div className="flex gap-2 justify-end mt-4">
@@ -1283,37 +1516,54 @@ export function DashboardSedeView({
                 </div>
               )}
 
-              <Card title="Últimos movimientos registrados manualmente" titleSub="10 más recientes" scrollable>
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr>
-                      {["Fecha", "Caja", "Tipo", "Concepto", "Categoría", "Monto"].map((h, i) => (
-                        <th key={i} className={`text-left text-[9px] font-bold uppercase tracking-[0.5px] text-slate-400 pb-2 border-b border-slate-200 ${i === 5 ? "text-right" : ""}`}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {movimientosManuales.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="py-8 text-center text-[11px] text-slate-400">
-                          No hay movimientos registrados aún.
-                        </td>
-                      </tr>
-                    ) : movimientosManuales.map((m) => (
-                      <tr key={m.id} className="border-b border-slate-100 last:border-0">
-                        <td className="py-2.5 text-[11px] text-slate-600">{m.fecha}</td>
-                        <td className="py-2.5 text-[11px] text-slate-600">{m.caja}</td>
-                        <td className="py-2.5">
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${m.tipo === "Egreso" ? "bg-red-50 text-red-600" : m.tipo === "Ingreso" ? "bg-green-50 text-green-600" : "bg-blue-50 text-blue-600"}`}>{m.tipo}</span>
-                        </td>
-                        <td className="py-2.5 text-[11px] text-slate-700 font-medium max-w-[160px] truncate">{m.concepto}</td>
-                        <td className="py-2.5 text-[11px] text-slate-500">{m.categoria}</td>
-                        <td className="py-2.5 text-[11px] text-right font-semibold text-slate-800">{formatMoney(m.monto, monedaUsuario)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Card>
+              {(() => {
+                const movFiltrados = movimientosManuales.filter((m) => {
+                  if (registrarSubTab === "egreso-mayor")  return m.tipo === "Egreso"   && m.caja === "Caja Mayor";
+                  if (registrarSubTab === "ingreso-mayor") return m.tipo === "Ingreso"  && m.caja === "Caja Mayor";
+                  if (registrarSubTab === "traslado")      return m.tipo === "Traslado";
+                  if (registrarSubTab === "egreso-menor")  return m.tipo === "Egreso"   && m.caja === "Caja Menor";
+                  return true;
+                });
+                const tabLabel: Record<string, string> = {
+                  "egreso-mayor":  "Egresos Caja Mayor",
+                  "ingreso-mayor": "Ingresos Caja Mayor",
+                  "traslado":      "Traslados entre cajas",
+                  "egreso-menor":  "Egresos Caja Menor",
+                };
+                return (
+                  <Card title={`Últimos ${tabLabel[registrarSubTab] ?? "movimientos"}`} titleSub="10 más recientes" scrollable>
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr>
+                          {["Fecha", "Caja", "Tipo", "Concepto", "Categoría", "Monto"].map((h, i) => (
+                            <th key={i} className={`text-left text-[9px] font-bold uppercase tracking-[0.5px] text-slate-400 pb-2 border-b border-slate-200 ${i === 5 ? "text-right" : ""}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {movFiltrados.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center text-[11px] text-slate-400">
+                              No hay movimientos registrados aún.
+                            </td>
+                          </tr>
+                        ) : movFiltrados.map((m) => (
+                          <tr key={m.id} className="border-b border-slate-100 last:border-0">
+                            <td className="py-2.5 text-[11px] text-slate-600">{m.fecha}</td>
+                            <td className="py-2.5 text-[11px] text-slate-600">{m.caja}</td>
+                            <td className="py-2.5">
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${m.tipo === "Egreso" ? "bg-red-50 text-red-600" : m.tipo === "Ingreso" ? "bg-green-50 text-green-600" : "bg-blue-50 text-blue-600"}`}>{m.tipo}</span>
+                            </td>
+                            <td className="py-2.5 text-[11px] text-slate-700 font-medium max-w-[160px] truncate">{m.concepto}</td>
+                            <td className="py-2.5 text-[11px] text-slate-500">{m.categoria}</td>
+                            <td className="py-2.5 text-[11px] text-right font-semibold text-slate-800">{formatMoney(m.monto, monedaUsuario)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Card>
+                );
+              })()}
             </>
           )}
       </>

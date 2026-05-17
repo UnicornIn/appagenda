@@ -8,6 +8,7 @@ import { Calendar, DollarSign, Package, Users } from "lucide-react"
 import { Button } from "../../../components/ui/button"
 import { Skeleton } from "../../../components/ui/skeleton"
 import { formatDateDMY } from "../../../lib/dateFormat"
+import { DatePicker } from "../../../components/ui/DatePicker"
 import { getStoredCurrency, normalizeCurrencyCode } from "../../../lib/currency"
 
 interface SalesMetricsProps {
@@ -325,11 +326,9 @@ export function SalesMetrics({
               <label className="block text-sm font-medium text-gray-800 mb-2">
                 Fecha de inicio
               </label>
-              <input
-                type="date"
+              <DatePicker
                 value={tempDateRange.start_date}
-                onChange={(e) => setTempDateRange(prev => ({ ...prev, start_date: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
+                onChange={(v) => setTempDateRange(prev => ({ ...prev, start_date: v }))}
                 max={tempDateRange.end_date || today}
               />
             </div>
@@ -338,11 +337,9 @@ export function SalesMetrics({
               <label className="block text-sm font-medium text-gray-800 mb-2">
                 Fecha de fin
               </label>
-              <input
-                type="date"
+              <DatePicker
                 value={tempDateRange.end_date}
-                onChange={(e) => setTempDateRange(prev => ({ ...prev, end_date: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
+                onChange={(v) => setTempDateRange(prev => ({ ...prev, end_date: v }))}
                 min={tempDateRange.start_date}
                 max={today}
               />

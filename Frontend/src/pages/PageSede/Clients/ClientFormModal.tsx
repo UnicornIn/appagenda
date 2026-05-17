@@ -5,6 +5,7 @@ import { X } from "lucide-react"
 import { Button } from "../../../components/ui/button"
 import { crearCliente } from "../../../components/Quotes/clientsService"
 import { useAuth } from "../../../components/Auth/AuthContext"
+import { DatePicker } from "../../../components/ui/DatePicker"
 
 interface ClientFormModalProps {
   isOpen: boolean
@@ -205,13 +206,10 @@ export function ClientFormModal({ isOpen, onClose, onSuccess, isSaving = false, 
             <label className="text-xs font-medium text-gray-700 mb-1 block">
               Fecha de Nacimiento
             </label>
-            <input
-              name="fecha_de_nacimiento"
-              type="date"
+            <DatePicker
               value={formData.fecha_de_nacimiento}
-              onChange={handleChange}
+              onChange={(v) => handleChange({ target: { name: "fecha_de_nacimiento", value: v } } as any)}
               disabled={localIsSaving || isSaving}
-              className="w-full h-8 text-sm border border-gray-300 rounded px-2 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50"
             />
           </div>
 

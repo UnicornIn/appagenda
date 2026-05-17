@@ -1,5 +1,6 @@
 // components/Quotes/AppointmentDetailsModal.tsx
 import React, { useState, useEffect, useCallback } from "react";
+import { DatePicker } from "../../../components/ui/DatePicker";
 import {
   Loader2,
   CheckCircle,
@@ -3133,13 +3134,10 @@ const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
                             >
                               Fecha
                             </p>
-                            <input
-                              type="date"
+                            <DatePicker
                               value={fechaEditada}
-                              onChange={(e) => setFechaEditada(e.target.value)}
+                              onChange={(v) => setFechaEditada(v)}
                               disabled={isServiceActionsDisabled}
-                              className="w-full bg-transparent text-sm font-medium focus:ring-0 focus:outline-none disabled:opacity-50 border-0 p-0"
-                              style={{ color: "#1E293B" }}
                             />
                           </div>
                           <div

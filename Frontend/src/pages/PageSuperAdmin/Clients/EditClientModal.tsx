@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { X, Loader2 } from 'lucide-react'
 import { Button } from "../../../components/ui/button"
 import { clientesService, UpdateClienteData } from "./clientesService"
+import { DatePicker } from "../../../components/ui/DatePicker"
 
 interface EditClientModalProps {
     isOpen: boolean
@@ -277,13 +278,10 @@ export function EditClientModal({ isOpen, onClose, onSuccess, cliente, token }: 
                                     <label className="mb-1.5 block text-sm font-medium text-gray-700">
                                         Fecha de Nacimiento
                                     </label>
-                                    <input
-                                        type="date"
-                                        name="fecha_de_nacimiento"
+                                    <DatePicker
                                         value={formData.fecha_de_nacimiento || ''}
-                                        onChange={handleChange}
+                                        onChange={(v) => handleChange({ target: { name: "fecha_de_nacimiento", value: v } } as any)}
                                         disabled={isLoading}
-                                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50"
                                     />
                                 </div>
                             </div>

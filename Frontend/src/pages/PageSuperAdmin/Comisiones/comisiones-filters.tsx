@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../../components/ui/select";
-import { Calendar } from "lucide-react";
+import { PeriodoSelector, type PeriodoId } from "../../../components/ui/PeriodoSelector";
 import { profesionalesService } from "./Api/profesionalesService";
 import { Professional } from "../../../types/commissions";
 import { sedeService } from "../Sedes/sedeService";
@@ -39,6 +39,8 @@ export function ComisionesFilters({ onFiltersChange }: ComisionesFiltersProps) {
     useState<string>("placeholder");
   const [fechaInicio, setFechaInicio] = useState<string>("");
   const [fechaFin, setFechaFin] = useState<string>("");
+  const [periodoActivo, setPeriodoActivo] = useState<PeriodoId>("mes");
+  const [rangoAplicado, setRangoAplicado] = useState<{ from: Date; to: Date } | undefined>(undefined);
 
   const [estilistas, setEstilistas] = useState<Professional[]>([]);
   const [sedes, setSedes] = useState<Sede[]>([]);
@@ -195,6 +197,28 @@ export function ComisionesFilters({ onFiltersChange }: ComisionesFiltersProps) {
     setFechaFin(fin);
   }, []);
 
+  const handlePeriodoChange = (periodo: PeriodoId, fechas?: { from: Date; to: Date }) => {
+    setPeriodoActivo(periodo);
+    const hoy = new Date();
+    const todayStr = formatDate(hoy);
+    if (periodo === "hoy") {
+      setFechaInicio(todayStr); setFechaFin(todayStr);
+    } else if (periodo === "7dias") {
+      const s = new Date(hoy); s.setDate(s.getDate() - 6);
+      setFechaInicio(formatDate(s)); setFechaFin(todayStr);
+    } else if (periodo === "mes") {
+      const s = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+      const e = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+      setFechaInicio(formatDate(s)); setFechaFin(formatDate(e));
+    } else if (periodo === "30dias") {
+      const s = new Date(hoy); s.setDate(s.getDate() - 29);
+      setFechaInicio(formatDate(s)); setFechaFin(todayStr);
+    } else if (periodo === "rango" && fechas) {
+      setRangoAplicado(fechas);
+      setFechaInicio(formatDate(fechas.from)); setFechaFin(formatDate(fechas.to));
+    }
+  };
+
   // ==================================================
   // UI
   // ==================================================
@@ -281,27 +305,12 @@ export function ComisionesFilters({ onFiltersChange }: ComisionesFiltersProps) {
         </Select>
       </div>
 
-      {/* Fechas */}
-      {[["Desde", fechaInicio, setFechaInicio], ["Hasta", fechaFin, setFechaFin]].map(
-        ([label, value, setter]: any) => (
-          <div
-            key={label}
-            className="flex items-center gap-2 rounded-lg border bg-white px-4 py-2.5"
-          >
-            <Calendar className="h-4 w-4 text-gray-400" />
-            <div>
-              <span className="text-xs text-gray-500">{label}</span>
-              <input
-                type="date"
-                value={value}
-                onChange={(e) => setter(e.target.value)}
-                className="text-sm bg-white border-none outline-none"
-                disabled={!selectedSede}
-              />
-            </div>
-          </div>
-        )
-      )}
+      {/* Selector de período */}
+      <PeriodoSelector
+        periodoActivo={periodoActivo}
+        onPeriodoChange={handlePeriodoChange}
+        rangoAplicado={rangoAplicado}
+      />
     </div>
   );
 }

@@ -157,6 +157,7 @@ export default function VistaEstilistaPage() {
     refetchCitas,
     comisionServiciosPct,
     comisionProductosPct,
+    comisionesTotalesHoy,
   } = useEstilistaData();
 
   const [citaSeleccionada, setCitaSeleccionada] = useState<any>(null);
@@ -580,6 +581,7 @@ export default function VistaEstilistaPage() {
               totalVentasHoy={ingresosHoy}
               comisionServiciosPct={comisionServiciosPct}
               comisionProductosPct={comisionProductosPct}
+              comisionesTotalesHoy={comisionesTotalesHoy}
               bloqueosHoy={bloqueos.filter((bloqueo) => normalizeFecha(bloqueo.fecha) === todayIso).length}
             />
           </section>

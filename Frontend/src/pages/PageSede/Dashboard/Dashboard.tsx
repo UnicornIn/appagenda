@@ -6,13 +6,11 @@ import { useAuth } from "../../../components/Auth/AuthContext";
 import { formatSedeNombre } from "../../../lib/sede";
 import { formatDateDMY, toLocalYMD } from "../../../lib/dateFormat";
 import { getSedes, getVentasAvailablePeriods, type Sede } from "./analyticsApi";
-import {
-  normalizeCurrencyCode,
-  getStoredCurrency,
-} from "../../../lib/currency";
-import { DEFAULT_PERIOD } from "../../../lib/period";
+import { normalizeCurrencyCode, getStoredCurrency } from "../../../lib/currency";
 import { RefreshCw } from "lucide-react";
+
 import { DashboardSedeView } from "./DashboardSedeView";
+import { PeriodoSelector, type PeriodoId } from "../../../components/ui/PeriodoSelector";
 
 interface DateRange {
   start_date: string;
@@ -27,17 +25,9 @@ export default function DashboardPage() {
   const [sedes, setSedes] = useState<Sede[]>([]);
   const [loadingSedes, setLoadingSedes] = useState(true);
   const [selectedSede, setSelectedSede] = useState<string>("");
-  const [selectedPeriod, setSelectedPeriod] = useState(DEFAULT_PERIOD);
-  const [showDateModal, setShowDateModal] = useState(false);
-  const [tempDateRange, setTempDateRange] = useState<DateRange>({
-    start_date: "",
-    end_date: "",
-  });
-  const [dateRange, setDateRange] = useState<DateRange>({
-    start_date: "",
-    end_date: "",
-  });
-  const [error, setError] = useState<string | null>(null);
+  const [periodoActivo, setPeriodoActivo] = useState<PeriodoId>("7dias");
+  const [dateRange, setDateRange] = useState<DateRange>({ start_date: "", end_date: "" });
+  const [rangoAplicado, setRangoAplicado] = useState<{ from: Date; to: Date } | undefined>(undefined);
   const [reloadNonce, setReloadNonce] = useState(0);
 
   const monedaUsuario = normalizeCurrencyCode(
@@ -71,24 +61,22 @@ export default function DashboardPage() {
     );
   }, [user?.role]);
 
-  const periodOptions = [
-    { id: "today", label: "Hoy" },
-    { id: "last_7_days", label: "7 días" },
-    { id: "month", label: "Mes actual" },
-    { id: "last_30_days", label: "30 días" },
-    { id: "custom", label: "Rango" },
-  ];
+  const PERIODO_TO_API: Record<PeriodoId, string> = {
+    hoy: "today",
+    "7dias": "last_7_days",
+    mes: "month",
+    "30dias": "last_30_days",
+    rango: "custom",
+  };
 
   useEffect(() => {
     const today = new Date();
     const last7Days = new Date();
     last7Days.setDate(today.getDate() - 7);
-    const defaultRange: DateRange = {
+    setDateRange({
       start_date: toLocalYMD(last7Days),
       end_date: toLocalYMD(today),
-    };
-    setDateRange(defaultRange);
-    setTempDateRange(defaultRange);
+    });
   }, []);
 
   useEffect(() => {
@@ -172,45 +160,31 @@ export default function DashboardPage() {
     if (sedeId !== "global") setActiveSedeId(sedeId);
   };
 
-  const handlePeriodChange = (period: string) => {
-    setSelectedPeriod(period);
-    if (period === "custom") {
-      setTempDateRange(dateRange);
-      setShowDateModal(true);
+  const handlePeriodoChange = (periodo: PeriodoId, fechas?: { from: Date; to: Date }) => {
+    setPeriodoActivo(periodo);
+    if (periodo === "rango" && fechas) {
+      setRangoAplicado(fechas);
+      setDateRange({
+        start_date: toLocalYMD(fechas.from),
+        end_date: toLocalYMD(fechas.to),
+      });
     }
   };
 
-  const handleApplyDateRange = () => {
-    if (!tempDateRange.start_date || !tempDateRange.end_date) {
-      setError("Por favor selecciona ambas fechas");
-      return;
-    }
-    if (new Date(tempDateRange.start_date) > new Date(tempDateRange.end_date)) {
-      setError("La fecha de inicio no puede ser mayor a la fecha de fin");
-      return;
-    }
-    setDateRange(tempDateRange);
-    setShowDateModal(false);
-    setSelectedPeriod("custom");
-    setError(null);
-  };
-
-  const setQuickDateRange = (days: number) => {
-    const today = new Date();
-    const start = new Date();
-    start.setDate(today.getDate() - days);
-    setTempDateRange({
-      start_date: toLocalYMD(start),
-      end_date: toLocalYMD(today),
-    });
+  const PERIODO_LABELS: Record<PeriodoId, string> = {
+    hoy: "Hoy",
+    "7dias": "7 días",
+    mes: "Mes actual",
+    "30dias": "30 días",
+    rango: "Rango personalizado",
   };
 
   const formatDateDisplay = (dateString: string) => formatDateDMY(dateString, "");
 
   const getPeriodDisplay = () => {
-    if (selectedPeriod === "custom")
+    if (periodoActivo === "rango")
       return `${formatDateDisplay(dateRange.start_date)} - ${formatDateDisplay(dateRange.end_date)}`;
-    return periodOptions.find((p) => p.id === selectedPeriod)?.label || "Período";
+    return PERIODO_LABELS[periodoActivo] || "Período";
   };
 
   // ── Auth & loading guards ────────────────────────────────
@@ -248,93 +222,11 @@ export default function DashboardPage() {
     );
   }
 
-  // ── Date Range Modal ─────────────────────────────────────
-
-  const DateRangeModal = () => {
-    if (!showDateModal) return null;
-    const today = toLocalYMD(new Date());
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div className="bg-white rounded-xl w-full max-w-md mx-4 p-6">
-          <h3 className="text-lg font-bold text-slate-800 mb-1">Seleccionar rango de fechas</h3>
-          <p className="text-sm text-slate-500 mb-5">Elige las fechas para filtrar las métricas</p>
-          {error && <p className="text-xs text-red-500 mb-3">{error}</p>}
-          <p className="text-xs text-slate-600 font-medium mb-2">Rangos rápidos:</p>
-          <div className="flex flex-wrap gap-2 mb-5">
-            {[{ label: "7 días", days: 7 }, { label: "30 días", days: 30 }, { label: "90 días", days: 90 }].map(({ label, days }) => (
-              <button
-                key={label}
-                onClick={() => setQuickDateRange(days)}
-                className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 hover:bg-slate-50"
-              >
-                {label}
-              </button>
-            ))}
-            <button
-              onClick={() => {
-                const today = new Date();
-                setTempDateRange({
-                  start_date: toLocalYMD(new Date(today.getFullYear(), today.getMonth(), 1)),
-                  end_date: toLocalYMD(today),
-                });
-              }}
-              className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-700 hover:bg-slate-50"
-            >
-              Mes actual
-            </button>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">Fecha de inicio</label>
-              <input
-                type="date"
-                value={tempDateRange.start_date}
-                onChange={(e) => setTempDateRange((p) => ({ ...p, start_date: e.target.value }))}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-500"
-                max={tempDateRange.end_date || today}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">Fecha de fin</label>
-              <input
-                type="date"
-                value={tempDateRange.end_date}
-                onChange={(e) => setTempDateRange((p) => ({ ...p, end_date: e.target.value }))}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-500"
-                min={tempDateRange.start_date}
-                max={today}
-              />
-            </div>
-          </div>
-          <div className="mt-5 p-3 bg-slate-50 rounded-lg border border-slate-100 text-xs text-slate-600">
-            <span className="font-medium">Rango:</span> {formatDateDisplay(tempDateRange.start_date)} –{" "}
-            {formatDateDisplay(tempDateRange.end_date)}
-          </div>
-          <div className="mt-5 flex gap-3">
-            <button
-              onClick={handleApplyDateRange}
-              className="flex-1 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-700"
-            >
-              Aplicar rango
-            </button>
-            <button
-              onClick={() => setShowDateModal(false)}
-              className="flex-1 py-2 border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50"
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   // ── Main Render ──────────────────────────────────────────
 
   return (
     <div className="flex flex-col h-screen bg-white">
       <Sidebar />
-      <DateRangeModal />
 
       <main className="flex-1 overflow-y-auto bg-[#F8FAFC]">
         <div className="max-w-[1300px] mx-auto px-7 py-5 pb-10">
@@ -372,29 +264,19 @@ export default function DashboardPage() {
           </div>
 
           {/* Period filter */}
-          <div className="flex items-center gap-1.5 mb-[18px] flex-wrap">
-            <span className="text-xs text-slate-500 font-medium">Período:</span>
-            {periodOptions.map((option) => (
-              <button
-                key={option.id}
-                onClick={() => handlePeriodChange(option.id)}
-                className={`px-3.5 py-1.5 border rounded-full text-[11px] font-medium transition-colors ${
-                  selectedPeriod === option.id
-                    ? "bg-slate-800 text-white border-slate-800"
-                    : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <PeriodoSelector
+            periodoActivo={periodoActivo}
+            onPeriodoChange={handlePeriodoChange}
+            rangoAplicado={rangoAplicado}
+            className="mb-[18px]"
+          />
 
           {/* Content */}
           <DashboardSedeView
             key={`${selectedSede}-${reloadNonce}`}
             token={user!.access_token}
             sedeId={selectedSede}
-            selectedPeriod={selectedPeriod}
+            selectedPeriod={PERIODO_TO_API[periodoActivo]}
             dateRange={dateRange}
             sedes={sedes}
             monedaUsuario={monedaUsuario}

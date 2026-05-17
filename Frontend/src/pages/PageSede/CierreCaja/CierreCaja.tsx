@@ -5,9 +5,11 @@ import { Sidebar } from "../../../components/Layout/Sidebar";
 import { PageHeader } from "../../../components/Layout/PageHeader";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
+import { PeriodoSelector, type PeriodoId } from "../../../components/ui/PeriodoSelector";
+import { DatePicker } from "../../../components/ui/DatePicker";
 // import { Textarea } from "../../../components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
-import { Calendar, Loader2 } from "lucide-react"; //Wallet +
+import { Loader2 } from "lucide-react"; //Wallet +
 import { cashService, getEfectivoDia } from "./api/cashService";
 import type { CashCierre, CashEgreso, CashIngreso, CashResumen, CashReporteRaw } from "./types";
 import { formatDateDMY, parseDateToDate, toBackendDate } from "../../../lib/dateFormat";
@@ -46,13 +48,7 @@ interface HeaderDateRange {
   end_date: string;
 }
 
-const HEADER_PERIOD_OPTIONS: Array<{ id: HeaderPeriod; label: string }> = [
-  { id: "today", label: "Hoy" },
-  { id: "last_7_days", label: "7 días" },
-  { id: "last_30_days", label: "30 días" },
-  { id: "month", label: "Mes actual" },
-  { id: "custom", label: "Rango personalizado" },
-];
+
 
 const getRangeByPeriod = (period: HeaderPeriod, customRange?: HeaderDateRange): HeaderDateRange => {
   const today = new Date();
@@ -525,14 +521,19 @@ export default function CierreCajaPage() {
   const monedaSede = String(moneda || "COP").toUpperCase();
 
   const today = useMemo(() => getToday(), []);
-  const [periodoSeleccionado, setPeriodoSeleccionado] = useState<HeaderPeriod>("today");
+  const [, setPeriodoSeleccionado] = useState<HeaderPeriod>("today");
   const [fechaDesde, setFechaDesde] = useState(today);
   const [fechaHasta, setFechaHasta] = useState(today);
-  const [showDateModal, setShowDateModal] = useState(false);
-  const [tempDateRange, setTempDateRange] = useState<HeaderDateRange>({
-    start_date: today,
-    end_date: today,
-  });
+  const [periodoActivo, setPeriodoActivo] = useState<PeriodoId>("hoy");
+  const [rangoAplicado, setRangoAplicado] = useState<{ from: Date; to: Date } | undefined>(undefined);
+
+  const PERIODO_TO_HEADER: Record<PeriodoId, HeaderPeriod> = {
+    hoy: "today",
+    "7dias": "last_7_days",
+    mes: "month",
+    "30dias": "last_30_days",
+    rango: "custom",
+  };
 
   const [, setResumen] = useState<CashResumen>({
     ingresos: 0,
@@ -705,42 +706,28 @@ export default function CierreCajaPage() {
   };
 
   const handlePeriodChange = (newPeriod: HeaderPeriod) => {
-    if (newPeriod === "custom") {
-      setTempDateRange({
-        start_date: fechaDesde || today,
-        end_date: fechaHasta || today,
-      });
-      setShowDateModal(true);
-      return;
-    }
-
     const range = getRangeByPeriod(newPeriod);
     const normalized = normalizeDateRange(range.start_date, range.end_date);
     if (!normalized.start || !normalized.end) return;
-
     setPeriodoSeleccionado(newPeriod);
     setFechaDesde(normalized.start);
     setFechaHasta(normalized.end);
   };
 
-  const setQuickDateRange = (days: number) => {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(endDate.getDate() - (days - 1));
-    setTempDateRange({
-      start_date: toLocalDateString(startDate),
-      end_date: toLocalDateString(endDate),
-    });
-  };
-
-  const handleApplyDateRange = () => {
-    const normalized = normalizeDateRange(tempDateRange.start_date, tempDateRange.end_date);
-    if (!normalized.start || !normalized.end) return;
-
-    setPeriodoSeleccionado("custom");
-    setFechaDesde(normalized.start);
-    setFechaHasta(normalized.end);
-    setShowDateModal(false);
+  const handlePeriodoChange = (periodo: PeriodoId, fechas?: { from: Date; to: Date }) => {
+    setPeriodoActivo(periodo);
+    const headerPeriod = PERIODO_TO_HEADER[periodo];
+    if (periodo === "rango" && fechas) {
+      setRangoAplicado(fechas);
+      const normalized = normalizeDateRange(toLocalDateString(fechas.from), toLocalDateString(fechas.to));
+      if (normalized.start && normalized.end) {
+        setPeriodoSeleccionado("custom");
+        setFechaDesde(normalized.start);
+        setFechaHasta(normalized.end);
+      }
+    } else {
+      handlePeriodChange(headerPeriod);
+    }
   };
 
   const displayDateRange = useMemo(() => {
@@ -1931,104 +1918,6 @@ export default function CierreCajaPage() {
     setError(null);
   };
 
-  const DateRangeModal = () => {
-    if (!showDateModal) return null;
-
-    const maxDate = getToday();
-
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div className="mx-4 w-full max-w-md rounded-lg bg-white p-6">
-          <div className="mb-6">
-            <h3 className="text-xl font-bold text-gray-900">Seleccionar rango de fechas</h3>
-            <p className="mt-1 text-gray-700">Elige las fechas para filtrar el cierre de caja</p>
-          </div>
-
-          <div className="mb-6">
-            <p className="mb-3 text-sm text-gray-700">Rangos rápidos:</p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-gray-300 text-gray-800 hover:bg-gray-100"
-                onClick={() => setQuickDateRange(7)}
-              >
-                7 días
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-gray-300 text-gray-800 hover:bg-gray-100"
-                onClick={() => setQuickDateRange(30)}
-              >
-                30 días
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-gray-300 text-gray-800 hover:bg-gray-100"
-                onClick={() => {
-                  const endDate = new Date();
-                  const firstDayOfMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
-                  setTempDateRange({
-                    start_date: toLocalDateString(firstDayOfMonth),
-                    end_date: toLocalDateString(endDate),
-                  });
-                }}
-              >
-                Mes actual
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label className={FIELD_LABEL_CLASS}>Fecha de inicio</label>
-              <Input
-                type="date"
-                value={tempDateRange.start_date}
-                onChange={(event) => setTempDateRange((prev) => ({ ...prev, start_date: event.target.value }))}
-                max={tempDateRange.end_date || maxDate}
-                className={INPUT_CLASS}
-              />
-            </div>
-
-            <div>
-              <label className={FIELD_LABEL_CLASS}>Fecha de fin</label>
-              <Input
-                type="date"
-                value={tempDateRange.end_date}
-                onChange={(event) => setTempDateRange((prev) => ({ ...prev, end_date: event.target.value }))}
-                min={tempDateRange.start_date}
-                max={maxDate}
-                className={INPUT_CLASS}
-              />
-            </div>
-          </div>
-
-          <div className="mt-6 rounded-lg border border-gray-300 bg-gray-50 p-4">
-            <p className="text-sm text-gray-800">
-              <span className="font-medium">Rango seleccionado:</span>{" "}
-              {formatDate(tempDateRange.start_date)} - {formatDate(tempDateRange.end_date)}
-            </p>
-          </div>
-
-          <div className="mt-6 flex gap-3">
-            <Button className={`flex-1 ${PRIMARY_BUTTON_CLASS}`} onClick={handleApplyDateRange}>
-              Aplicar rango
-            </Button>
-            <Button
-              variant="outline"
-              className={`flex-1 ${OUTLINE_BUTTON_CLASS}`}
-              onClick={() => setShowDateModal(false)}
-            >
-              Cancelar
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -2036,7 +1925,6 @@ export default function CierreCajaPage() {
       <main className="flex-1 overflow-auto">
         <div className="p-8">
           <div className="space-y-6">
-            <DateRangeModal />
             <PageHeader title="Cierre de Caja" />
             {error && (
               <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -2071,27 +1959,11 @@ export default function CierreCajaPage() {
                   </div>
 
                   <div>
-                    <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
-                      <Calendar className="h-4 w-4 text-gray-600" />
-                      <span>Período</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {HEADER_PERIOD_OPTIONS.map((option) => (
-                        <Button
-                          key={option.id}
-                          size="sm"
-                          variant={periodoSeleccionado === option.id ? "default" : "outline"}
-                          className={
-                            periodoSeleccionado === option.id
-                              ? PRIMARY_BUTTON_CLASS
-                              : OUTLINE_BUTTON_CLASS
-                          }
-                          onClick={() => handlePeriodChange(option.id)}
-                        >
-                          {option.label}
-                        </Button>
-                      ))}
-                    </div>
+                    <PeriodoSelector
+                      periodoActivo={periodoActivo}
+                      onPeriodoChange={handlePeriodoChange}
+                      rangoAplicado={rangoAplicado}
+                    />
                   </div>
 
                   <div className="rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 xl:min-w-[250px] xl:justify-self-end">
@@ -2194,7 +2066,7 @@ export default function CierreCajaPage() {
                     <div className={FORM_GRID_CLASS}>
                       <div>
                         <label className={FIELD_LABEL_CLASS}>Fecha de apertura</label>
-                        <Input type="date" value={aperturaFecha} onChange={(e) => setAperturaFecha(e.target.value)} className={INPUT_CLASS} />
+                        <DatePicker value={aperturaFecha} onChange={(v) => setAperturaFecha(v)} />
                       </div>
                       <div>
                         <label className={FIELD_LABEL_CLASS}>Monto inicial</label>
@@ -2244,7 +2116,7 @@ export default function CierreCajaPage() {
                     <div className={FORM_GRID_CLASS}>
                       <div>
                         <label className={FIELD_LABEL_CLASS}>Fecha de cierre</label>
-                        <Input type="date" value={cierreFecha} onChange={(e) => setCierreFecha(e.target.value)} className={INPUT_CLASS} />
+                        <DatePicker value={cierreFecha} onChange={(v) => setCierreFecha(v)} />
                       </div>
                       <div>
                         <label className={FIELD_LABEL_CLASS}>Efectivo contado</label>
@@ -2427,7 +2299,7 @@ export default function CierreCajaPage() {
                         </div>
                         <div>
                           <label className={FIELD_LABEL_CLASS}>Fecha</label>
-                          <Input type="date" value={egresoFecha} onChange={(e) => setEgresoFecha(e.target.value)} className={INPUT_CLASS} />
+                          <DatePicker value={egresoFecha} onChange={(v) => setEgresoFecha(v)} />
                         </div>
                       </div>
 
@@ -2543,7 +2415,7 @@ export default function CierreCajaPage() {
                         </div>
                         <div>
                           <label className={FIELD_LABEL_CLASS}>Fecha</label>
-                          <Input type="date" value={ingresoFecha} onChange={(e) => setIngresoFecha(e.target.value)} className={INPUT_CLASS} />
+                          <DatePicker value={ingresoFecha} onChange={(v) => setIngresoFecha(v)} />
                         </div>
                       </div>
 

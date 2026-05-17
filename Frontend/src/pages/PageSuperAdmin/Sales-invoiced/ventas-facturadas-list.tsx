@@ -15,6 +15,7 @@ import {
 import { Button } from "../../../components/ui/button"
 import { Input } from "../../../components/ui/input"
 import { FacturaDetailModal } from "./factura-detail-modal"
+import { PeriodoSelector, type PeriodoId } from "../../../components/ui/PeriodoSelector"
 import { PageHeader } from "../../../components/Layout/PageHeader"
 import type { Factura } from "../../../types/factura"
 import { facturaService } from "./facturas"
@@ -56,8 +57,10 @@ const EMPTY_FACTURA_FILTERS: FacturaFilters = {
 export function VentasFacturadasList() {
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedSede, setSelectedSede] = useState("")
-  const [fechaDesde, setFechaDesde] = useState("")
-  const [fechaHasta, setFechaHasta] = useState("")
+  const [, setFechaDesde] = useState("")
+  const [, setFechaHasta] = useState("")
+  const [periodoActivo, setPeriodoActivo] = useState<PeriodoId>("hoy")
+  const [rangoAplicado, setRangoAplicado] = useState<{ from: Date; to: Date } | undefined>(undefined)
   const [selectedFactura, setSelectedFactura] = useState<Factura | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [facturas, setFacturas] = useState<Factura[]>([])
@@ -199,35 +202,35 @@ export function VentasFacturadasList() {
     }
   }
 
-  const aplicarFiltros = async () => {
-    const filtros: FacturaFilters = {
-      searchTerm: searchTerm.trim(),
-      fecha_desde: fechaDesde,
-      fecha_hasta: fechaHasta,
+  const handlePeriodoChange = (periodo: PeriodoId, fechas?: { from: Date; to: Date }) => {
+    setPeriodoActivo(periodo)
+    const today = new Date()
+    const todayYmd = toIsoLocalDate(today)
+    let desde = todayYmd
+    let hasta = todayYmd
+    if (periodo === "hoy") {
+      desde = todayYmd; hasta = todayYmd
+    } else if (periodo === "7dias") {
+      const s = new Date(today); s.setDate(s.getDate() - 6)
+      desde = toIsoLocalDate(s); hasta = todayYmd
+    } else if (periodo === "mes") {
+      const s = new Date(today.getFullYear(), today.getMonth(), 1)
+      desde = toIsoLocalDate(s); hasta = todayYmd
+    } else if (periodo === "30dias") {
+      const s = new Date(today); s.setDate(s.getDate() - 29)
+      desde = toIsoLocalDate(s); hasta = todayYmd
+    } else if (periodo === "rango" && fechas) {
+      setRangoAplicado(fechas)
+      desde = toIsoLocalDate(fechas.from)
+      hasta = toIsoLocalDate(fechas.to)
     }
-    setAppliedFilters(filtros)
-    await cargarFacturas(1, filtros)
-  }
-
-  const limpiarFiltros = () => {
-    setSearchTerm("")
-    setFechaDesde("")
-    setFechaHasta("")
-    setAppliedFilters(EMPTY_FACTURA_FILTERS)
-    cargarFacturas(1, EMPTY_FACTURA_FILTERS)
-  }
-
-  const filtrarHoy = () => {
-    const today = toIsoLocalDate(new Date())
-    setFechaDesde(today)
-    setFechaHasta(today)
-  }
-
-  const filtrarUltimoMes = () => {
-    const date = new Date()
-    date.setDate(date.getDate() - 30)
-    setFechaDesde(toIsoLocalDate(date))
-    setFechaHasta(toIsoLocalDate(new Date()))
+    if (periodo !== "rango" || fechas) {
+      setFechaDesde(desde)
+      setFechaHasta(hasta)
+      const filtros: FacturaFilters = { searchTerm: searchTerm.trim(), fecha_desde: desde, fecha_hasta: hasta }
+      setAppliedFilters(filtros)
+      cargarFacturas(1, filtros)
+    }
   }
 
   const irAPagina = (pagina: number) => {
@@ -423,137 +426,31 @@ export function VentasFacturadasList() {
         {/* Filtros (solo mostrar si hay sede seleccionada) */}
         {selectedSede && (
           <>
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-4">
-                <div className="md:col-span-2">
-                  <label className="mb-1 block text-xs font-medium text-gray-700">
-                    Buscar cliente/comprobante
-                  </label>
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-                    <Input
-                      placeholder="Nombre, cédula, email o número de comprobante..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="h-9 pl-8 text-sm"
-                      disabled={isLoading}
-                    />
-                  </div>
+            <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+              {/* Row: buscador + período en la misma línea */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative min-w-[220px] flex-1">
+                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                  <Input
+                    placeholder="Buscar cliente, cédula, email o comprobante..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="h-9 pl-8 text-sm"
+                    disabled={isLoading}
+                  />
                 </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-700">
-                    Fecha desde
-                  </label>
-                  <div className="relative">
-                    <Input
-                      type="text"
-                      value={formatDateDMY(fechaDesde, "")}
-                      readOnly
-                      placeholder="DD-MM-YYYY"
-                      className="h-9 pl-8 text-sm"
-                      disabled={isLoading}
-                    />
-                    <Calendar className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-                    <Input
-                      type="date"
-                      value={fechaDesde}
-                      onChange={(e) => setFechaDesde(e.target.value)}
-                      className="absolute inset-0 h-9 w-full cursor-pointer opacity-0"
-                      disabled={isLoading}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-700">
-                    Fecha hasta
-                  </label>
-                  <div className="relative">
-                    <Input
-                      type="text"
-                      value={formatDateDMY(fechaHasta, "")}
-                      readOnly
-                      placeholder="DD-MM-YYYY"
-                      className="h-9 pl-8 text-sm"
-                      disabled={isLoading}
-                    />
-                    <Calendar className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-                    <Input
-                      type="date"
-                      value={fechaHasta}
-                      onChange={(e) => setFechaHasta(e.target.value)}
-                      className="absolute inset-0 h-9 w-full cursor-pointer opacity-0"
-                      disabled={isLoading}
-                    />
-                  </div>
-                </div>
+                <PeriodoSelector
+                  periodoActivo={periodoActivo}
+                  onPeriodoChange={handlePeriodoChange}
+                  rangoAplicado={rangoAplicado}
+                />
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={filtrarHoy}
-                    disabled={isLoading}
-                    className="h-9 px-3 text-xs"
-                  >
-                    Hoy
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={filtrarUltimoMes}
-                    disabled={isLoading}
-                    className="h-9 px-3 text-xs"
-                  >
-                    Últimos 30 días
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={limpiarFiltros}
-                    disabled={isLoading}
-                    className="h-9 px-3 text-xs"
-                  >
-                    Limpiar filtros
-                  </Button>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button
-                    variant="default"
-                    onClick={aplicarFiltros}
-                    disabled={isLoading}
-                    className="h-9 bg-gray-900 px-3 text-xs text-white hover:bg-gray-800"
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                        Aplicando...
-                      </>
-                    ) : (
-                      "Aplicar filtros"
-                    )}
-                  </Button>
-                </div>
-              </div>
-
-              {(appliedDateSummary || filtersApplied?.search) && (
-                <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-gray-600">
-                  {appliedDateSummary && (
-                    <div className="inline-flex items-center gap-2 text-sm text-gray-700">
-                      <Calendar className="h-4 w-4 text-gray-500" />
-                      <span>{appliedDateSummary}</span>
-                    </div>
-                  )}
-                  {filtersApplied?.search && (
-                    <div className="inline-flex items-center gap-2 text-sm text-gray-700">
-                      <Search className="h-4 w-4 text-gray-500" />
-                      <span>Búsqueda: {filtersApplied.search}</span>
-                    </div>
-                  )}
+              {/* Rango aplicado — solo cuando hay info útil */}
+              {appliedDateSummary && (
+                <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
+                  <Calendar className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                  <span>{appliedDateSummary}</span>
                 </div>
               )}
             </div>

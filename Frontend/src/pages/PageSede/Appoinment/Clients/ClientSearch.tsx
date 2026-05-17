@@ -1,5 +1,6 @@
 // components/Quotes/ClientSearch.tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { DatePicker } from '../../../../components/ui/DatePicker';
 import { Search, Plus, User, X, Loader2 } from 'lucide-react';
 import { buscarClientes, crearCliente, Cliente, CrearClienteRequest } from '../../../../components/Quotes/clientsService';
 import { useAuth } from '../../../../components/Auth/AuthContext';
@@ -326,11 +327,9 @@ export const ClientSearch: React.FC<ClientSearchProps> = ({
                 </div>
                 <div className="space-y-1">
                   <label className="block text-xs font-medium text-gray-700">Fecha de nacimiento</label>
-                  <input
-                    type="date"
+                  <DatePicker
                     value={formatDateForInput(newClient.fecha_de_nacimiento)}
-                    onChange={e => setNewClient({ ...newClient, fecha_de_nacimiento: e.target.value })}
-                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                    onChange={(v) => setNewClient({ ...newClient, fecha_de_nacimiento: v })}
                   />
                 </div>
               </div>
