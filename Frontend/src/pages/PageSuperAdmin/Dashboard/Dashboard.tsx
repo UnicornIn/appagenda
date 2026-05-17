@@ -17,7 +17,6 @@ interface DateRange {
   end_date: string;
 }
 
-const SUPER_ADMIN_DEFAULT_PERIOD = "month";
 
 export default function DashboardPage() {
   const { user, isAuthenticated } = useAuth();

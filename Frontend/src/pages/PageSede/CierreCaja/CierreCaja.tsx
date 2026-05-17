@@ -9,7 +9,7 @@ import { PeriodoSelector, type PeriodoId } from "../../../components/ui/PeriodoS
 import { DatePicker } from "../../../components/ui/DatePicker";
 // import { Textarea } from "../../../components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
-import { Calendar, Loader2 } from "lucide-react"; //Wallet +
+import { Loader2 } from "lucide-react"; //Wallet +
 import { cashService, getEfectivoDia } from "./api/cashService";
 import type { CashCierre, CashEgreso, CashIngreso, CashResumen, CashReporteRaw } from "./types";
 import { formatDateDMY, parseDateToDate, toBackendDate } from "../../../lib/dateFormat";
@@ -48,13 +48,7 @@ interface HeaderDateRange {
   end_date: string;
 }
 
-const HEADER_PERIOD_OPTIONS: Array<{ id: HeaderPeriod; label: string }> = [
-  { id: "today", label: "Hoy" },
-  { id: "last_7_days", label: "7 días" },
-  { id: "last_30_days", label: "30 días" },
-  { id: "month", label: "Mes actual" },
-  { id: "custom", label: "Rango personalizado" },
-];
+
 
 const getRangeByPeriod = (period: HeaderPeriod, customRange?: HeaderDateRange): HeaderDateRange => {
   const today = new Date();
@@ -527,7 +521,7 @@ export default function CierreCajaPage() {
   const monedaSede = String(moneda || "COP").toUpperCase();
 
   const today = useMemo(() => getToday(), []);
-  const [periodoSeleccionado, setPeriodoSeleccionado] = useState<HeaderPeriod>("today");
+  const [, setPeriodoSeleccionado] = useState<HeaderPeriod>("today");
   const [fechaDesde, setFechaDesde] = useState(today);
   const [fechaHasta, setFechaHasta] = useState(today);
   const [periodoActivo, setPeriodoActivo] = useState<PeriodoId>("hoy");

@@ -296,7 +296,6 @@ export function VentasFacturadasList() {
     [activeFilters],
   );
 
-  const activeSearchSummary = activeFilters?.searchTerm || null;
 
   const cargarFacturasFechaEfectiva = async (
     filtros: FacturaFilters,
@@ -583,10 +582,6 @@ export function VentasFacturadasList() {
     };
   }, [facturas, allegraEnabled, authToken, activeSedeId]);
 
-  const handlePeriodChange = (newPeriod: BillingPeriod) => {
-    setPeriod(newPeriod);
-  };
-
   const handlePeriodoChange = (periodo: PeriodoId, fechas?: { from: Date; to: Date }) => {
     setPeriodoActivo(periodo);
     const billing = PERIODO_TO_BILLING[periodo];
@@ -862,8 +857,6 @@ export function VentasFacturadasList() {
 
     return paginas;
   };
-  const today = toIsoLocalDate(new Date());
-
   return (
     <>
       <div className="space-y-6">

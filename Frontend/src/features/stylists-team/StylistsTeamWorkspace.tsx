@@ -227,16 +227,6 @@ const formatDateRangeSelectValue = (value?: string): string => {
     .replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
 };
 
-const formatDateRangeSelectLabel = (range: DateRangeValue): string => {
-  const startLabel = formatDateRangeSelectValue(range.start);
-  const endLabel = formatDateRangeSelectValue(range.end);
-
-  if (!startLabel || !endLabel) {
-    return "Seleccionar rango";
-  }
-
-  return `${startLabel} - ${endLabel}`;
-};
 
 const chunk = <T,>(items: T[], size: number): T[][] => {
   const result: T[][] = [];

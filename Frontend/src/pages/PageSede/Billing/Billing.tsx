@@ -89,12 +89,6 @@ const BILLING_VISIBLE_STATES = new Set([
   "facturada",
 ])
 
-const PERIOD_CHIPS = [
-  { id: "today", label: "Hoy" },
-  { id: "last_7_days", label: "7 días" },
-  { id: "last_30_days", label: "30 días" },
-  { id: "month", label: "Mes actual" },
-]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -428,10 +422,6 @@ export default function Billing() {
     { id: "paid", label: "Pagadas", count: stats.paid },
     { id: "no-ficha", label: "Sin ficha", count: stats.noFicha },
   ]
-
-  const handlePeriodChange = (newPeriod: string) => {
-    setPeriod(newPeriod)
-  }
 
   const handlePeriodoChange = (periodo: PeriodoId, fechas?: { from: Date; to: Date }) => {
     setPeriodoActivo(periodo)

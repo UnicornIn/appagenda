@@ -57,8 +57,8 @@ const EMPTY_FACTURA_FILTERS: FacturaFilters = {
 export function VentasFacturadasList() {
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedSede, setSelectedSede] = useState("")
-  const [fechaDesde, setFechaDesde] = useState("")
-  const [fechaHasta, setFechaHasta] = useState("")
+  const [, setFechaDesde] = useState("")
+  const [, setFechaHasta] = useState("")
   const [periodoActivo, setPeriodoActivo] = useState<PeriodoId>("hoy")
   const [rangoAplicado, setRangoAplicado] = useState<{ from: Date; to: Date } | undefined>(undefined)
   const [selectedFactura, setSelectedFactura] = useState<Factura | null>(null)
@@ -200,37 +200,6 @@ export function VentasFacturadasList() {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  const aplicarFiltros = async () => {
-    const filtros: FacturaFilters = {
-      searchTerm: searchTerm.trim(),
-      fecha_desde: fechaDesde,
-      fecha_hasta: fechaHasta,
-    }
-    setAppliedFilters(filtros)
-    await cargarFacturas(1, filtros)
-  }
-
-  const limpiarFiltros = () => {
-    setSearchTerm("")
-    setFechaDesde("")
-    setFechaHasta("")
-    setAppliedFilters(EMPTY_FACTURA_FILTERS)
-    cargarFacturas(1, EMPTY_FACTURA_FILTERS)
-  }
-
-  const filtrarHoy = () => {
-    const today = toIsoLocalDate(new Date())
-    setFechaDesde(today)
-    setFechaHasta(today)
-  }
-
-  const filtrarUltimoMes = () => {
-    const date = new Date()
-    date.setDate(date.getDate() - 30)
-    setFechaDesde(toIsoLocalDate(date))
-    setFechaHasta(toIsoLocalDate(new Date()))
   }
 
   const handlePeriodoChange = (periodo: PeriodoId, fechas?: { from: Date; to: Date }) => {

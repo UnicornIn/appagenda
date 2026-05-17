@@ -1014,7 +1014,7 @@ export function DashboardSedeView({
                   </div>
                 ))}
               </div>
-              {clientesNuevos.hay_mas && (
+              {/* {clientesNuevos.hay_mas && (
                 <div className="mt-2 text-[10px] text-slate-400 text-center">
                   +{clientesNuevos.total - clientesNuevos.mostrando} más…
                   {clientesNuevos.descarga_url && (
@@ -1028,7 +1028,7 @@ export function DashboardSedeView({
                     </a>
                   )}
                 </div>
-              )}
+              )} */}
             </>
           ) : (
             <p className="text-xs text-slate-400 py-4 text-center">

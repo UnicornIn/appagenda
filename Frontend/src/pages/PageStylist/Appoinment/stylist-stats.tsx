@@ -5,29 +5,38 @@ interface StylistStatsProps {
   citasHoy: number;
   serviciosCompletadosHoy: number;
   totalVentasHoy: number;
-  bloqueosHoy?: number; // ← Hacerlo opcional con "?"
+  bloqueosHoy?: number;
   comisionServiciosPct?: number | null;
   comisionProductosPct?: number | null;
+  /** Suma de item.comision del día, calculada directamente desde facturas (fuente canónica). */
+  comisionesTotalesHoy?: number | null;
 }
 
 export function StylistStats({
   totalVentasHoy,
   comisionServiciosPct,
   comisionProductosPct,
+  comisionesTotalesHoy,
 }: StylistStatsProps) {
-  // Datos de ejemplo para productos
-  const ventasProductos = [
-    { nombre: "Producto A", total: 0 },
-    { nombre: "Producto B", total: 0 },
-  ];
+  // Si el backend ya envía el total de comisiones como valor absoluto en las facturas,
+  // se usa ese dato directamente (idéntico a lo que muestra Reportes).
+  // Si no llega, se calcula desde el porcentaje configurado en el perfil.
+  // Nunca se asume un porcentaje arbitrario.
+  let totalComisiones: number;
+  let fuenteComision: "facturas" | "porcentaje" | "sin-datos";
 
-  const totalVentasProductos = ventasProductos.reduce((acc, v) => acc + v.total, 0);
-  const pctServicios = typeof comisionServiciosPct === "number" ? comisionServiciosPct / 100 : 0.3;
-  const pctProductos = typeof comisionProductosPct === "number" ? comisionProductosPct / 100 : 0.2;
-
-  const comisionServicio = totalVentasHoy * pctServicios;
-  const comisionProductos = totalVentasProductos * pctProductos;
-  const totalComisiones = comisionServicio + comisionProductos;
+  if (typeof comisionesTotalesHoy === "number" && Number.isFinite(comisionesTotalesHoy)) {
+    totalComisiones = comisionesTotalesHoy;
+    fuenteComision = "facturas";
+  } else if (typeof comisionServiciosPct === "number") {
+    const pctServicios = comisionServiciosPct / 100;
+    const pctProductos = typeof comisionProductosPct === "number" ? comisionProductosPct / 100 : 0;
+    totalComisiones = totalVentasHoy * pctServicios + 0 * pctProductos;
+    fuenteComision = "porcentaje";
+  } else {
+    totalComisiones = 0;
+    fuenteComision = "sin-datos";
+  }
 
   // Función para formatear moneda
   const formatCurrency = (amount: number) => {
@@ -53,12 +62,16 @@ export function StylistStats({
             <div>
               <span className="font-bold text-gray-900">Total comisiones</span>
               <div className="text-xs text-gray-700 mt-1">
-                Hoy • Generado automáticamente
+                {fuenteComision === "facturas"
+                  ? "Hoy · Desde facturas"
+                  : fuenteComision === "porcentaje"
+                  ? "Hoy · Estimado desde porcentaje"
+                  : "Hoy · Sin datos disponibles"}
               </div>
             </div>
             <div className="text-right">
               <div className="text-xl font-bold text-gray-900">
-                {formatCurrency(totalComisiones)}
+                {fuenteComision === "sin-datos" ? "—" : formatCurrency(totalComisiones)}
               </div>
               <div className="text-xs text-gray-600 mt-1">
                 Disponible para pago
